@@ -21,6 +21,15 @@ export function useRealtime(options: RealtimeOptions) {
   const conversationRecording = useRef<any[]>([])
 
   const connect = useCallback(async () => {
+    if (!options.agentId) {
+      if (wsRef.current) {
+        wsRef.current.close()
+        wsRef.current = null
+      }
+      setConnected(false)
+      return
+    }
+
     const config = await fetch('/api/config').then(r => r.json())
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(
@@ -29,14 +38,12 @@ export function useRealtime(options: RealtimeOptions) {
 
     ws.onopen = () => {
       setConnected(true)
-      if (options.agentId) {
-        ws.send(
-          JSON.stringify({
-            type: 'session.update',
-            session: { agent_id: options.agentId },
-          })
-        )
-      }
+      ws.send(
+        JSON.stringify({
+          type: 'session.update',
+          session: { agent_id: options.agentId },
+        })
+      )
     }
 
     ws.onmessage = event => {

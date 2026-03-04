@@ -197,7 +197,37 @@ class TestPronunciationAssessor:
         assessor = PronunciationAssessor()
         # Test that it initializes with config values
         assert hasattr(assessor, "speech_key")
+        assert hasattr(assessor, "speech_endpoint")
         assert hasattr(assessor, "speech_region")
+
+    @patch("src.services.analyzers.speechsdk.SpeechConfig")
+    def test_create_speech_config_with_key(self, mock_speech_config):
+        """Test creating speech config with subscription key auth."""
+        assessor = PronunciationAssessor()
+        assessor.speech_key = "test-speech-key"
+        assessor.speech_endpoint = ""
+
+        assessor._create_speech_config()
+
+        mock_speech_config.assert_called_once_with(subscription="test-speech-key", region=assessor.speech_region)
+
+    @patch("src.services.analyzers.DefaultAzureCredential")
+    @patch("src.services.analyzers.speechsdk.SpeechConfig")
+    def test_create_speech_config_with_managed_identity(self, mock_speech_config, mock_default_credential):
+        """Test creating speech config with managed identity auth."""
+        mock_default_credential.return_value = Mock()
+
+        assessor = PronunciationAssessor()
+        assessor.speech_key = ""
+        assessor.speech_endpoint = "https://speech-test.cognitiveservices.azure.com/"
+
+        assessor._create_speech_config()
+
+        mock_default_credential.assert_called_once()
+        mock_speech_config.assert_called_once_with(
+            token_credential=mock_default_credential.return_value,
+            endpoint="https://speech-test.cognitiveservices.azure.com/",
+        )
 
     @pytest.mark.asyncio
     async def test_assess_pronunciation_no_speech_key(self):

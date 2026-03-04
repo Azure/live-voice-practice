@@ -27,7 +27,8 @@ from azure.ai.voicelive.models import (
     RequestSession,
     ServerEventType,
 )
-from azure.core.credentials import AzureKeyCredential
+from azure.core.credentials import AzureKeyCredential, TokenCredential
+from azure.identity import DefaultAzureCredential
 
 from src.config import config
 from src.services.managers import AgentManager
@@ -128,7 +129,10 @@ class VoiceProxyHandler:
                 if msg.get("type") == SESSION_UPDATE_TYPE:
                     return msg.get("session", {}).get("agent_id")
         except Exception as e:
-            logger.error("Error getting agent ID: %s", e)
+            if "Connection closed" in str(e):
+                logger.info("Client disconnected before sending initial agent id")
+            else:
+                logger.error("Error getting agent ID: %s", e)
         return None
 
     def _build_endpoint(self) -> str:
@@ -136,13 +140,14 @@ class VoiceProxyHandler:
         resource_name = config["azure_ai_resource_name"]
         return f"https://{resource_name}.{AZURE_COGNITIVE_SERVICES_DOMAIN}"
 
-    def _get_credential(self) -> Optional[AzureKeyCredential]:
+    def _get_credential(self) -> Optional[AzureKeyCredential | TokenCredential]:
         """Get the Azure credential."""
         api_key = config.get("azure_openai_api_key")
-        if not api_key:
-            logger.error("No API key found in configuration (azure_openai_api_key)")
-            return None
-        return AzureKeyCredential(api_key)
+        if api_key:
+            return AzureKeyCredential(api_key)
+
+        logger.info("No API key configured. Using DefaultAzureCredential for VoiceLive connection")
+        return DefaultAzureCredential()
 
     def _get_model(self, agent_config: Optional[Dict[str, Any]]) -> Optional[str]:
         """Get the model name for the connection."""

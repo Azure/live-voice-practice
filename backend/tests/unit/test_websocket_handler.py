@@ -199,10 +199,14 @@ class TestVoiceProxyHandler:
 
     @patch("src.services.websocket_handler.config")
     def test_get_credential_missing_key(self, mock_config):
-        """Test getting credential with missing API key."""
+        """Test getting credential with missing API key uses managed identity."""
         mock_config.get.return_value = None
 
-        handler = VoiceProxyHandler(Mock())
-        credential = handler._get_credential()
+        with patch("src.services.websocket_handler.DefaultAzureCredential") as mock_default_credential:
+            mock_default_credential.return_value = Mock()
 
-        assert credential is None
+            handler = VoiceProxyHandler(Mock())
+            credential = handler._get_credential()
+
+            assert credential is not None
+            mock_default_credential.assert_called_once()

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 import azure.cognitiveservices.speech as speechsdk  # pyright: ignore[reportMissingTypeStubs]
 import yaml
+from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AzureOpenAI
 
 from src.config import config
@@ -114,17 +115,31 @@ class ConversationAnalyzer:
             endpoint = config["azure_openai_endpoint"]
             api_key = config["azure_openai_api_key"]
 
-            if not endpoint or not api_key:
-                logger.error("Azure OpenAI endpoint or API key not configured")
+            if not endpoint:
+                logger.error("Azure OpenAI endpoint not configured")
                 return None
+
+            if api_key:
+                client = AzureOpenAI(
+                    api_version=config["api_version"],
+                    azure_endpoint=endpoint,
+                    api_key=api_key,
+                )
+                logger.info("ConversationAnalyzer initialized with API key auth and endpoint: %s", endpoint)
+                return client
+
+            token_provider = get_bearer_token_provider(
+                DefaultAzureCredential(),
+                "https://cognitiveservices.azure.com/.default",
+            )
 
             client = AzureOpenAI(
                 api_version=config["api_version"],
                 azure_endpoint=endpoint,
-                api_key=api_key,
+                azure_ad_token_provider=token_provider,
             )
 
-            logger.info("ConversationAnalyzer initialized with endpoint: %s", endpoint)
+            logger.info("ConversationAnalyzer initialized with managed identity auth and endpoint: %s", endpoint)
             return client
 
         except Exception as e:
@@ -329,6 +344,7 @@ class PronunciationAssessor:
     def __init__(self):
         """Initialize the pronunciation assessor."""
         self.speech_key = config["azure_speech_key"]
+        self.speech_endpoint = config.get("azure_speech_endpoint")
         self.speech_region = config["azure_speech_region"]
 
     def _create_wav_audio(self, audio_bytes: bytearray) -> bytes:
@@ -349,11 +365,21 @@ class PronunciationAssessor:
         logger.info("Starting pronunciation assessment with audio size: %s bytes", len(wav_audio))
         logger.info("Reference text: %s", reference_text or "None")
         logger.info("Speech key configured: %s", "Yes" if self.speech_key else "No")
+        logger.info("Speech endpoint configured: %s", "Yes" if self.speech_endpoint else "No")
         logger.info("Speech region: %s", self.speech_region)
 
     def _create_speech_config(self) -> speechsdk.SpeechConfig:
         """Create speech configuration."""
-        speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
+        if self.speech_key:
+            speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
+        elif self.speech_endpoint:
+            speech_config = speechsdk.SpeechConfig(
+                token_credential=DefaultAzureCredential(),
+                endpoint=self.speech_endpoint,
+            )
+        else:
+            raise ValueError("Azure Speech authentication is not configured")
+
         speech_config.speech_recognition_language = config["azure_speech_language"]
         return speech_config
 
@@ -411,8 +437,8 @@ class PronunciationAssessor:
         Returns:
             Optional[Dict[str, Any]]: Pronunciation assessment results or None if assessment fails
         """
-        if not self.speech_key:
-            logger.error("Azure Speech key not configured")
+        if not self.speech_key and not self.speech_endpoint:
+            logger.error("Azure Speech auth not configured (set AZURE_SPEECH_KEY or AZURE_SPEECH_ENDPOINT with MSI)")
             return None
 
         try:

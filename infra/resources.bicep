@@ -159,18 +159,6 @@ module voicelab 'br/public:avm/res/app/container-app:0.8.0' = {
     ingressTransport: 'http'
     scaleMinReplicas: 1
     scaleMaxReplicas: 10
-    secrets: {
-      secureList: [
-         {
-          name: 'ai-foundry-api-key'
-          value: aiFoundryResource.listKeys().key1
-        }
-        {
-          name: 'speech-api-key'
-          value: speechService.listKeys().key1
-        }
-      ]
-    }
     containers: [
       {
         image: voicelabFetchLatestImage.outputs.?containers[?0].?image ?? 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
@@ -193,10 +181,6 @@ module voicelab 'br/public:avm/res/app/container-app:0.8.0' = {
             value: aiFoundryResource.properties.endpoint
           }
           {
-            name: 'AZURE_OPENAI_API_KEY'
-            secretRef: 'ai-foundry-api-key'
-          }
-          {
             name: 'PROJECT_ENDPOINT'
             value: '${aiFoundryResource.properties.endpoint}api/projects/default-project'
           }
@@ -205,12 +189,12 @@ module voicelab 'br/public:avm/res/app/container-app:0.8.0' = {
             value: gptDeploymentName
           }
           {
-            name: 'AZURE_SPEECH_KEY'
-            secretRef: 'speech-api-key'
+            name: 'AZURE_SPEECH_REGION'
+            value: location
           }
           {
-            name: 'AZURE_SPEECH_REGION'
-            value: 'swedencentral'
+            name: 'AZURE_SPEECH_ENDPOINT'
+            value: speechService.properties.endpoint
           }
           {
             name: 'AZURE_AI_RESOURCE_NAME'
@@ -218,7 +202,7 @@ module voicelab 'br/public:avm/res/app/container-app:0.8.0' = {
           }
           {
             name: 'AZURE_AI_REGION'
-            value: 'swedencentral'
+            value: location
           }
           {
             name: 'SUBSCRIPTION_ID'
@@ -283,6 +267,19 @@ resource containerAppCognitiveServicesOpenAIUserRole 'Microsoft.Authorization/ro
     principalId: voicelabIdentity.outputs.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
+  }
+}
+
+resource containerAppSpeechUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: speechService
+  name: guid(speechService.id, voicelabIdentity.name, 'f2dc8367-1007-4938-bd23-fe263f013447')
+  properties: {
+    principalId: voicelabIdentity.outputs.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      'f2dc8367-1007-4938-bd23-fe263f013447'
+    )
   }
 }
 
