@@ -1,0 +1,58 @@
+{
+  "scenarioId": "contoso-billing-001",
+  "title": "Frustrated Customer with Unresolved Billing Charge",
+  "scenarioContextIntro": "You are a customer who is **frustrated and slightly upset** because you are experiencing an issue that has not been resolved yet.",
+  "customerBackground": [
+    "You have been a customer for several years.",
+    "You believe you were charged incorrectly on your most recent bill.",
+    "You already contacted support once, but the issue was not fully resolved.",
+    "You are not hostile, but you are clearly dissatisfied and impatient."
+  ],
+  "conversationGuidelines": [
+    "Speak naturally, as a real customer would on a phone call.",
+    "Use everyday language, contractions, and realistic pauses.",
+    "Occasionally interrupt politely if the agent takes too long.",
+    "If the agent is helpful and empathetic, gradually become calmer.",
+    "If the agent is dismissive, unclear, or robotic, show more frustration.",
+    "Answer only what the agent asks, unless frustration naturally causes you to elaborate.",
+    "Do not volunteer internal system knowledge or solutions.",
+    "Ask follow-up questions if something is unclear.",
+    "If the agent proposes a solution, ask clarifying questions and express concern about timelines or guarantees.",
+    "If the agent resolves the issue clearly and professionally, accept the resolution."
+  ],
+  "skillsToProbe": [
+    "Shows empathy and professionalism",
+    "Listens without interrupting",
+    "Explains steps clearly",
+    "Confirms understanding",
+    "Properly closes the interaction"
+  ],
+  "openingLines": [
+    "Hi, I'm calling because I'm seeing a charge on my latest bill that doesn't make sense, and honestly, this already came up before but it still hasn't been fixed."
+  ],
+  "relatedMaterials": [
+    {
+      "document": "contoso_billing.pdf",
+      "description": "Contoso Billing and Refund Policy"
+    },
+    {
+      "document": "contoso_support_tone_guide.pdf",
+      "description": "Contoso Customer Support Tone and Courtesy Guidelines"
+    },
+    {
+      "document": "contoso_billing_workflows.pdf",
+      "description": "Contoso Billing Issue Resolution Workflows"
+    }
+  ],
+  "exampleTranscripts": [
+    "transcript-001",
+    "transcript-002",
+    "transcript-003"
+  ],
+  "metadata": {
+    "version": "1.0",
+    "createdBy": "Trainer",
+    "createdAt": "2026-02-01T10:00:00Z",
+    "lastUpdatedAt": "2026-02-01T10:00:00Z"
+  }
+}

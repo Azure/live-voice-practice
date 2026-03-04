@@ -1,0 +1,43 @@
+﻿[Guest-1]: Hi, I'm calling because I'm seeing a charge on my latest bill that doesn't make sense, and honestly, this already came up before but it still hasn't been fixed.
+[Guest-1]: Thank you for explaining that, and I'm really sorry it wasn't resolved the first time.
+[Guest-1]: I can imagine how frustrating that is.
+[Guest-1]: Let's get this sorted out now.
+[Guest-1]: Could you tell me the date and amount of the charge you're referring to?
+[Guest-1]: Yeah.
+[Guest-1]: Demonstrably it's January 15th, and it's $50.00.
+[Guest-1]: It's labeled as a service fee, but I don't know what that is.
+[Guest-1]: Got it.
+[Guest-1]: January 15th, $50, labeled as a service fee.
+[Guest-1]: Thanks.
+[Guest-1]: And just to confirm, is this on the same account ending in 4821?
+[Guest-1]: Yes, that's the one.
+[Guest-1]: Perfect.
+[Guest-1]: One more question so I don't make assumptions.
+[Guest-1]: When you called previously, did they mention issuing a credit or removing the charge?
+[Guest-1]: They said it would be removed, and that I'd see it reflected on the next bill.
+[Guest-1]: But here we are.
+[Guest-1]: Thank you, that helps.
+[Guest-1]: Based on what you're describing, it sounds like the correction didn't fully process.
+[Guest-1]: Here's what I'm going to do: I'll validate the charge type, then either remove it or apply a credit immediately, and I'll confirm the timeline before we end this call.
+[Guest-1]: Does that work for you?
+[Guest-1]: Yes.
+[Guest-1]: I just want it fixed for real.
+[Guest-1]: Absolutely.
+[Guest-1]: I'm seeing the charge now.
+[Guest-1]: It was applied in error due to a billing flag that should not be on your account.
+[Guest-1]: I've corrected that flag and I'm issuing a $50 credit right now.
+[Guest-1]: You'll see it on your next statement, and it typically posts within 24 hours.
+[Guest-1]: I'll also send a confirmation e-mail in the next few minutes.
+[Guest-1]: Okay, that's the first time someone explained it clearly proved they did something.
+[Guest-1]: So I'll see it within a day?
+[Guest-1]: Yes, within 24 hours for the credit to post, and it will also show on the next statement.
+[Guest-1]: If you don't see it by tomorrow, you can reply to the confirmation e-mail and it will route back to our billing team with this case reference.
+[Guest-1]: Alright.
+[Guest-1]: That sounds fair.
+[Guest-1]: Thank you.
+[Guest-1]: You're welcome.
+[Guest-1]: I'm glad we could resolve it today.
+[Guest-1]: Is there anything else I can help you with before we wrap up?
+[Guest-1]: No, that's it.
+[Guest-1]: Great.
+[Guest-1]: Thanks for calling Contoso, and I hope the rest of your day goes smoothly.

@@ -1,0 +1,141 @@
+{
+  "rubricId": "contoso-rubric-billing-v1",
+  "appliesTo": {
+    "scenarioIds": ["contoso-billing-001"]
+  },
+  "referenceTranscripts": [
+    "transcript-001"
+  ],
+  "criteria": [
+    {
+      "criterionId": "empathy",
+      "name": "Empathy and Professionalism",
+      "description": "Assesses whether the agent acknowledges the customer's frustration and responds with empathy, respect, and a calm tone.",
+      "levels": [
+        {
+          "level": 1,
+          "label": "Poor",
+          "description": "Dismissive, impatient, or fails to acknowledge the customer's frustration."
+        },
+        {
+          "level": 3,
+          "label": "Adequate",
+          "description": "Acknowledges the issue but empathy or professionalism is inconsistent."
+        },
+        {
+          "level": 5,
+          "label": "Excellent",
+          "description": "Clearly acknowledges frustration, apologizes appropriately, and maintains a respectful, calm tone throughout."
+        }
+      ]
+    },
+    {
+      "criterionId": "information_gathering",
+      "name": "Information Gathering",
+      "description": "Evaluates whether the agent asks for the right details to investigate the charge efficiently (e.g., date, amount, context).",
+      "levels": [
+        {
+          "level": 1,
+          "label": "Insufficient",
+          "description": "Fails to request key details or asks irrelevant questions."
+        },
+        {
+          "level": 3,
+          "label": "Mostly Sufficient",
+          "description": "Requests some key details but misses at least one important piece of information."
+        },
+        {
+          "level": 5,
+          "label": "Complete",
+          "description": "Requests the necessary details clearly and confirms them before proceeding."
+        }
+      ]
+    },
+    {
+      "criterionId": "clarity",
+      "name": "Clarity of Explanation",
+      "description": "Evaluates how clearly the agent explains what happened and what will be done to resolve it.",
+      "levels": [
+        {
+          "level": 1,
+          "label": "Unclear",
+          "description": "Explanation is confusing, vague, or incomplete."
+        },
+        {
+          "level": 3,
+          "label": "Clear",
+          "description": "Explanation is understandable but missing structure or key details (timeline/next steps)."
+        },
+        {
+          "level": 5,
+          "label": "Very Clear",
+          "description": "Explanation is structured, easy to follow, includes next steps and timeline, and checks for understanding."
+        }
+      ]
+    },
+    {
+      "criterionId": "completeness",
+      "name": "Resolution Completeness",
+      "description": "Assesses whether the agent fully resolves the issue and communicates required follow-up actions (e.g., confirmation email, expected credit timing).",
+      "levels": [
+        {
+          "level": 1,
+          "label": "Incomplete",
+          "description": "Issue is not resolved or the customer is left without a clear next step."
+        },
+        {
+          "level": 3,
+          "label": "Mostly Complete",
+          "description": "Issue is addressed but follow-up details are incomplete or not confirmed."
+        },
+        {
+          "level": 5,
+          "label": "Complete",
+          "description": "Issue is resolved with clear confirmation, timeline, and follow-up actions communicated."
+        }
+      ]
+    },
+    {
+      "criterionId": "closure",
+      "name": "Call Closure",
+      "description": "Evaluates whether the agent confirms resolution, offers additional help, and closes politely and professionally.",
+      "levels": [
+        {
+          "level": 1,
+          "label": "Abrupt",
+          "description": "Ends without confirming resolution or without courtesy."
+        },
+        {
+          "level": 3,
+          "label": "Acceptable",
+          "description": "Closes politely but misses confirmation or an offer of further help."
+        },
+        {
+          "level": 5,
+          "label": "Excellent",
+          "description": "Confirms resolution, offers further assistance, and closes with clear, courteous language."
+        }
+      ]
+    }
+  ],
+  "relatedMaterials": [
+    {
+      "document": "contoso_billing.pdf",
+      "description": "Contoso Billing and Refund Policy"
+    },
+    {
+      "document": "contoso_support_tone_guide.pdf",
+      "description": "Contoso Customer Support Tone and Courtesy Guidelines"
+    }
+  ],
+  "scoring": {
+    "scale": "1-5",
+    "overallScoreMethod": "average",
+    "passThreshold": 3.5
+  },
+  "metadata": {
+    "version": "1.0",
+    "createdBy": "Trainer",
+    "createdAt": "2026-02-01T10:30:00Z"
+  }
+}
