@@ -67,11 +67,7 @@ http://localhost:8000
 
 ## Project Origin and Acknowledgments
 
-This project builds upon the sample **Voice Live API Sales Coach**:
-
-[https://github.com/Azure-Samples/voicelive-api-salescoach](https://github.com/Azure-Samples/voicelive-api-salescoach)
-
-This repository extends the original implementation to support a **voice-based practice platform for customer-service and call-center training scenarios**, introducing configurable scenarios based on training materials, rubric-driven evaluation, and curated example transcripts.
+This project builds upon the sample **[Voice Live API Sales Coach](https://github.com/Azure-Samples/voicelive-api-salescoach)**. This repository extends the original implementation to support a **voice-based practice platform for customer-service and call-center training scenarios**, introducing configurable scenarios based on training materials, rubric-driven evaluation, and curated example transcripts.
 
 The foundational architecture and part of the initial implementation originate from the original repository and its contributors. We thank the authors for making their work available as open source.
 
