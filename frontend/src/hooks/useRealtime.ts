@@ -4,14 +4,18 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { api } from '../services/api'
 import { Message } from '../types'
 
 interface RealtimeOptions {
   agentId?: string | null
+  scenarioId?: string | null
   onMessage?: (msg: any) => void
   onAudioDelta?: (delta: string) => void
   onTranscript?: (role: 'user' | 'assistant', text: string) => void
 }
+
+const SAVE_DEBOUNCE_MS = 5000
 
 export function useRealtime(options: RealtimeOptions) {
   const [connected, setConnected] = useState(false)
@@ -19,6 +23,32 @@ export function useRealtime(options: RealtimeOptions) {
   const wsRef = useRef<WebSocket | null>(null)
   const audioRecording = useRef<any[]>([])
   const conversationRecording = useRef<any[]>([])
+  const conversationIdRef = useRef<string | null>(null)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingSaveRef = useRef(false)
+  const scheduleSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    pendingSaveRef.current = true
+    saveTimerRef.current = setTimeout(() => {
+      if (!conversationIdRef.current || !pendingSaveRef.current) return
+      const msgs = conversationRecording.current
+      const transcript = msgs.map((m: any) => `${m.role}: ${m.content}`).join('\n')
+      api.updateConversationMessages(conversationIdRef.current, msgs, transcript).catch(err =>
+        console.warn('Failed to save conversation messages:', err)
+      )
+      pendingSaveRef.current = false
+    }, SAVE_DEBOUNCE_MS)
+  }, [])
+
+  const ensureConversationCreated = useCallback(async () => {
+    if (conversationIdRef.current || !options.scenarioId) return
+    try {
+      const result = await api.createConversation(options.scenarioId)
+      conversationIdRef.current = result.conversation_id
+    } catch (err) {
+      console.warn('Failed to create conversation record:', err)
+    }
+  }, [options.scenarioId])
 
   const connect = useCallback(async () => {
     if (!options.agentId) {
@@ -75,6 +105,7 @@ export function useRealtime(options: RealtimeOptions) {
               content: msg.transcript,
             })
             options.onTranscript?.('user', msg.transcript)
+            ensureConversationCreated().then(scheduleSave)
           }
           break
         case 'response.audio_transcript.done':
@@ -91,6 +122,7 @@ export function useRealtime(options: RealtimeOptions) {
               content: msg.transcript,
             })
             options.onTranscript?.('assistant', msg.transcript)
+            ensureConversationCreated().then(scheduleSave)
           }
           break
       }
@@ -111,6 +143,9 @@ export function useRealtime(options: RealtimeOptions) {
     setMessages([])
     conversationRecording.current = []
     audioRecording.current = []
+    conversationIdRef.current = null
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    pendingSaveRef.current = false
   }, [])
 
   const getRecordings = useCallback(
@@ -121,9 +156,14 @@ export function useRealtime(options: RealtimeOptions) {
     []
   )
 
+  const getConversationId = useCallback(() => conversationIdRef.current, [])
+
   useEffect(() => {
     connect()
-    return () => wsRef.current?.close()
+    return () => {
+      wsRef.current?.close()
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    }
   }, [connect])
 
   return {
@@ -132,5 +172,6 @@ export function useRealtime(options: RealtimeOptions) {
     send,
     clearMessages,
     getRecordings,
+    getConversationId,
   }
 }

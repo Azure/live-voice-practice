@@ -145,6 +145,65 @@ def delete_agent(agent_id: str):
         return jsonify({"error": str(e)}), HTTP_INTERNAL_SERVER_ERROR
 
 
+@app.route(API_CONVERSATIONS_ENDPOINT, methods=["POST"])
+def create_conversation_record():
+    """Create an in-progress conversation record when a session starts."""
+    data = cast(Dict[str, Any], request.json)
+    scenario_id = cast(str, data.get("scenario_id"))
+    messages = data.get("messages", [])
+
+    if not scenario_id:
+        return jsonify({"error": SCENARIO_ID_REQUIRED}), HTTP_BAD_REQUEST
+
+    user = get_current_user()
+
+    if user is not None:
+        metadata = {"user_name": user.name, "user_email": user.email}
+        conversation_id = conversation_store.create_conversation(
+            user_id=user.user_id,
+            scenario_id=scenario_id,
+            messages=messages,
+            metadata=metadata,
+        )
+    else:
+        conversation_id = conversation_manager.create_conversation_record(
+            scenario_id=scenario_id,
+            conversation_messages=messages,
+        )
+
+    if conversation_id:
+        return jsonify({"conversation_id": conversation_id})
+    return jsonify({"error": "Failed to create conversation"}), HTTP_INTERNAL_SERVER_ERROR
+
+
+@app.route(f"{API_CONVERSATIONS_ENDPOINT}/<conversation_id>/messages", methods=["PATCH"])
+def update_conversation_messages_endpoint(conversation_id: str):
+    """Update messages on an in-progress conversation."""
+    data = cast(Dict[str, Any], request.json)
+    messages = data.get("messages", [])
+    transcript = cast(str, data.get("transcript", ""))
+
+    user = get_current_user()
+
+    if user is not None:
+        success = conversation_store.update_conversation_messages(
+            user_id=user.user_id,
+            conversation_id=conversation_id,
+            messages=messages,
+            transcript=transcript,
+        )
+    else:
+        success = conversation_manager.update_conversation_messages(
+            conversation_id=conversation_id,
+            conversation_messages=messages,
+            transcript_text=transcript,
+        )
+
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Failed to update conversation"}), HTTP_INTERNAL_SERVER_ERROR
+
+
 @app.route(API_ANALYZE_ENDPOINT, methods=["POST"])
 def analyze_conversation():
     """Analyze a conversation for performance assessment and save it."""
@@ -154,6 +213,7 @@ def analyze_conversation():
     audio_data = data.get("audio_data", [])
     reference_text = cast(str, data.get("reference_text"))
     conversation_messages = cast(List[Dict[str, Any]], data.get("conversation_messages", []))
+    existing_conversation_id = data.get("conversation_id")
 
     _log_analyze_request(scenario_id, transcript, reference_text)
 
@@ -170,6 +230,7 @@ def analyze_conversation():
         reference_text,
         conversation_messages,
         user,
+        existing_conversation_id=existing_conversation_id,
     )
 
 
@@ -190,6 +251,7 @@ def _perform_conversation_analysis(
     reference_text: str,
     conversation_messages: List[Dict[str, Any]],
     user: Optional[UserIdentity] = None,
+    existing_conversation_id: Optional[str] = None,
 ):
     """Perform the actual conversation analysis and save to database if user is authenticated."""
     loop = asyncio.new_event_loop()
@@ -220,39 +282,65 @@ def _perform_conversation_analysis(
             "pronunciation_assessment": pronunciation,
         }
 
-        # Save conversation to database if user is authenticated
-        if user is not None:
-            assessment_data = {
-                "ai_assessment": ai_assessment,
-                "pronunciation_assessment": pronunciation,
-            }
-            metadata = {
-                "user_name": user.name,
-                "user_email": user.email,
-            }
-            conversation_id = conversation_store.save_conversation(
-                user_id=user.user_id,
-                scenario_id=scenario_id,
-                transcript=transcript,
-                assessment=assessment_data,
-                metadata=metadata,
-            )
-            if conversation_id:
-                response_data["conversation_id"] = conversation_id
-                logger.info("Conversation saved with ID: %s for user: %s", conversation_id, user.user_id)
+        assessment_data = {
+            "ai_assessment": ai_assessment,
+            "pronunciation_assessment": pronunciation,
+        }
+
+        # If an existing conversation was created during the session, update it
+        if existing_conversation_id:
+            if user is not None:
+                updated = conversation_store.update_conversation_assessment(
+                    user_id=user.user_id,
+                    conversation_id=existing_conversation_id,
+                    transcript=transcript,
+                    assessment=assessment_data,
+                    messages=conversation_messages,
+                )
             else:
-                logger.warning("Failed to save conversation for user: %s", user.user_id)
-        else:
-            # Fallback: save via ConversationManager (unauthenticated)
-            conversation_id = conversation_manager.save_conversation(
-                scenario_id=scenario_id,
-                transcript=transcript,
-                conversation_messages=conversation_messages,
-                evaluation=ai_assessment if isinstance(ai_assessment, dict) else None,
-                pronunciation=pronunciation if isinstance(pronunciation, dict) else None,
-            )
-            if conversation_id:
-                response_data["conversation_id"] = conversation_id
+                updated = conversation_manager.update_conversation_with_assessment(
+                    conversation_id=existing_conversation_id,
+                    transcript_text=transcript,
+                    conversation_messages=conversation_messages,
+                    evaluation=ai_assessment if isinstance(ai_assessment, dict) else None,
+                    pronunciation=pronunciation if isinstance(pronunciation, dict) else None,
+                )
+            if updated:
+                response_data["conversation_id"] = existing_conversation_id
+                logger.info("Updated existing conversation %s with assessment", existing_conversation_id)
+            else:
+                logger.warning("Failed to update conversation %s, falling back to create", existing_conversation_id)
+                existing_conversation_id = None  # Fall through to create below
+
+        # Create a new conversation record if none existed
+        if not existing_conversation_id:
+            if user is not None:
+                metadata = {
+                    "user_name": user.name,
+                    "user_email": user.email,
+                }
+                conversation_id = conversation_store.save_conversation(
+                    user_id=user.user_id,
+                    scenario_id=scenario_id,
+                    transcript=transcript,
+                    assessment=assessment_data,
+                    metadata=metadata,
+                )
+                if conversation_id:
+                    response_data["conversation_id"] = conversation_id
+                    logger.info("Conversation saved with ID: %s for user: %s", conversation_id, user.user_id)
+                else:
+                    logger.warning("Failed to save conversation for user: %s", user.user_id)
+            else:
+                conversation_id = conversation_manager.save_conversation(
+                    scenario_id=scenario_id,
+                    transcript=transcript,
+                    conversation_messages=conversation_messages,
+                    evaluation=ai_assessment if isinstance(ai_assessment, dict) else None,
+                    pronunciation=pronunciation if isinstance(pronunciation, dict) else None,
+                )
+                if conversation_id:
+                    response_data["conversation_id"] = conversation_id
 
         return jsonify(response_data)
 

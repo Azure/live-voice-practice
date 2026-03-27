@@ -100,6 +100,7 @@ class ConversationStore:
             "scenario_id": scenario_id,
             "transcript": transcript,
             "assessment": assessment,
+            "status": "analyzed" if assessment else "in_progress",
             "metadata": metadata or {},
             "created_at": now,
             "updated_at": now,
@@ -112,6 +113,137 @@ class ConversationStore:
         except exceptions.CosmosHttpResponseError as e:
             logger.error("Failed to save conversation: %s", e)
             return None
+
+    def create_conversation(
+        self,
+        user_id: str,
+        scenario_id: str,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """Create an in-progress conversation record.
+
+        Args:
+            user_id: The ID of the user who owns this conversation.
+            scenario_id: The ID of the scenario.
+            messages: Optional initial conversation messages.
+            metadata: Optional additional metadata.
+
+        Returns:
+            The ID of the created conversation, or None if storage failed.
+        """
+        if not self._ensure_initialized():
+            return None
+
+        if self._container is None:
+            return None
+
+        conversation_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+
+        document = {
+            "id": conversation_id,
+            "user_id": user_id,
+            "scenario_id": scenario_id,
+            "transcript": "",
+            "messages": messages or [],
+            "assessment": None,
+            "status": "in_progress",
+            "metadata": metadata or {},
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        try:
+            self._container.create_item(body=document)
+            logger.info("Created in-progress conversation %s for user %s", conversation_id, user_id)
+            return conversation_id
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to create conversation: %s", e)
+            return None
+
+    def update_conversation_messages(
+        self,
+        user_id: str,
+        conversation_id: str,
+        messages: List[Dict[str, Any]],
+        transcript: str = "",
+    ) -> bool:
+        """Update messages on an existing conversation.
+
+        Args:
+            user_id: The user ID (partition key).
+            conversation_id: The conversation ID.
+            messages: Updated list of messages.
+            transcript: Updated transcript text.
+
+        Returns:
+            True on success, False on failure.
+        """
+        if not self._ensure_initialized():
+            return False
+
+        if self._container is None:
+            return False
+
+        try:
+            item = self._container.read_item(item=conversation_id, partition_key=user_id)
+            item["messages"] = messages
+            item["transcript"] = transcript
+            item["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._container.replace_item(item=conversation_id, body=item)
+            logger.info("Updated messages for conversation %s", conversation_id)
+            return True
+        except exceptions.CosmosResourceNotFoundError:
+            logger.warning("Conversation %s not found for update", conversation_id)
+            return False
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to update conversation messages: %s", e)
+            return False
+
+    def update_conversation_assessment(
+        self,
+        user_id: str,
+        conversation_id: str,
+        transcript: str,
+        assessment: Dict[str, Any],
+        messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
+        """Update an existing conversation with assessment results.
+
+        Args:
+            user_id: The user ID (partition key).
+            conversation_id: The conversation ID.
+            transcript: Final transcript text.
+            assessment: Assessment results.
+            messages: Optional final messages list.
+
+        Returns:
+            True on success, False on failure.
+        """
+        if not self._ensure_initialized():
+            return False
+
+        if self._container is None:
+            return False
+
+        try:
+            item = self._container.read_item(item=conversation_id, partition_key=user_id)
+            item["transcript"] = transcript
+            item["assessment"] = assessment
+            item["status"] = "analyzed"
+            item["updated_at"] = datetime.now(timezone.utc).isoformat()
+            if messages is not None:
+                item["messages"] = messages
+            self._container.replace_item(item=conversation_id, body=item)
+            logger.info("Updated conversation %s with assessment", conversation_id)
+            return True
+        except exceptions.CosmosResourceNotFoundError:
+            logger.warning("Conversation %s not found for assessment update", conversation_id)
+            return False
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to update conversation assessment: %s", e)
+            return False
 
     def get_conversation(self, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
         """Get a specific conversation by ID.

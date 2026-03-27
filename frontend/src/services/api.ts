@@ -70,7 +70,8 @@ export const api = {
     scenarioId: string,
     transcript: string,
     audioData: any[],
-    conversationMessages: any[]
+    conversationMessages: any[],
+    conversationId?: string | null
   ): Promise<Assessment> {
     const referenceText = extractUserText(conversationMessages)
 
@@ -83,9 +84,40 @@ export const api = {
         audio_data: audioData,
         reference_text: referenceText,
         conversation_messages: conversationMessages,
+        ...(conversationId ? { conversation_id: conversationId } : {}),
       }),
     })
     if (!res.ok) throw new Error('Analysis failed')
+    return res.json()
+  },
+
+  async createConversation(
+    scenarioId: string,
+    messages: any[] = []
+  ): Promise<{ conversation_id: string }> {
+    const res = await fetch('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scenario_id: scenarioId,
+        messages,
+      }),
+    })
+    if (!res.ok) throw new Error('Failed to create conversation')
+    return res.json()
+  },
+
+  async updateConversationMessages(
+    conversationId: string,
+    messages: any[],
+    transcript: string = ''
+  ): Promise<{ success: boolean }> {
+    const res = await fetch(`/api/conversations/${conversationId}/messages`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages, transcript }),
+    })
+    if (!res.ok) throw new Error('Failed to update conversation')
     return res.json()
   },
 

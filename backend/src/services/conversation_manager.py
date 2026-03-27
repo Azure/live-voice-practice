@@ -200,6 +200,133 @@ class ConversationManager:
 
         return normalized
 
+    def create_conversation_record(
+        self,
+        scenario_id: str,
+        conversation_messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[str]:
+        """Create an in-progress conversation record when a session starts.
+
+        Returns:
+            The conversationId, or None on failure.
+        """
+        if not self.cosmos_client:
+            logger.warning("Cosmos client unavailable; conversation not created")
+            return None
+
+        database_name = config.get("cosmos_database_name", "")
+        container_name = config.get("cosmos_conversations_container", "conversations")
+        if not database_name:
+            logger.warning("COSMOS database name not configured; conversation not created")
+            return None
+
+        conversation_id = f"conv-{uuid.uuid4().hex[:UUID_SHORT_LENGTH]}"
+        now = datetime.now(timezone.utc).isoformat()
+
+        rubric = self.get_rubric_for_scenario(scenario_id)
+        structured_transcript = self._normalize_transcript_messages(conversation_messages, "")
+
+        record: Dict[str, Any] = {
+            "id": conversation_id,
+            "conversationId": conversation_id,
+            "scenarioId": scenario_id,
+            "transcript": structured_transcript,
+            "transcriptText": "",
+            "status": "in_progress",
+            "evaluation": None,
+            "pronunciationAssessment": None,
+            "rubricId": rubric.get("rubricId") if rubric else None,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+
+        try:
+            database = self.cosmos_client.get_database_client(database_name)
+            container = database.get_container_client(container_name)
+            container.create_item(record)
+            logger.info("Created in-progress conversation %s for scenario %s", conversation_id, scenario_id)
+            return conversation_id
+        except Exception as error:
+            logger.error("Failed to create conversation record: %s", error)
+            return None
+
+    def update_conversation_messages(
+        self,
+        conversation_id: str,
+        conversation_messages: List[Dict[str, Any]],
+        transcript_text: str = "",
+    ) -> bool:
+        """Update messages on an existing in-progress conversation.
+
+        Returns:
+            True on success, False on failure.
+        """
+        if not self.cosmos_client:
+            return False
+
+        database_name = config.get("cosmos_database_name", "")
+        container_name = config.get("cosmos_conversations_container", "conversations")
+        if not database_name:
+            return False
+
+        try:
+            database = self.cosmos_client.get_database_client(database_name)
+            container = database.get_container_client(container_name)
+            item = container.read_item(item=conversation_id, partition_key=conversation_id)
+
+            structured = self._normalize_transcript_messages(conversation_messages, transcript_text)
+            item["transcript"] = structured
+            item["transcriptText"] = transcript_text
+            item["updatedAt"] = datetime.now(timezone.utc).isoformat()
+
+            container.replace_item(item=conversation_id, body=item)
+            logger.info("Updated messages for conversation %s", conversation_id)
+            return True
+        except Exception as error:
+            logger.error("Failed to update conversation %s: %s", conversation_id, error)
+            return False
+
+    def update_conversation_with_assessment(
+        self,
+        conversation_id: str,
+        transcript_text: str,
+        conversation_messages: List[Dict[str, Any]],
+        evaluation: Optional[Dict[str, Any]] = None,
+        pronunciation: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Update an existing conversation with final assessment results.
+
+        Returns:
+            True on success, False on failure.
+        """
+        if not self.cosmos_client:
+            return False
+
+        database_name = config.get("cosmos_database_name", "")
+        container_name = config.get("cosmos_conversations_container", "conversations")
+        if not database_name:
+            return False
+
+        try:
+            database = self.cosmos_client.get_database_client(database_name)
+            container = database.get_container_client(container_name)
+            item = container.read_item(item=conversation_id, partition_key=conversation_id)
+
+            structured = self._normalize_transcript_messages(conversation_messages, transcript_text)
+            item["transcript"] = structured
+            item["transcriptText"] = transcript_text
+            item["evaluation"] = evaluation
+            item["pronunciationAssessment"] = pronunciation
+            item["status"] = "analyzed"
+            item["updatedAt"] = datetime.now(timezone.utc).isoformat()
+
+            container.replace_item(item=conversation_id, body=item)
+            logger.info("Updated conversation %s with assessment", conversation_id)
+            return True
+        except Exception as error:
+            logger.error("Failed to update conversation %s with assessment: %s", conversation_id, error)
+            return False
+
     def get_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a single conversation by its ID."""
         if not self.cosmos_client:

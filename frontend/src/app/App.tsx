@@ -115,9 +115,10 @@ export default function App() {
     }
   }, [avatarEnabled])
 
-  const { connected, messages, send, clearMessages, getRecordings } =
+  const { connected, messages, send, clearMessages, getRecordings, getConversationId } =
     useRealtime({
       agentId: currentAgent,
+      scenarioId: selectedScenario,
       onMessage: handleWebRTCMessage,
       onAudioDelta: playAudio,
     })
@@ -183,7 +184,8 @@ export default function App() {
         selectedScenario,
         transcript,
         [...audioData, ...recordings.audio],
-        recordings.conversation
+        recordings.conversation,
+        getConversationId()
       )
 
       setAssessment(result)
