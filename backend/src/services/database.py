@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from azure.cosmos import CosmosClient, exceptions
+from azure.cosmos.partition_key import NonePartitionKeyValue
 from azure.identity import DefaultAzureCredential
 
 from src.config import config
@@ -64,6 +65,25 @@ class ConversationStore:
             logger.error("Failed to initialize Cosmos DB: %s", e)
             self._initialized = True
             return False
+
+    def _find_item(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """Find a conversation item, handling legacy items without conversationId field.
+
+        Tries a point read first (efficient), then falls back to a cross-partition
+        query for items created before the partition key fix.
+        """
+        try:
+            return dict(self._container.read_item(item=conversation_id, partition_key=conversation_id))
+        except exceptions.CosmosResourceNotFoundError:
+            # Fallback for legacy items stored under null/undefined partition
+            items = list(
+                self._container.query_items(
+                    query="SELECT * FROM c WHERE c.id = @id",
+                    parameters=[{"name": "@id", "value": conversation_id}],
+                    enable_cross_partition_query=True,
+                )
+            )
+            return dict(items[0]) if items else None
 
     def save_conversation(
         self,
@@ -189,19 +209,21 @@ class ConversationStore:
             return False
 
         try:
-            item = self._container.read_item(item=conversation_id, partition_key=conversation_id)
+            item = self._find_item(conversation_id)
+            if item is None:
+                logger.warning("Conversation %s not found for update", conversation_id)
+                return False
             if item.get("user_id") != user_id:
                 logger.warning("User %s not authorized to update conversation %s", user_id, conversation_id)
                 return False
             item["messages"] = messages
             item["transcript"] = transcript
             item["updated_at"] = datetime.now(timezone.utc).isoformat()
-            self._container.replace_item(item=conversation_id, body=item)
+            if "conversationId" not in item:
+                item["conversationId"] = conversation_id
+            self._container.upsert_item(body=item)
             logger.info("Updated messages for conversation %s", conversation_id)
             return True
-        except exceptions.CosmosResourceNotFoundError:
-            logger.warning("Conversation %s not found for update", conversation_id)
-            return False
         except exceptions.CosmosHttpResponseError as e:
             logger.error("Failed to update conversation messages: %s", e)
             return False
@@ -233,7 +255,10 @@ class ConversationStore:
             return False
 
         try:
-            item = self._container.read_item(item=conversation_id, partition_key=conversation_id)
+            item = self._find_item(conversation_id)
+            if item is None:
+                logger.warning("Conversation %s not found for assessment update", conversation_id)
+                return False
             if item.get("user_id") != user_id:
                 logger.warning("User %s not authorized to update conversation %s", user_id, conversation_id)
                 return False
@@ -243,12 +268,11 @@ class ConversationStore:
             item["updated_at"] = datetime.now(timezone.utc).isoformat()
             if messages is not None:
                 item["messages"] = messages
-            self._container.replace_item(item=conversation_id, body=item)
+            if "conversationId" not in item:
+                item["conversationId"] = conversation_id
+            self._container.upsert_item(body=item)
             logger.info("Updated conversation %s with assessment", conversation_id)
             return True
-        except exceptions.CosmosResourceNotFoundError:
-            logger.warning("Conversation %s not found for assessment update", conversation_id)
-            return False
         except exceptions.CosmosHttpResponseError as e:
             logger.error("Failed to update conversation assessment: %s", e)
             return False
@@ -270,14 +294,14 @@ class ConversationStore:
             return None
 
         try:
-            item = self._container.read_item(item=conversation_id, partition_key=conversation_id)
+            item = self._find_item(conversation_id)
+            if item is None:
+                logger.warning("Conversation %s not found for user %s", conversation_id, user_id)
+                return None
             if item.get("user_id") != user_id:
                 logger.warning("User %s not authorized to access conversation %s", user_id, conversation_id)
                 return None
-            return dict(item)
-        except exceptions.CosmosResourceNotFoundError:
-            logger.warning("Conversation %s not found for user %s", conversation_id, user_id)
-            return None
+            return item
         except exceptions.CosmosHttpResponseError as e:
             logger.error("Failed to get conversation: %s", e)
             return None
@@ -381,8 +405,14 @@ class ConversationStore:
             logger.info("Deleted conversation %s for user %s", conversation_id, user_id)
             return True
         except exceptions.CosmosResourceNotFoundError:
-            logger.warning("Conversation %s not found for deletion", conversation_id)
-            return False
+            # Fallback for legacy items without conversationId field (null partition)
+            try:
+                self._container.delete_item(item=conversation_id, partition_key=NonePartitionKeyValue)
+                logger.info("Deleted legacy conversation %s for user %s", conversation_id, user_id)
+                return True
+            except (exceptions.CosmosResourceNotFoundError, exceptions.CosmosHttpResponseError):
+                logger.warning("Conversation %s not found for deletion", conversation_id)
+                return False
         except exceptions.CosmosHttpResponseError as e:
             logger.error("Failed to delete conversation: %s", e)
             return False
