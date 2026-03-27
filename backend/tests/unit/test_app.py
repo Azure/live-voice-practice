@@ -249,49 +249,58 @@ class TestFlaskApp:
 
         assert callable(_perform_conversation_analysis)
 
-    @patch("src.app.conversation_manager")
-    def test_list_conversations_endpoint(self, mock_conversation_manager):
-        """Test the GET /api/conversations endpoint."""
-        mock_conversation_manager.list_conversations.return_value = [
-            {"id": "conv-1", "scenarioId": "s1", "overallScore": 4.0}
-        ]
-
+    def test_list_conversations_requires_auth(self):
+        """Test that GET /api/conversations returns 401 without auth."""
         response = self.client.get("/api/conversations")
+        assert response.status_code == 401
+
+    @patch("src.app.scenario_manager")
+    @patch("src.app.conversation_store")
+    def test_list_conversations_endpoint(self, mock_store, mock_scenario_mgr):
+        """Test the GET /api/conversations endpoint with auth."""
+        mock_store.list_user_conversations.return_value = {
+            "items": [{"id": "conv-1", "scenario_id": "s1", "status": "analyzed", "created_at": "2026-01-01T00:00:00"}],
+            "total": 1,
+        }
+        mock_scenario_mgr.list_scenarios.return_value = [{"id": "s1", "name": "Scenario 1"}]
+
+        response = self.client.get(
+            "/api/conversations",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert len(data) == 1
-        assert data[0]["id"] == "conv-1"
-        mock_conversation_manager.list_conversations.assert_called_once_with(scenario_id=None)
+        assert data["total"] == 1
+        assert len(data["conversations"]) == 1
+        assert data["conversations"][0]["id"] == "conv-1"
+        assert data["conversations"][0]["scenario_name"] == "Scenario 1"
 
-    @patch("src.app.conversation_manager")
-    def test_list_conversations_filtered_by_scenario(self, mock_conversation_manager):
-        """Test conversations listing filtered by scenario_id."""
-        mock_conversation_manager.list_conversations.return_value = []
-
-        response = self.client.get("/api/conversations?scenario_id=contoso-billing-001")
-
-        assert response.status_code == 200
-        mock_conversation_manager.list_conversations.assert_called_once_with(scenario_id="contoso-billing-001")
-
-    @patch("src.app.conversation_manager")
-    def test_get_conversation_found(self, mock_conversation_manager):
+    @patch("src.app.conversation_store")
+    def test_get_conversation_found(self, mock_store):
         """Test getting an existing conversation by ID."""
-        record = {"id": "conv-abc", "conversationId": "conv-abc", "scenarioId": "s1"}
-        mock_conversation_manager.get_conversation.return_value = record
+        record = {"id": "conv-abc", "conversationId": "conv-abc", "user_id": "user-1", "scenario_id": "s1"}
+        mock_store.get_conversation.return_value = record
 
-        response = self.client.get("/api/conversations/conv-abc")
+        response = self.client.get(
+            "/api/conversations/conv-abc",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
 
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data["id"] == "conv-abc"
 
-    @patch("src.app.conversation_manager")
-    def test_get_conversation_not_found(self, mock_conversation_manager):
+    @patch("src.app.conversation_store")
+    def test_get_conversation_not_found(self, mock_store):
         """Test getting a non-existent conversation returns 404."""
-        mock_conversation_manager.get_conversation.return_value = None
+        mock_store.get_conversation.return_value = None
+        mock_store.get_conversation_by_id_admin.return_value = None
 
-        response = self.client.get("/api/conversations/nonexistent")
+        response = self.client.get(
+            "/api/conversations/nonexistent",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
 
         assert response.status_code == 404
         data = json.loads(response.data)

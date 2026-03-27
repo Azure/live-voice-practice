@@ -24,9 +24,9 @@ import {
     ChartMultipleRegular,
     DeleteRegular,
 } from '@fluentui/react-icons'
-import { Assessment, ConversationSummary } from '../types'
 import { useConversations } from '../hooks/useConversations'
 import { api } from '../services/api'
+import { Assessment, ConversationSummary } from '../types'
 
 const useStyles = makeStyles({
   card: {

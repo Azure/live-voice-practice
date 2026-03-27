@@ -53,7 +53,7 @@ class ConversationStore:
             # Get or create database
             database = self._client.get_database_client(database_name)
 
-            # Get or create container with user_id as partition key
+            # Container uses /conversationId as partition key
             self._container = database.get_container_client(container_name)
 
             logger.info("Cosmos DB initialized successfully: %s/%s", database_name, container_name)
@@ -96,7 +96,8 @@ class ConversationStore:
 
         document = {
             "id": conversation_id,
-            "user_id": user_id,  # Partition key
+            "conversationId": conversation_id,
+            "user_id": user_id,
             "scenario_id": scenario_id,
             "transcript": transcript,
             "assessment": assessment,
@@ -143,6 +144,7 @@ class ConversationStore:
 
         document = {
             "id": conversation_id,
+            "conversationId": conversation_id,
             "user_id": user_id,
             "scenario_id": scenario_id,
             "transcript": "",
@@ -172,8 +174,8 @@ class ConversationStore:
         """Update messages on an existing conversation.
 
         Args:
-            user_id: The user ID (partition key).
-            conversation_id: The conversation ID.
+            user_id: The user ID (for ownership verification).
+            conversation_id: The conversation ID (partition key).
             messages: Updated list of messages.
             transcript: Updated transcript text.
 
@@ -187,7 +189,10 @@ class ConversationStore:
             return False
 
         try:
-            item = self._container.read_item(item=conversation_id, partition_key=user_id)
+            item = self._container.read_item(item=conversation_id, partition_key=conversation_id)
+            if item.get("user_id") != user_id:
+                logger.warning("User %s not authorized to update conversation %s", user_id, conversation_id)
+                return False
             item["messages"] = messages
             item["transcript"] = transcript
             item["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -212,8 +217,8 @@ class ConversationStore:
         """Update an existing conversation with assessment results.
 
         Args:
-            user_id: The user ID (partition key).
-            conversation_id: The conversation ID.
+            user_id: The user ID (for ownership verification).
+            conversation_id: The conversation ID (partition key).
             transcript: Final transcript text.
             assessment: Assessment results.
             messages: Optional final messages list.
@@ -228,7 +233,10 @@ class ConversationStore:
             return False
 
         try:
-            item = self._container.read_item(item=conversation_id, partition_key=user_id)
+            item = self._container.read_item(item=conversation_id, partition_key=conversation_id)
+            if item.get("user_id") != user_id:
+                logger.warning("User %s not authorized to update conversation %s", user_id, conversation_id)
+                return False
             item["transcript"] = transcript
             item["assessment"] = assessment
             item["status"] = "analyzed"
@@ -249,11 +257,11 @@ class ConversationStore:
         """Get a specific conversation by ID.
 
         Args:
-            user_id: The user ID (required for partition key lookup).
-            conversation_id: The conversation ID.
+            user_id: The user ID (for ownership verification).
+            conversation_id: The conversation ID (partition key).
 
         Returns:
-            The conversation document, or None if not found.
+            The conversation document, or None if not found or not owned by user.
         """
         if not self._ensure_initialized():
             return None
@@ -262,7 +270,10 @@ class ConversationStore:
             return None
 
         try:
-            item = self._container.read_item(item=conversation_id, partition_key=user_id)
+            item = self._container.read_item(item=conversation_id, partition_key=conversation_id)
+            if item.get("user_id") != user_id:
+                logger.warning("User %s not authorized to access conversation %s", user_id, conversation_id)
+                return None
             return dict(item)
         except exceptions.CosmosResourceNotFoundError:
             logger.warning("Conversation %s not found for user %s", conversation_id, user_id)
@@ -309,19 +320,19 @@ class ConversationStore:
             sort_order = "desc"
 
         try:
-            # Count query for total
+            # Count query for total (cross-partition since partition key is conversationId)
             count_query = "SELECT VALUE COUNT(1) FROM c WHERE c.user_id = @user_id"
             count_params: List[Dict[str, Any]] = [{"name": "@user_id", "value": user_id}]
             count_results = list(
                 self._container.query_items(
                     query=count_query,
                     parameters=count_params,
-                    partition_key=user_id,
+                    enable_cross_partition_query=True,
                 )
             )
             total = count_results[0] if count_results else 0
 
-            # Data query with sorting and pagination
+            # Data query with sorting and pagination (cross-partition)
             query = f"""
                 SELECT c.id, c.user_id, c.scenario_id, c.assessment,
                        c.metadata, c.status, c.created_at, c.updated_at
@@ -340,7 +351,7 @@ class ConversationStore:
                 self._container.query_items(
                     query=query,
                     parameters=parameters,
-                    partition_key=user_id,
+                    enable_cross_partition_query=True,
                 )
             )
             return {"items": [dict(item) for item in items], "total": total}
@@ -366,7 +377,7 @@ class ConversationStore:
             return False
 
         try:
-            self._container.delete_item(item=conversation_id, partition_key=user_id)
+            self._container.delete_item(item=conversation_id, partition_key=conversation_id)
             logger.info("Deleted conversation %s for user %s", conversation_id, user_id)
             return True
         except exceptions.CosmosResourceNotFoundError:

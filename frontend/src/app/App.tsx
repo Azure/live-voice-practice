@@ -19,6 +19,7 @@ import { ChatPanel } from '../components/ChatPanel'
 import { ConversationDetail } from '../components/ConversationDetail'
 import { ConversationList } from '../components/ConversationList'
 import { ScenarioList } from '../components/ScenarioList'
+import { UserHeader } from '../components/UserHeader'
 import { ConnectionStage, VideoPanel } from '../components/VideoPanel'
 import { useAudioPlayer } from '../hooks/useAudioPlayer'
 import { useAuth } from '../hooks/useAuth'
@@ -77,7 +78,7 @@ export default function App() {
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
 
-  const { authenticated } = useAuth()
+  const { authenticated, user } = useAuth()
 
   const {
     scenarios,
@@ -233,6 +234,8 @@ export default function App() {
 
   return (
     <div className={styles.container}>
+      <UserHeader userName={user?.name} authenticated={authenticated} />
+
       {/* Setup dialog (home screen) */}
       <Dialog
         open={currentView === 'setup'}
