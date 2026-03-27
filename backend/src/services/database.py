@@ -455,6 +455,72 @@ class ConversationStore:
             logger.error("Failed to get conversation by admin: %s", e)
             return None
 
+    def list_all_conversations(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+    ) -> Dict[str, Any]:
+        """List all conversations across all users (trainer/admin only).
+
+        Args:
+            limit: Maximum number of conversations to return.
+            offset: Number of conversations to skip.
+            sort_by: Column to sort by (created_at, updated_at, scenario_id).
+            sort_order: Sort direction (asc or desc).
+
+        Returns:
+            Dict with 'items' (list of conversation summaries) and 'total' count.
+        """
+        empty_result: Dict[str, Any] = {"items": [], "total": 0}
+
+        if not self._ensure_initialized():
+            return empty_result
+
+        if self._container is None:
+            return empty_result
+
+        if sort_by not in self._ALLOWED_SORT_COLUMNS:
+            sort_by = "created_at"
+        if sort_order.lower() not in ("asc", "desc"):
+            sort_order = "desc"
+
+        try:
+            count_query = "SELECT VALUE COUNT(1) FROM c"
+            count_results = list(
+                self._container.query_items(
+                    query=count_query,
+                    enable_cross_partition_query=True,
+                )
+            )
+            total = count_results[0] if count_results else 0
+
+            query = f"""
+                SELECT c.id, c.user_id, c.scenario_id, c.assessment,
+                       c.metadata, c.status, c.created_at, c.updated_at
+                FROM c
+                ORDER BY c.{sort_by} {sort_order.upper()}
+                OFFSET @offset LIMIT @limit
+            """
+            parameters: List[Dict[str, Any]] = [
+                {"name": "@offset", "value": offset},
+                {"name": "@limit", "value": limit},
+            ]
+
+            items = list(
+                self._container.query_items(
+                    query=query,
+                    parameters=parameters,
+                    enable_cross_partition_query=True,
+                )
+            )
+            return {"items": [dict(item) for item in items], "total": total}
+
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to list all conversations: %s", e)
+            return empty_result
+
 
 # Singleton instance
 conversation_store = ConversationStore()

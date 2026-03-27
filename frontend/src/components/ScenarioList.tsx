@@ -14,13 +14,21 @@ import {
     makeStyles,
     tokens,
 } from '@fluentui/react-components'
-import { History24Regular } from '@fluentui/react-icons'
+import { History24Regular, People24Regular } from '@fluentui/react-icons'
 import { useState } from 'react'
 import { AVATAR_OPTIONS, DEFAULT_AVATAR, Scenario } from '../types'
 
 const useStyles = makeStyles({
   header: {
     gridColumn: '1 / -1',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+  },
+  logo: {
+    width: '80px',
+    height: 'auto',
   },
   cardsGrid: {
     display: 'grid',
@@ -69,6 +77,9 @@ interface Props {
   onStart: (avatarValue: string) => void
   isAuthenticated?: boolean
   onNavigateToConversations?: () => void
+  isTrainer?: boolean
+  onNavigateToAllPractices?: () => void
+  appName?: string
 }
 
 export function ScenarioList({
@@ -78,15 +89,25 @@ export function ScenarioList({
   onStart,
   isAuthenticated,
   onNavigateToConversations,
+  isTrainer,
+  onNavigateToAllPractices,
+  appName,
 }: Props) {
   const styles = useStyles()
   const [selectedAvatar, setSelectedAvatar] = useState(DEFAULT_AVATAR)
 
   return (
     <>
-      <Text className={styles.header} size={500} weight="semibold">
-        Select Training Scenario
-      </Text>
+      <div className={styles.header}>
+        <img
+          src="/static/images/logo.png"
+          alt={appName || 'Live Voice Practice'}
+          className={styles.logo}
+        />
+        <Text size={500} weight="semibold">
+          {appName || 'Select Training Scenario'}
+        </Text>
+      </div>
 
       {/* Server-side scenarios */}
       <div className={styles.cardsGrid}>
@@ -116,6 +137,15 @@ export function ScenarioList({
             onClick={onNavigateToConversations}
           >
             My Practices
+          </Button>
+        )}
+        {isTrainer && onNavigateToAllPractices && (
+          <Button
+            appearance="secondary"
+            icon={<People24Regular />}
+            onClick={onNavigateToAllPractices}
+          >
+            All Practices
           </Button>
         )}
         <div className={styles.avatarSelector}>

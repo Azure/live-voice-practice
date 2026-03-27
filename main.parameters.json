@@ -138,6 +138,11 @@
           "name": "conversations",
           "canonical_name": "CONVERSATIONS_DATABASE_CONTAINER",
           "partitionKeyPath": "/conversationId"
+        },
+        {
+          "name": "role_assignments",
+          "canonical_name": "ROLE_ASSIGNMENTS_DATABASE_CONTAINER",
+          "partitionKeyPath": "/userId"
         }
       ]
     },

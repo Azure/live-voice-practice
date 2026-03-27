@@ -11,12 +11,14 @@ interface AuthUser {
   name: string
   email: string
   is_admin: boolean
+  role: string
 }
 
 interface AuthState {
   authenticated: boolean
   user: AuthUser | null
   loading: boolean
+  isTrainer: boolean
 }
 
 export function useAuth(): AuthState {
@@ -24,6 +26,7 @@ export function useAuth(): AuthState {
     authenticated: false,
     user: null,
     loading: true,
+    isTrainer: false,
   })
 
   useEffect(() => {
@@ -38,15 +41,17 @@ export function useAuth(): AuthState {
               name: data.name,
               email: data.email,
               is_admin: data.is_admin,
+              role: data.role || 'trainee',
             },
             loading: false,
+            isTrainer: data.role === 'trainer',
           })
         } else {
-          setState({ authenticated: false, user: null, loading: false })
+          setState({ authenticated: false, user: null, loading: false, isTrainer: false })
         }
       })
       .catch(() => {
-        setState({ authenticated: false, user: null, loading: false })
+        setState({ authenticated: false, user: null, loading: false, isTrainer: false })
       })
   }, [])
 

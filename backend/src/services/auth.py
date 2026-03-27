@@ -33,15 +33,21 @@ class UserIdentity:
     name: Optional[str] = None
     email: Optional[str] = None
     roles: Optional[List[str]] = None
+    role: str = "trainee"
 
     @property
     def is_admin(self) -> bool:
         """Check if the user has admin role."""
         return self.roles is not None and ADMIN_ROLE in self.roles
 
+    @property
+    def is_trainer(self) -> bool:
+        """Check if the user has trainer role."""
+        return self.role == "trainer"
+
     def can_access_user_data(self, target_user_id: str) -> bool:
         """Check if this user can access another user's data."""
-        return self.user_id == target_user_id or self.is_admin
+        return self.user_id == target_user_id or self.is_admin or self.is_trainer
 
 
 def get_current_user() -> Optional[UserIdentity]:

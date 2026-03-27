@@ -46,6 +46,7 @@ class TestFlaskApp:
         data = json.loads(response.data)
         assert data["proxy_enabled"] is True
         assert data["ws_endpoint"] == "/ws/voice"
+        assert "app_name" in data
 
     @patch("src.app.scenario_manager")
     def test_get_scenarios_route(self, mock_scenario_manager):
@@ -254,10 +255,12 @@ class TestFlaskApp:
         response = self.client.get("/api/conversations")
         assert response.status_code == 401
 
+    @patch("src.app.role_store")
     @patch("src.app.scenario_manager")
     @patch("src.app.conversation_store")
-    def test_list_conversations_endpoint(self, mock_store, mock_scenario_mgr):
+    def test_list_conversations_endpoint(self, mock_store, mock_scenario_mgr, mock_role_store):
         """Test the GET /api/conversations endpoint with auth."""
+        mock_role_store.get_user_role.return_value = "trainee"
         mock_store.list_user_conversations.return_value = {
             "items": [{"id": "conv-1", "scenario_id": "s1", "status": "analyzed", "created_at": "2026-01-01T00:00:00"}],
             "total": 1,
@@ -276,9 +279,11 @@ class TestFlaskApp:
         assert data["conversations"][0]["id"] == "conv-1"
         assert data["conversations"][0]["scenario_name"] == "Scenario 1"
 
+    @patch("src.app.role_store")
     @patch("src.app.conversation_store")
-    def test_get_conversation_found(self, mock_store):
+    def test_get_conversation_found(self, mock_store, mock_role_store):
         """Test getting an existing conversation by ID."""
+        mock_role_store.get_user_role.return_value = "trainee"
         record = {"id": "conv-abc", "conversationId": "conv-abc", "user_id": "user-1", "scenario_id": "s1"}
         mock_store.get_conversation.return_value = record
 
@@ -291,9 +296,11 @@ class TestFlaskApp:
         data = json.loads(response.data)
         assert data["id"] == "conv-abc"
 
+    @patch("src.app.role_store")
     @patch("src.app.conversation_store")
-    def test_get_conversation_not_found(self, mock_store):
+    def test_get_conversation_not_found(self, mock_store, mock_role_store):
         """Test getting a non-existent conversation returns 404."""
+        mock_role_store.get_user_role.return_value = "trainee"
         mock_store.get_conversation.return_value = None
         mock_store.get_conversation_by_id_admin.return_value = None
 
@@ -305,3 +312,74 @@ class TestFlaskApp:
         assert response.status_code == 404
         data = json.loads(response.data)
         assert data["error"] == "Conversation not found"
+
+    @patch("src.app.role_store")
+    def test_get_me_returns_role(self, mock_role_store):
+        """Test that GET /api/me returns the user's role."""
+        mock_role_store.get_user_role.return_value = "trainer"
+
+        response = self.client.get(
+            "/api/me",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["authenticated"] is True
+        assert data["role"] == "trainer"
+
+    def test_get_me_unauthenticated(self):
+        """Test that GET /api/me returns unauthenticated when no auth headers."""
+        response = self.client.get("/api/me")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["authenticated"] is False
+
+    @patch("src.app.role_store")
+    @patch("src.app.scenario_manager")
+    @patch("src.app.conversation_store")
+    def test_list_all_conversations_as_trainer(self, mock_store, mock_scenario_mgr, mock_role_store):
+        """Test that trainers can list all conversations with ?all=true."""
+        mock_role_store.get_user_role.return_value = "trainer"
+        mock_store.list_all_conversations.return_value = {
+            "items": [
+                {"id": "conv-1", "scenario_id": "s1", "user_id": "other-user", "created_at": "2026-01-01T00:00:00"},
+                {"id": "conv-2", "scenario_id": "s1", "user_id": "user-1", "created_at": "2026-01-02T00:00:00"},
+            ],
+            "total": 2,
+        }
+        mock_scenario_mgr.list_scenarios.return_value = [{"id": "s1", "name": "Scenario 1"}]
+
+        response = self.client.get(
+            "/api/conversations?all=true",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["total"] == 2
+        mock_store.list_all_conversations.assert_called_once()
+
+    @patch("src.app.role_store")
+    @patch("src.app.scenario_manager")
+    @patch("src.app.conversation_store")
+    def test_list_all_conversations_as_trainee_ignored(self, mock_store, mock_scenario_mgr, mock_role_store):
+        """Test that trainees cannot list all conversations even with ?all=true."""
+        mock_role_store.get_user_role.return_value = "trainee"
+        mock_store.list_user_conversations.return_value = {
+            "items": [{"id": "conv-1", "scenario_id": "s1", "created_at": "2026-01-01T00:00:00"}],
+            "total": 1,
+        }
+        mock_scenario_mgr.list_scenarios.return_value = [{"id": "s1", "name": "Scenario 1"}]
+
+        response = self.client.get(
+            "/api/conversations?all=true",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        # Should still call list_user_conversations, not list_all_conversations
+        mock_store.list_user_conversations.assert_called_once()
+        mock_store.list_all_conversations.assert_not_called()

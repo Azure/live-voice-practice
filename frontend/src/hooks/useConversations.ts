@@ -9,7 +9,7 @@ import { ConversationSummary } from '../types'
 
 const PAGE_SIZE = 20
 
-export function useConversations() {
+export function useConversations(showAll?: boolean) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
@@ -23,7 +23,7 @@ export function useConversations() {
     setLoading(true)
     try {
       const offset = (currentPage - 1) * PAGE_SIZE
-      const result = await api.listConversations(PAGE_SIZE, offset, sortBy, sortOrder)
+      const result = await api.listConversations(PAGE_SIZE, offset, sortBy, sortOrder, showAll)
       setConversations(result.conversations)
       setTotal(result.total)
     } catch (err) {
@@ -33,7 +33,7 @@ export function useConversations() {
     } finally {
       setLoading(false)
     }
-  }, [currentPage, sortBy, sortOrder])
+  }, [currentPage, sortBy, sortOrder, showAll])
 
   useEffect(() => {
     fetchConversations()

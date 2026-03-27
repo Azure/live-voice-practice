@@ -140,7 +140,8 @@ export const api = {
     limit: number = 20,
     offset: number = 0,
     sortBy: string = 'created_at',
-    sortOrder: string = 'desc'
+    sortOrder: string = 'desc',
+    all?: boolean
   ): Promise<ConversationListResponse> {
     const params = new URLSearchParams({
       limit: String(limit),
@@ -148,6 +149,9 @@ export const api = {
       sort_by: sortBy,
       sort_order: sortOrder,
     })
+    if (all) {
+      params.set('all', 'true')
+    }
     const res = await fetch(`/api/conversations?${params}`)
     if (!res.ok) throw new Error('Failed to list conversations')
     return res.json()

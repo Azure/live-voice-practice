@@ -13,7 +13,7 @@ import {
     Text,
     tokens,
 } from '@fluentui/react-components'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AssessmentPanel } from '../components/AssessmentPanel'
 import { ChatPanel } from '../components/ChatPanel'
 import { ConversationDetail } from '../components/ConversationDetail'
@@ -41,6 +41,20 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     backgroundColor: tokens.colorNeutralBackground3,
     padding: tokens.spacingVerticalL,
+  },
+  brandingBar: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
+    zIndex: 1000,
+  },
+  brandingLogo: {
+    width: '32px',
+    height: '32px',
   },
   mainLayout: {
     width: '95%',
@@ -77,8 +91,10 @@ export default function App() {
   const [avatarEnabled, setAvatarEnabled] = useState(true)
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
+  const [showAllPractices, setShowAllPractices] = useState(false)
+  const [appName, setAppName] = useState<string>('Live Voice Practice')
 
-  const { authenticated, user } = useAuth()
+  const { authenticated, user, isTrainer } = useAuth()
 
   const {
     scenarios,
@@ -89,8 +105,22 @@ export default function App() {
   const { playAudio } = useAudioPlayer()
   const activeScenario = scenarios.find(s => s.id === selectedScenario) || null
 
+  // Fetch app name from config
+  useEffect(() => {
+    api.getConfig().then((cfg: { app_name?: string }) => {
+      if (cfg.app_name) setAppName(cfg.app_name)
+    }).catch(() => {})
+  }, [])
+
   const navigateToConversations = useCallback(() => {
     setPreviousView(currentView)
+    setShowAllPractices(false)
+    setCurrentView('conversations')
+  }, [currentView])
+
+  const navigateToAllPractices = useCallback(() => {
+    setPreviousView(currentView)
+    setShowAllPractices(true)
     setCurrentView('conversations')
   }, [currentView])
 
@@ -234,7 +264,21 @@ export default function App() {
 
   return (
     <div className={styles.container}>
-      <UserHeader userName={user?.name} authenticated={authenticated} />
+      <UserHeader userName={user?.name} authenticated={authenticated} role={user?.role} />
+
+      {/* Branding bar - top left on non-setup views */}
+      {currentView !== 'setup' && (
+        <div className={styles.brandingBar}>
+          <img
+            src="/static/images/favicon-32x32.png"
+            alt={appName}
+            className={styles.brandingLogo}
+          />
+          <Text size={300} weight="semibold">
+            {appName}
+          </Text>
+        </div>
+      )}
 
       {/* Setup dialog (home screen) */}
       <Dialog
@@ -257,6 +301,9 @@ export default function App() {
                 onStart={handleStart}
                 isAuthenticated={authenticated}
                 onNavigateToConversations={navigateToConversations}
+                isTrainer={isTrainer}
+                onNavigateToAllPractices={navigateToAllPractices}
+                appName={appName}
               />
             )}
           </DialogBody>
@@ -335,6 +382,8 @@ export default function App() {
             hasAvatarConfig={avatarConfig !== null}
             isAuthenticated={authenticated}
             onNavigateToConversations={navigateToConversations}
+            isTrainer={isTrainer}
+            onNavigateToAllPractices={navigateToAllPractices}
           />
         </div>
       )}
@@ -345,6 +394,7 @@ export default function App() {
           onSelectConversation={navigateToDetail}
           onViewAssessment={handleViewAssessment}
           onBack={navigateBack}
+          showAll={showAllPractices}
         />
       )}
 

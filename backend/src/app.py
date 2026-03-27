@@ -23,6 +23,7 @@ from src.services.analyzers import ConversationAnalyzer, PronunciationAssessor
 from src.services.conversation_manager import ConversationManager
 from src.services.database import conversation_store
 from src.services.managers import AgentManager, ScenarioManager
+from src.services.role_store import role_store
 from src.services.websocket_handler import VoiceProxyHandler
 
 # Constants
@@ -86,7 +87,11 @@ def index():
 @app.route(API_CONFIG_ENDPOINT)
 def get_config():
     """Get client configuration."""
-    return jsonify({"proxy_enabled": True, "ws_endpoint": WEBSOCKET_ENDPOINT})
+    return jsonify({
+        "proxy_enabled": True,
+        "ws_endpoint": WEBSOCKET_ENDPOINT,
+        "app_name": config.get("app_display_name", "Live Voice Practice"),
+    })
 
 
 @app.route(API_SCENARIOS_ENDPOINT)
@@ -360,18 +365,31 @@ def list_conversations():
     offset = request.args.get("offset", 0, type=int)
     sort_by = request.args.get("sort_by", "created_at", type=str)
     sort_order = request.args.get("sort_order", "desc", type=str)
+    show_all = request.args.get("all", "false", type=str).lower() in ("true", "1")
 
     # Validate pagination parameters
     limit = max(1, min(100, limit))
     offset = max(0, offset)
 
-    result = conversation_store.list_user_conversations(
-        user_id=user.user_id,
-        limit=limit,
-        offset=offset,
-        sort_by=sort_by,
-        sort_order=sort_order,
-    )
+    # Resolve role and decide query scope
+    role = role_store.get_user_role(user.user_id)
+    user.role = role
+
+    if show_all and user.is_trainer:
+        result = conversation_store.list_all_conversations(
+            limit=limit,
+            offset=offset,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    else:
+        result = conversation_store.list_user_conversations(
+            user_id=user.user_id,
+            limit=limit,
+            offset=offset,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
 
     conversations = result.get("items", [])
     total = result.get("total", 0)
@@ -401,20 +419,23 @@ def get_conversation(conversation_id: str):
     if user is None:
         return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
 
+    # Resolve role
+    user.role = role_store.get_user_role(user.user_id)
+
     # First, try to get conversation using user's ID as partition key (efficient)
     conversation = conversation_store.get_conversation(
         user_id=user.user_id,
         conversation_id=conversation_id,
     )
 
-    # If not found and user is admin, try cross-partition query
-    if conversation is None and user.is_admin:
+    # If not found and user is admin/trainer, try cross-partition query
+    if conversation is None and (user.is_admin or user.is_trainer):
         conversation = conversation_store.get_conversation_by_id_admin(conversation_id)
 
     if conversation is None:
         return jsonify({"error": CONVERSATION_NOT_FOUND}), HTTP_NOT_FOUND
 
-    # Check access: user must own the conversation or be an admin
+    # Check access: user must own the conversation or be an admin/trainer
     if not user.can_access_user_data(conversation.get("user_id", "")):
         return jsonify({"error": ACCESS_DENIED}), HTTP_FORBIDDEN
 
@@ -426,11 +447,14 @@ def get_conversation(conversation_id: str):
 def delete_conversation(conversation_id: str):
     """Delete a specific conversation.
 
-    Users can only delete their own conversations unless they have admin role.
+    Users can only delete their own conversations unless they have admin/trainer role.
     """
     user = get_current_user()
     if user is None:
         return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
+
+    # Resolve role
+    user.role = role_store.get_user_role(user.user_id)
 
     # First check if conversation exists and user has access
     conversation = conversation_store.get_conversation(
@@ -438,9 +462,9 @@ def delete_conversation(conversation_id: str):
         conversation_id=conversation_id,
     )
 
-    # If not found with user's partition key and user is admin, try admin lookup
+    # If not found with user's partition key and user is admin/trainer, try admin lookup
     target_user_id = user.user_id
-    if conversation is None and user.is_admin:
+    if conversation is None and (user.is_admin or user.is_trainer):
         conversation = conversation_store.get_conversation_by_id_admin(conversation_id)
         if conversation:
             target_user_id = conversation.get("user_id", "")
@@ -470,6 +494,9 @@ def get_current_user_info():
     if user is None:
         return jsonify({"authenticated": False})
 
+    role = role_store.get_user_role(user.user_id)
+    user.role = role
+
     return jsonify(
         {
             "authenticated": True,
@@ -477,6 +504,7 @@ def get_current_user_info():
             "name": user.name,
             "email": user.email,
             "is_admin": user.is_admin,
+            "role": role,
         }
     )
 

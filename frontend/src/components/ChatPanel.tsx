@@ -17,6 +17,7 @@ import {
     History20Regular,
     MicOffRegular,
     MicRegular,
+    People20Regular,
 } from '@fluentui/react-icons'
 import { Message, Scenario } from '../types'
 
@@ -92,6 +93,8 @@ interface Props {
   hasAvatarConfig?: boolean
   isAuthenticated?: boolean
   onNavigateToConversations?: () => void
+  isTrainer?: boolean
+  onNavigateToAllPractices?: () => void
 }
 
 export function ChatPanel({
@@ -108,6 +111,8 @@ export function ChatPanel({
   hasAvatarConfig,
   isAuthenticated,
   onNavigateToConversations,
+  isTrainer,
+  onNavigateToAllPractices,
 }: Props) {
   const styles = useStyles()
 
@@ -184,6 +189,16 @@ export function ChatPanel({
             onClick={onNavigateToConversations}
           >
             Past Practices
+          </Button>
+        )}
+
+        {isTrainer && onNavigateToAllPractices && (
+          <Button
+            appearance="subtle"
+            icon={<People20Regular />}
+            onClick={onNavigateToAllPractices}
+          >
+            All Practices
           </Button>
         )}
 

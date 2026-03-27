@@ -98,6 +98,7 @@ interface Props {
   onSelectConversation: (id: string) => void
   onViewAssessment: (assessment: Assessment) => void
   onBack: () => void
+  showAll?: boolean
 }
 
 type SortableColumn = 'created_at' | 'updated_at' | 'scenario_id'
@@ -117,6 +118,7 @@ export function ConversationList({
   onSelectConversation,
   onViewAssessment,
   onBack,
+  showAll,
 }: Props) {
   const styles = useStyles()
   const {
@@ -129,7 +131,7 @@ export function ConversationList({
     setPage,
     setSort,
     refresh,
-  } = useConversations()
+  } = useConversations(showAll)
 
   const handleSort = (column: SortableColumn) => {
     if (sortBy === column) {
@@ -177,7 +179,7 @@ export function ConversationList({
           onClick={onBack}
         />
         <Text size={600} weight="semibold">
-          My Practices
+          {showAll ? 'All Practices' : 'My Practices'}
         </Text>
       </div>
 

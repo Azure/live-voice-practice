@@ -252,6 +252,18 @@ class Config:
                 app_config_key="CONVERSATIONS_DATABASE_CONTAINER",
                 default="conversations",
             ),
+            "cosmos_role_assignments_container": self._get_setting(
+                env_var="COSMOS_ROLE_ASSIGNMENTS_CONTAINER",
+                app_config=app_config_values,
+                app_config_key="ROLE_ASSIGNMENTS_DATABASE_CONTAINER",
+                default="role_assignments",
+            ),
+            "app_display_name": self._get_setting(
+                env_var="APP_DISPLAY_NAME",
+                app_config=app_config_values,
+                app_config_key="APP_DISPLAY_NAME",
+                default="Live Voice Practice",
+            ),
 
         }
         return result

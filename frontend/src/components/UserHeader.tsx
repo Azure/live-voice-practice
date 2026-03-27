@@ -22,9 +22,10 @@ const useStyles = makeStyles({
 interface Props {
   userName: string | null | undefined
   authenticated: boolean
+  role?: string
 }
 
-export function UserHeader({ userName, authenticated }: Props) {
+export function UserHeader({ userName, authenticated, role }: Props) {
   const styles = useStyles()
 
   if (!authenticated) return null
@@ -34,6 +35,11 @@ export function UserHeader({ userName, authenticated }: Props) {
       <Text size={300} weight="semibold">
         {userName || 'User'}
       </Text>
+      {role && (
+        <Text size={200} style={{ opacity: 0.7 }}>
+          ({role === 'trainer' ? 'Trainer' : 'Trainee'})
+        </Text>
+      )}
       <Button
         appearance="subtle"
         size="small"
