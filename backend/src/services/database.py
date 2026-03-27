@@ -1,0 +1,260 @@
+# ---------------------------------------------------------------------------------------------
+#  Copyright (c) Microsoft Corporation. All rights reserved.
+#  Licensed under the MIT License. See LICENSE in the project root for license information.
+# --------------------------------------------------------------------------------------------
+
+"""Cosmos DB service for storing and retrieving user conversations."""
+
+import logging
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from azure.cosmos import CosmosClient, exceptions
+from azure.identity import DefaultAzureCredential
+
+from src.config import config
+
+logger = logging.getLogger(__name__)
+
+
+class ConversationStore:
+    """Service for managing conversation records in Cosmos DB."""
+
+    def __init__(self):
+        """Initialize the Cosmos DB client and container."""
+        self._client: Optional[CosmosClient] = None
+        self._container = None
+        self._initialized = False
+
+    def _ensure_initialized(self) -> bool:
+        """Lazily initialize the Cosmos DB connection.
+
+        Returns:
+            True if initialization was successful, False otherwise.
+        """
+        if self._initialized:
+            return self._container is not None
+
+        endpoint = config.get("cosmos_db_endpoint")
+        database_name = config.get("cosmos_db_database", "voicelab")
+        container_name = config.get("cosmos_db_container", "conversations")
+
+        if not endpoint:
+            logger.warning("COSMOS_DB_ENDPOINT not configured, conversation storage disabled")
+            self._initialized = True
+            return False
+
+        try:
+            # Use DefaultAzureCredential for authentication (works with managed identity)
+            credential = DefaultAzureCredential()
+            self._client = CosmosClient(endpoint, credential=credential)
+
+            # Get or create database
+            database = self._client.get_database_client(database_name)
+
+            # Get or create container with user_id as partition key
+            self._container = database.get_container_client(container_name)
+
+            logger.info("Cosmos DB initialized successfully: %s/%s", database_name, container_name)
+            self._initialized = True
+            return True
+
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to initialize Cosmos DB: %s", e)
+            self._initialized = True
+            return False
+
+    def save_conversation(
+        self,
+        user_id: str,
+        scenario_id: str,
+        transcript: str,
+        assessment: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """Save a conversation record to Cosmos DB.
+
+        Args:
+            user_id: The ID of the user who owns this conversation.
+            scenario_id: The ID of the scenario used in this conversation.
+            transcript: The full conversation transcript.
+            assessment: Optional assessment results (AI and pronunciation).
+            metadata: Optional additional metadata.
+
+        Returns:
+            The ID of the created conversation record, or None if storage failed.
+        """
+        if not self._ensure_initialized():
+            return None
+
+        if self._container is None:
+            return None
+
+        conversation_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+
+        document = {
+            "id": conversation_id,
+            "user_id": user_id,  # Partition key
+            "scenario_id": scenario_id,
+            "transcript": transcript,
+            "assessment": assessment,
+            "metadata": metadata or {},
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        try:
+            self._container.create_item(body=document)
+            logger.info("Saved conversation %s for user %s", conversation_id, user_id)
+            return conversation_id
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to save conversation: %s", e)
+            return None
+
+    def get_conversation(self, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific conversation by ID.
+
+        Args:
+            user_id: The user ID (required for partition key lookup).
+            conversation_id: The conversation ID.
+
+        Returns:
+            The conversation document, or None if not found.
+        """
+        if not self._ensure_initialized():
+            return None
+
+        if self._container is None:
+            return None
+
+        try:
+            item = self._container.read_item(item=conversation_id, partition_key=user_id)
+            return dict(item)
+        except exceptions.CosmosResourceNotFoundError:
+            logger.warning("Conversation %s not found for user %s", conversation_id, user_id)
+            return None
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to get conversation: %s", e)
+            return None
+
+    def list_user_conversations(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """List conversations for a specific user.
+
+        Args:
+            user_id: The user ID to filter by.
+            limit: Maximum number of conversations to return.
+            offset: Number of conversations to skip.
+
+        Returns:
+            List of conversation documents (without full transcript for efficiency).
+        """
+        if not self._ensure_initialized():
+            return []
+
+        if self._container is None:
+            return []
+
+        try:
+            # Query with partition key for efficiency
+            query = """
+                SELECT c.id, c.user_id, c.scenario_id, c.assessment,
+                       c.metadata, c.created_at, c.updated_at
+                FROM c
+                WHERE c.user_id = @user_id
+                ORDER BY c.created_at DESC
+                OFFSET @offset LIMIT @limit
+            """
+            parameters: List[Dict[str, Any]] = [
+                {"name": "@user_id", "value": user_id},
+                {"name": "@offset", "value": offset},
+                {"name": "@limit", "value": limit},
+            ]
+
+            items = list(
+                self._container.query_items(
+                    query=query,
+                    parameters=parameters,
+                    partition_key=user_id,
+                )
+            )
+            return [dict(item) for item in items]
+
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to list conversations: %s", e)
+            return []
+
+    def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
+        """Delete a conversation.
+
+        Args:
+            user_id: The user ID (required for partition key).
+            conversation_id: The conversation ID to delete.
+
+        Returns:
+            True if deleted successfully, False otherwise.
+        """
+        if not self._ensure_initialized():
+            return False
+
+        if self._container is None:
+            return False
+
+        try:
+            self._container.delete_item(item=conversation_id, partition_key=user_id)
+            logger.info("Deleted conversation %s for user %s", conversation_id, user_id)
+            return True
+        except exceptions.CosmosResourceNotFoundError:
+            logger.warning("Conversation %s not found for deletion", conversation_id)
+            return False
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to delete conversation: %s", e)
+            return False
+
+    def get_conversation_by_id_admin(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """Get a conversation by ID (admin only - cross-partition query).
+
+        This is less efficient as it requires a cross-partition query.
+        Use only for admin access when user_id is not known.
+
+        Args:
+            conversation_id: The conversation ID.
+
+        Returns:
+            The conversation document, or None if not found.
+        """
+        if not self._ensure_initialized():
+            return None
+
+        if self._container is None:
+            return None
+
+        try:
+            query = "SELECT * FROM c WHERE c.id = @id"
+            parameters: List[Dict[str, Any]] = [{"name": "@id", "value": conversation_id}]
+
+            items = list(
+                self._container.query_items(
+                    query=query,
+                    parameters=parameters,
+                    enable_cross_partition_query=True,
+                )
+            )
+
+            if items:
+                return dict(items[0])
+            return None
+
+        except exceptions.CosmosHttpResponseError as e:
+            logger.error("Failed to get conversation by admin: %s", e)
+            return None
+
+
+# Singleton instance
+conversation_store = ConversationStore()

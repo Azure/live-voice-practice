@@ -30,6 +30,10 @@ DEFAULT_VOICE_TYPE = "azure-standard"
 DEFAULT_AVATAR_CHARACTER = "lisa"
 DEFAULT_AVATAR_STYLE = "casual-sitting"
 
+# Cosmos DB defaults
+DEFAULT_COSMOS_DATABASE = "voicelab"
+DEFAULT_COSMOS_CONTAINER = "conversations"
+
 logger = logging.getLogger(__name__)
 
 
@@ -248,6 +252,7 @@ class Config:
                 app_config_key="CONVERSATIONS_DATABASE_CONTAINER",
                 default="conversations",
             ),
+
         }
         return result
 
