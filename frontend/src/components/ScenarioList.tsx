@@ -100,7 +100,7 @@ export function ScenarioList({
     <>
       <div className={styles.header}>
         <img
-          src="/static/images/logo.png"
+          src="/images/logo.png"
           alt={appName || 'Live Voice Practice'}
           className={styles.logo}
         />

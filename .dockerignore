@@ -94,6 +94,7 @@ samples/rubrics/
 samples/scenarios/
 docs/
 static/
+!static/images/
 
 # Testing
 .pytest_cache/

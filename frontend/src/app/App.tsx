@@ -270,7 +270,7 @@ export default function App() {
       {currentView !== 'setup' && (
         <div className={styles.brandingBar}>
           <img
-            src="/static/images/favicon-32x32.png"
+            src="/images/favicon-32x32.png"
             alt={appName}
             className={styles.brandingLogo}
           />

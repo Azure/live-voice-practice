@@ -51,6 +51,7 @@ COPY --chown=app:app data/graph-api-canned.json ./data/
 COPY --chown=app:app samples/transcripts/ ./samples/transcripts/
 
 COPY --from=frontend-builder --chown=app:app /app/static/ ./static/
+COPY --chown=app:app static/images/ ./static/images/
 
 USER app
 EXPOSE 8000
