@@ -16,15 +16,20 @@ import {
 import { useCallback, useState } from 'react'
 import { AssessmentPanel } from '../components/AssessmentPanel'
 import { ChatPanel } from '../components/ChatPanel'
+import { ConversationDetail } from '../components/ConversationDetail'
+import { ConversationList } from '../components/ConversationList'
 import { ScenarioList } from '../components/ScenarioList'
 import { ConnectionStage, VideoPanel } from '../components/VideoPanel'
 import { useAudioPlayer } from '../hooks/useAudioPlayer'
+import { useAuth } from '../hooks/useAuth'
 import { useRealtime } from '../hooks/useRealtime'
 import { useRecorder } from '../hooks/useRecorder'
 import { useScenarios } from '../hooks/useScenarios'
 import { useWebRTC } from '../hooks/useWebRTC'
 import { api, AvatarConfig, parseAvatarValue } from '../services/api'
 import { Assessment } from '../types'
+
+type AppView = 'setup' | 'practice' | 'conversations' | 'conversationDetail'
 
 const useStyles = makeStyles({
   container: {
@@ -60,7 +65,8 @@ const useStyles = makeStyles({
 
 export default function App() {
   const styles = useStyles()
-  const [showSetup, setShowSetup] = useState(true)
+  const [currentView, setCurrentView] = useState<AppView>('setup')
+  const [previousView, setPreviousView] = useState<AppView>('setup')
   const [showLoading, setShowLoading] = useState(false)
   const [showAssessment, setShowAssessment] = useState(false)
   const [currentAgent, setCurrentAgent] = useState<string | null>(null)
@@ -69,6 +75,9 @@ export default function App() {
   const [connectionStage, setConnectionStage] = useState<ConnectionStage>('creating')
   const [avatarEnabled, setAvatarEnabled] = useState(true)
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig | null>(null)
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
+
+  const { authenticated } = useAuth()
 
   const {
     scenarios,
@@ -78,6 +87,25 @@ export default function App() {
   } = useScenarios()
   const { playAudio } = useAudioPlayer()
   const activeScenario = scenarios.find(s => s.id === selectedScenario) || null
+
+  const navigateToConversations = useCallback(() => {
+    setPreviousView(currentView)
+    setCurrentView('conversations')
+  }, [currentView])
+
+  const navigateToDetail = useCallback((id: string) => {
+    setSelectedConversationId(id)
+    setCurrentView('conversationDetail')
+  }, [])
+
+  const navigateBack = useCallback(() => {
+    if (currentView === 'conversationDetail') {
+      setCurrentView('conversations')
+      setSelectedConversationId(null)
+    } else if (currentView === 'conversations') {
+      setCurrentView(previousView)
+    }
+  }, [currentView, previousView])
 
   const handleWebRTCMessage = useCallback((msg: any) => {
     if (!avatarEnabled) return
@@ -158,7 +186,7 @@ export default function App() {
         setConnectionStage('connecting')
       }
       setCurrentAgent(agent_id)
-      setShowSetup(false)
+      setCurrentView('practice')
     } catch (error) {
       console.error('Failed to create agent:', error)
     }
@@ -198,11 +226,21 @@ export default function App() {
     }
   }
 
+  const handleViewAssessment = useCallback((a: Assessment) => {
+    setAssessment(a)
+    setShowAssessment(true)
+  }, [])
+
   return (
     <div className={styles.container}>
+      {/* Setup dialog (home screen) */}
       <Dialog
-        open={showSetup}
-        onOpenChange={(_, data) => setShowSetup(data.open)}
+        open={currentView === 'setup'}
+        onOpenChange={(_, data) => {
+          if (!data.open && currentView === 'setup') {
+            // Prevent closing via overlay click on the setup screen
+          }
+        }}
       >
         <DialogSurface className={styles.setupDialog}>
           <DialogBody>
@@ -214,12 +252,15 @@ export default function App() {
                 selectedScenario={selectedScenario}
                 onSelect={setSelectedScenario}
                 onStart={handleStart}
+                isAuthenticated={authenticated}
+                onNavigateToConversations={navigateToConversations}
               />
             )}
           </DialogBody>
         </DialogSurface>
       </Dialog>
 
+      {/* Loading overlay */}
       <Dialog open={showLoading}>
         <DialogSurface>
           <DialogBody>
@@ -245,12 +286,14 @@ export default function App() {
         </DialogSurface>
       </Dialog>
 
+      {/* Assessment panel overlay */}
       <AssessmentPanel
         open={showAssessment}
         assessment={assessment}
         onClose={() => setShowAssessment(false)}
       />
 
+      {/* Error dialog */}
       <Dialog open={!!analysisError} onOpenChange={() => setAnalysisError(null)}>
         <DialogSurface>
           <DialogBody>
@@ -269,7 +312,8 @@ export default function App() {
         </DialogSurface>
       </Dialog>
 
-      {!showSetup && (
+      {/* Practice view */}
+      {currentView === 'practice' && (
         <div className={styles.mainLayout}>
           {avatarEnabled && (
             <VideoPanel videoRef={videoRef} connectionStage={connectionStage} />
@@ -286,8 +330,29 @@ export default function App() {
             avatarEnabled={avatarEnabled}
             onToggleAvatar={() => setAvatarEnabled(prev => !prev)}
             hasAvatarConfig={avatarConfig !== null}
+            isAuthenticated={authenticated}
+            onNavigateToConversations={navigateToConversations}
           />
         </div>
+      )}
+
+      {/* Conversation list view */}
+      {currentView === 'conversations' && (
+        <ConversationList
+          onSelectConversation={navigateToDetail}
+          onViewAssessment={handleViewAssessment}
+          onBack={navigateBack}
+        />
+      )}
+
+      {/* Conversation detail view */}
+      {currentView === 'conversationDetail' && selectedConversationId && (
+        <ConversationDetail
+          conversationId={selectedConversationId}
+          scenarios={scenarios}
+          onBack={navigateBack}
+          onShowAssessment={handleViewAssessment}
+        />
       )}
     </div>
   )

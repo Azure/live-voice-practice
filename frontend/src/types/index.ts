@@ -89,3 +89,35 @@ export const AVATAR_OPTIONS: AvatarOption[] = [
 ]
 
 export const DEFAULT_AVATAR = 'lisa-casual-sitting'
+
+export interface ConversationSummary {
+  id: string
+  user_id: string
+  scenario_id: string
+  scenario_name?: string
+  assessment?: Assessment | null
+  metadata?: { user_name?: string; user_email?: string }
+  status?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ConversationListResponse {
+  conversations: ConversationSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ConversationDetailData {
+  id: string
+  user_id: string
+  scenario_id: string
+  transcript?: string
+  messages: Array<{ role: string; content: string }>
+  assessment?: Assessment | null
+  status?: string
+  metadata?: { user_name?: string; user_email?: string }
+  created_at: string
+  updated_at: string
+}

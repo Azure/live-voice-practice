@@ -356,20 +356,38 @@ def list_conversations():
     if user is None:
         return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
 
-    limit = request.args.get("limit", 50, type=int)
+    limit = request.args.get("limit", 20, type=int)
     offset = request.args.get("offset", 0, type=int)
+    sort_by = request.args.get("sort_by", "created_at", type=str)
+    sort_order = request.args.get("sort_order", "desc", type=str)
 
     # Validate pagination parameters
     limit = max(1, min(100, limit))
     offset = max(0, offset)
 
-    conversations = conversation_store.list_user_conversations(
+    result = conversation_store.list_user_conversations(
         user_id=user.user_id,
         limit=limit,
         offset=offset,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
-    return jsonify({"conversations": conversations, "limit": limit, "offset": offset})
+    conversations = result.get("items", [])
+    total = result.get("total", 0)
+
+    # Enrich conversations with scenario names
+    all_scenarios = scenario_manager.list_scenarios()
+    scenario_map = {s["id"]: s["name"] for s in all_scenarios}
+    for conv in conversations:
+        conv["scenario_name"] = scenario_map.get(conv.get("scenario_id", ""), "Unknown Scenario")
+
+    return jsonify({
+        "conversations": conversations,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 @app.route(f"{API_CONVERSATIONS_ENDPOINT}/<conversation_id>", methods=["GET"])

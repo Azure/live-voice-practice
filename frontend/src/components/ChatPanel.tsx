@@ -14,6 +14,7 @@ import {
 import {
     ChartMultipleRegular,
     DeleteRegular,
+    History20Regular,
     MicOffRegular,
     MicRegular,
 } from '@fluentui/react-icons'
@@ -89,6 +90,8 @@ interface Props {
   avatarEnabled?: boolean
   onToggleAvatar?: () => void
   hasAvatarConfig?: boolean
+  isAuthenticated?: boolean
+  onNavigateToConversations?: () => void
 }
 
 export function ChatPanel({
@@ -103,6 +106,8 @@ export function ChatPanel({
   avatarEnabled,
   onToggleAvatar,
   hasAvatarConfig,
+  isAuthenticated,
+  onNavigateToConversations,
 }: Props) {
   const styles = useStyles()
 
@@ -171,6 +176,16 @@ export function ChatPanel({
         >
           Analyze Performance
         </Button>
+
+        {isAuthenticated && onNavigateToConversations && (
+          <Button
+            appearance="subtle"
+            icon={<History20Regular />}
+            onClick={onNavigateToConversations}
+          >
+            Past Practices
+          </Button>
+        )}
 
         {hasAvatarConfig && onToggleAvatar && (
           <Switch

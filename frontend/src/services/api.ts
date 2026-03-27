@@ -6,6 +6,8 @@
 import {
     Assessment,
     AVATAR_OPTIONS,
+    ConversationDetailData,
+    ConversationListResponse,
     Scenario,
 } from '../types'
 
@@ -118,6 +120,34 @@ export const api = {
       body: JSON.stringify({ messages, transcript }),
     })
     if (!res.ok) throw new Error('Failed to update conversation')
+    return res.json()
+  },
+
+  async getMe(): Promise<any> {
+    const res = await fetch('/api/me')
+    return res.json()
+  },
+
+  async listConversations(
+    limit: number = 20,
+    offset: number = 0,
+    sortBy: string = 'created_at',
+    sortOrder: string = 'desc'
+  ): Promise<ConversationListResponse> {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    })
+    const res = await fetch(`/api/conversations?${params}`)
+    if (!res.ok) throw new Error('Failed to list conversations')
+    return res.json()
+  },
+
+  async getConversation(conversationId: string): Promise<ConversationDetailData> {
+    const res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`)
+    if (!res.ok) throw new Error('Failed to get conversation')
     return res.json()
   },
 

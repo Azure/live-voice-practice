@@ -271,36 +271,63 @@ class ConversationStore:
             logger.error("Failed to get conversation: %s", e)
             return None
 
+    # Whitelist of allowed sort columns to prevent injection
+    _ALLOWED_SORT_COLUMNS = {"created_at", "updated_at", "scenario_id"}
+
     def list_user_conversations(
         self,
         user_id: str,
-        limit: int = 50,
+        limit: int = 20,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
-        """List conversations for a specific user.
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+    ) -> Dict[str, Any]:
+        """List conversations for a specific user with pagination and sorting.
 
         Args:
             user_id: The user ID to filter by.
             limit: Maximum number of conversations to return.
             offset: Number of conversations to skip.
+            sort_by: Column to sort by (created_at, updated_at, scenario_id).
+            sort_order: Sort direction (asc or desc).
 
         Returns:
-            List of conversation documents (without full transcript for efficiency).
+            Dict with 'items' (list of conversation summaries) and 'total' count.
         """
+        empty_result: Dict[str, Any] = {"items": [], "total": 0}
+
         if not self._ensure_initialized():
-            return []
+            return empty_result
 
         if self._container is None:
-            return []
+            return empty_result
+
+        # Validate sort parameters against whitelist
+        if sort_by not in self._ALLOWED_SORT_COLUMNS:
+            sort_by = "created_at"
+        if sort_order.lower() not in ("asc", "desc"):
+            sort_order = "desc"
 
         try:
-            # Query with partition key for efficiency
-            query = """
+            # Count query for total
+            count_query = "SELECT VALUE COUNT(1) FROM c WHERE c.user_id = @user_id"
+            count_params: List[Dict[str, Any]] = [{"name": "@user_id", "value": user_id}]
+            count_results = list(
+                self._container.query_items(
+                    query=count_query,
+                    parameters=count_params,
+                    partition_key=user_id,
+                )
+            )
+            total = count_results[0] if count_results else 0
+
+            # Data query with sorting and pagination
+            query = f"""
                 SELECT c.id, c.user_id, c.scenario_id, c.assessment,
-                       c.metadata, c.created_at, c.updated_at
+                       c.metadata, c.status, c.created_at, c.updated_at
                 FROM c
                 WHERE c.user_id = @user_id
-                ORDER BY c.created_at DESC
+                ORDER BY c.{sort_by} {sort_order.upper()}
                 OFFSET @offset LIMIT @limit
             """
             parameters: List[Dict[str, Any]] = [
@@ -316,11 +343,11 @@ class ConversationStore:
                     partition_key=user_id,
                 )
             )
-            return [dict(item) for item in items]
+            return {"items": [dict(item) for item in items], "total": total}
 
         except exceptions.CosmosHttpResponseError as e:
             logger.error("Failed to list conversations: %s", e)
-            return []
+            return empty_result
 
     def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
         """Delete a conversation.

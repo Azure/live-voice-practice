@@ -14,6 +14,7 @@ import {
     makeStyles,
     tokens,
 } from '@fluentui/react-components'
+import { History24Regular } from '@fluentui/react-icons'
 import { useState } from 'react'
 import { AVATAR_OPTIONS, DEFAULT_AVATAR, Scenario } from '../types'
 
@@ -66,6 +67,8 @@ interface Props {
   selectedScenario: string | null
   onSelect: (id: string) => void
   onStart: (avatarValue: string) => void
+  isAuthenticated?: boolean
+  onNavigateToConversations?: () => void
 }
 
 export function ScenarioList({
@@ -73,6 +76,8 @@ export function ScenarioList({
   selectedScenario,
   onSelect,
   onStart,
+  isAuthenticated,
+  onNavigateToConversations,
 }: Props) {
   const styles = useStyles()
   const [selectedAvatar, setSelectedAvatar] = useState(DEFAULT_AVATAR)
@@ -104,6 +109,15 @@ export function ScenarioList({
       </div>
 
       <div className={styles.actions}>
+        {isAuthenticated && onNavigateToConversations && (
+          <Button
+            appearance="secondary"
+            icon={<History24Regular />}
+            onClick={onNavigateToConversations}
+          >
+            My Practices
+          </Button>
+        )}
         <div className={styles.avatarSelector}>
           <Label htmlFor="avatar-select">Avatar:</Label>
           <Dropdown
