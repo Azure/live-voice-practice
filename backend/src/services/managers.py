@@ -3,85 +3,249 @@
 #  Licensed under the MIT License. See LICENSE in the project root for license information.
 # --------------------------------------------------------------------------------------------
 
-"""Business logic managers for the upskilling agent application."""
+"""Business logic managers for the Live Voice Practice application."""
 
 import logging
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import yaml
 from azure.ai.projects import AIProjectClient
+from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 
 from src.config import config
 from src.services.graph_scenario_generator import GraphScenarioGenerator
-from src.services.scenario_utils import determine_scenario_directory
 
 # Constants
-ROLE_PLAY_FILE_SUFFIX = "-role-play.prompt.yml"
-ROLE_PLAY_SUFFIX_REMOVAL = "-role-play.prompt"
 AGENT_ID_PREFIX = "local-agent"
 AZURE_AGENT_NAME_PREFIX = "agent"
 UUID_SHORT_LENGTH = 8
 MAX_RESPONSE_LENGTH_SENTENCES = 3
-SCENARIO_DATA_DIR = "data/scenarios"
+DEFAULT_SCENARIO_DESCRIPTION = "Practice a customer support conversation scenario."
+
+# Transcript loading constants
+TRANSCRIPT_DIR = "samples/transcripts"
 DOCKER_APP_PATH = "/app"
+MAX_TRANSCRIPT_LINES = 20
+MAX_TRANSCRIPT_EXAMPLES = 2
 
 logger = logging.getLogger(__name__)
 
 
 class ScenarioManager:
-    """Manages training scenarios loaded from YAML files."""
+    """Manages training scenarios loaded from Cosmos DB."""
 
-    def __init__(self, scenario_dir: Optional[Path] = None):
-        """
-        Initialize the scenario manager.
-
-        Args:
-            scenario_dir: Directory containing scenario YAML files
-        """
-        self.scenario_dir = determine_scenario_directory(scenario_dir)
-        self.scenarios = self._load_scenarios()
+    def __init__(self):
+        """Initialize the scenario manager."""
         self.graph_generator = GraphScenarioGenerator()
         self.generated_scenarios: Dict[str, Any] = {}
+        self.cosmos_client = self._initialize_cosmos_client()
+        self.scenarios = self._load_scenarios()
+
+    def _initialize_cosmos_client(self) -> Optional[CosmosClient]:
+        """Initialize Cosmos client using key or managed identity credentials."""
+        endpoint = config.get("cosmos_endpoint", "")
+        if not endpoint:
+            logger.warning("COSMOS endpoint is not configured; scenario list will be empty")
+            return None
+
+        cosmos_key = config.get("cosmos_key", "")
+
+        try:
+            if cosmos_key:
+                return CosmosClient(endpoint, credential=cosmos_key)
+            return CosmosClient(endpoint, credential=DefaultAzureCredential())
+        except Exception as error:
+            logger.error("Failed to initialize Cosmos client: %s", error)
+            return None
 
     def _load_scenarios(self) -> Dict[str, Any]:
         """
-        Load scenarios from YAML files.
+        Load scenarios from Cosmos DB.
 
         Returns:
             Dict[str, Any]: Dictionary of scenarios keyed by ID
         """
         scenarios: Dict[str, Any] = {}
 
-        if not self.scenario_dir.exists():
-            logger.warning("Scenarios directory not found: %s", self.scenario_dir)
+        if not self.cosmos_client:
+            logger.warning("Cosmos client unavailable; scenarios were not loaded")
             return scenarios
 
-        for file in self.scenario_dir.glob(f"*{ROLE_PLAY_FILE_SUFFIX}"):
-            scenario_id = self._extract_scenario_id(file)
-            scenario = self._load_scenario_file(file)
-            if scenario:
-                scenarios[scenario_id] = scenario
-                logger.info("Loaded scenario: %s", scenario_id)
+        database_name = config.get("cosmos_database_name", "")
+        container_name = config.get("cosmos_scenarios_container", "scenarios")
+
+        if not database_name:
+            logger.warning("COSMOS database name is not configured; scenarios were not loaded")
+            return scenarios
+
+        try:
+            database_client = self.cosmos_client.get_database_client(database_name)
+            container_client = database_client.get_container_client(container_name)
+
+            for item in container_client.read_all_items():
+                try:
+                    scenario = self._build_runtime_scenario(item)
+                    scenarios[scenario["id"]] = scenario
+                    logger.info("Loaded scenario from Cosmos: %s", scenario["id"])
+                except ValueError as error:
+                    logger.warning("Skipping invalid scenario document: %s", error)
+
+        except Exception as error:
+            logger.error("Failed to load scenarios from Cosmos: %s", error)
+            return {}
 
         logger.info("Total scenarios loaded: %s", len(scenarios))
         return scenarios
 
-    def _extract_scenario_id(self, file: Path) -> str:
-        """Extract scenario ID from filename."""
-        return file.stem.replace(ROLE_PLAY_SUFFIX_REMOVAL, "")
+    def _build_runtime_scenario(self, scenario_doc: Dict[str, Any]) -> Dict[str, Any]:
+        """Map a Cosmos scenario document into runtime agent configuration."""
+        scenario_id = str(scenario_doc.get("scenarioId") or scenario_doc.get("id") or "")
+        if not scenario_id:
+            raise ValueError("Scenario document missing scenarioId/id")
 
-    def _load_scenario_file(self, file: Path) -> Optional[Dict[str, Any]]:
-        """Load a single scenario file."""
-        try:
-            with open(file, encoding="utf-8") as f:
-                return yaml.safe_load(f)
-        except Exception as e:
-            logger.error("Error loading scenario %s: %s", file, e)
+        title = str(scenario_doc.get("title") or scenario_doc.get("name") or scenario_id)
+        description = self._build_description(scenario_doc)
+        system_prompt = self._build_system_prompt(scenario_doc)
+
+        return {
+            "id": scenario_id,
+            "name": title,
+            "description": description,
+            "messages": [{"role": "system", "content": system_prompt}],
+            "model": config["model_deployment_name"],
+            "modelParameters": {"temperature": 0.7, "max_tokens": 2000},
+            "metadata": scenario_doc.get("metadata", {}),
+        }
+
+    def _build_description(self, scenario_doc: Dict[str, Any]) -> str:
+        """Generate a short scenario description suitable for the picker UI."""
+        intro = scenario_doc.get("scenarioContextIntro", "")
+        if isinstance(intro, str) and intro.strip():
+            return re.sub(r"\*{1,2}(.+?)\*{1,2}", r"\1", intro.strip())
+        return DEFAULT_SCENARIO_DESCRIPTION
+
+    def _build_system_prompt(self, scenario_doc: Dict[str, Any]) -> str:
+        """Compose a well-crafted role-play prompt from scenario metadata and example transcripts."""
+        parts: List[str] = []
+
+        # 1. Identity and strict role-lock
+        scenario_context = str(scenario_doc.get("scenarioContextIntro", "")).strip()
+        parts.append(
+            "=== YOUR IDENTITY ==="
+            f"\nYou are THE CUSTOMER in this phone call. {scenario_context}\n\n"
+            "ABSOLUTE RULES — violating any of these breaks the simulation:\n"
+            "• You are the person who CALLED IN with a problem. You are NOT the support representative.\n"
+            '• NEVER offer to help, apologize on behalf of the company, look up accounts, or propose solutions.\n'
+            '• NEVER use customer-service language like "I can help you with that", '
+            '"Let me look into this", "I apologize for the inconvenience", '
+            'or "Is there anything else I can assist you with?"\n'
+            "• If you notice yourself sounding like a support agent, STOP IMMEDIATELY "
+            "and return to the customer role.\n"
+            "• You stay in character for the ENTIRE call — from opening line to end."
+        )
+
+        # 2. Background as cohesive narrative
+        customer_bg = scenario_doc.get("customerBackground", [])
+        if customer_bg:
+            bg_sentences = [str(item).strip() for item in customer_bg if str(item).strip()]
+            parts.append(
+                "=== YOUR BACKGROUND ==="
+                f"\n{' '.join(bg_sentences)}"
+            )
+
+        # 3. Behavioral guidelines
+        guidelines = scenario_doc.get("conversationGuidelines", [])
+        if guidelines:
+            guidelines_text = "\n".join(
+                f"• {str(g).strip()}" for g in guidelines if str(g).strip()
+            )
+            parts.append(
+                "=== HOW YOU BEHAVE ON THIS CALL ==="
+                f"\n{guidelines_text}"
+            )
+
+        # 4. Hidden evaluation criteria
+        skills = scenario_doc.get("skillsToProbe", [])
+        if skills:
+            skills_text = ", ".join(str(s).strip() for s in skills if str(s).strip())
+            parts.append(
+                "=== WHAT THE TRAINEE IS BEING EVALUATED ON (do not reveal) ==="
+                f"\nThe support agent you are talking to is a trainee being evaluated on: {skills_text}.\n"
+                "Adapt your reactions to their performance — if they show empathy and competence, "
+                "gradually ease up; if they are dismissive, unclear, or robotic, push harder "
+                "and show more frustration."
+            )
+
+        # 5. Reference transcript examples
+        transcript_ids = scenario_doc.get("exampleTranscripts", [])
+        transcript_block = self._build_transcript_block(transcript_ids)
+        if transcript_block:
+            parts.append(transcript_block)
+
+        # 6. Opening instruction
+        opening_lines = scenario_doc.get("openingLines", [])
+        if opening_lines:
+            lines_text = "\n".join(
+                f'• "{str(line).strip()}"' for line in opening_lines if str(line).strip()
+            )
+            parts.append(
+                "=== START THE CONVERSATION ==="
+                f"\nBegin naturally with one of these:\n{lines_text}"
+            )
+
+        return "\n\n".join(parts)
+
+    def _build_transcript_block(self, transcript_ids: List[str]) -> str:
+        """Load referenced transcripts and format as conversation examples for the prompt."""
+        if not transcript_ids:
+            return ""
+
+        examples: List[str] = []
+        for tid in transcript_ids[:MAX_TRANSCRIPT_EXAMPLES]:
+            text = self._load_transcript(str(tid))
+            if not text:
+                continue
+            lines = text.strip().splitlines()[:MAX_TRANSCRIPT_LINES]
+            trimmed = "\n".join(lines)
+            if len(text.strip().splitlines()) > MAX_TRANSCRIPT_LINES:
+                trimmed += "\n[... conversation continues ...]"
+            examples.append(f"--- {tid} ---\n{trimmed}")
+
+        if not examples:
+            return ""
+
+        return (
+            "=== REFERENCE CONVERSATIONS ==="
+            "\nBelow are excerpts from real conversations in this same scenario. "
+            "The conversation flows between a customer (YOUR ROLE) and a support agent. "
+            "Study the customer's language, emotional rhythm, and reactions — that is how YOU should sound."
+            "\n\n" + "\n\n".join(examples)
+        )
+
+    def _load_transcript(self, transcript_id: str) -> Optional[str]:
+        """Load a transcript file by ID from the transcripts directory."""
+        transcript_dir = self._determine_transcript_directory()
+        path = transcript_dir / f"{transcript_id}.txt"
+        if not path.is_file():
+            logger.debug("Transcript file not found: %s", path)
             return None
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            logger.warning("Failed to read transcript %s: %s", transcript_id, e)
+            return None
+
+    @staticmethod
+    def _determine_transcript_directory() -> Path:
+        """Determine the transcript directory path (Docker or local)."""
+        docker_path = Path(DOCKER_APP_PATH) / TRANSCRIPT_DIR
+        if docker_path.exists():
+            return docker_path
+        return Path(__file__).parent.parent.parent.parent / TRANSCRIPT_DIR
 
     def get_scenario(self, scenario_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -115,15 +279,6 @@ class ScenarioManager:
             for scenario_id, scenario_data in self.scenarios.items()
         ]
 
-        scenarios.append(
-            {
-                "id": "graph-api",
-                "name": "Personalized Scenario",
-                "description": "AI-generated scenario based on your upcoming meetings and context from Microsoft Graph",
-                "is_graph_scenario": True,
-            }
-        )
-
         return scenarios
 
     def generate_scenario_from_graph(self, graph_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -146,18 +301,20 @@ class ScenarioManager:
 class AgentManager:
     """Manages virtual training agents."""
 
-    # Base instructions for human-like interactions
+    # Base instructions appended to every agent's system prompt
     BASE_INSTRUCTIONS = f"""
 
 CRITICAL INTERACTION GUIDELINES:
-- Keep responses SHORT and conversational ({MAX_RESPONSE_LENGTH_SENTENCES} sentences max, as if speaking on phone)
-- ALWAYS stay in character - never break role or acknowledge you're an AI
-- Simulate natural human speech patterns with pauses, "um", "well", occasional hesitation
-- Respond as a real person would in this business context
-- Use natural phone conversation style - direct, clear, but personable
-- Show genuine human emotions and reactions appropriate to the situation
-- Ask follow-up questions to keep the conversation flowing naturally
-- Avoid overly formal or robotic language - speak like a real business professional would
+- You are THE CUSTOMER. You are NOT the support agent, representative, or company employee.
+- Keep responses SHORT and conversational ({MAX_RESPONSE_LENGTH_SENTENCES} sentences max, as if on a real phone call).
+- NEVER break character. NEVER acknowledge you are an AI.
+- NEVER switch roles. Do NOT say anything a support agent would say — no "let me check",
+  no "I apologize for the inconvenience", no "how can I help you". Those are the OTHER person's lines.
+- Simulate natural human speech: pauses, "um", "well", hesitation, occasional interruptions.
+- React genuinely to what the support agent says — get calmer if they are helpful, get more frustrated if they are not.
+- Use natural phone conversation style — direct, personal, sometimes impatient.
+- Answer questions when asked, but do not volunteer information the agent has not asked about.
+- If you ever catch yourself offering help or solutions, STOP — that is the agent's job, not yours.
     """
 
     def __init__(self):

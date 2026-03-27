@@ -7,9 +7,6 @@ export interface Scenario {
   id: string
   name: string
   description: string
-  is_graph_scenario?: boolean
-  generated_from_graph?: boolean
-  is_custom?: boolean
 }
 
 export interface CustomScenarioData {
@@ -30,21 +27,28 @@ export interface Message {
   timestamp: Date
 }
 
+export interface CriterionScore {
+  score: number
+  justification: string
+}
+
 export interface Assessment {
   ai_assessment?: {
-    speaking_tone_style: {
+    speaking_tone_style?: {
       professional_tone: number
       active_listening: number
       engagement_quality: number
       total: number
     }
-    conversation_content: {
+    conversation_content?: {
       needs_assessment: number
       value_proposition: number
       objection_handling: number
       total: number
     }
+    criteria_scores?: Record<string, CriterionScore>
     overall_score: number
+    passed?: boolean
     strengths: string[]
     improvements: string[]
     specific_feedback?: string
@@ -70,6 +74,11 @@ export interface AvatarOption {
 }
 
 export const AVATAR_OPTIONS: AvatarOption[] = [
+  {
+    value: 'audio-only',
+    label: 'Audio Only (No Avatar)',
+    isPhotoAvatar: false,
+  },
   {
     value: 'lisa-casual-sitting',
     label: 'Lisa (Casual Sitting)',

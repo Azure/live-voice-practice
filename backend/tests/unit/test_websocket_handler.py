@@ -24,11 +24,44 @@ class TestVoiceProxyHandler:
         mock_config.__getitem__.side_effect = lambda key: {
             "azure_ai_resource_name": "test-resource",
         }.get(key, "default")
+        mock_config.get = lambda key, default=None: {
+            "realtime_azure_ai_resource_name": "test-resource",
+        }.get(key, default)
 
         handler = VoiceProxyHandler(Mock())
         endpoint = handler._build_endpoint()
 
         assert endpoint == "https://test-resource.cognitiveservices.azure.com"
+
+    @patch("src.services.websocket_handler.config")
+    def test_build_endpoint_cross_region(self, mock_config):
+        """Test building endpoint URL when realtime model is in a different region."""
+        mock_config.__getitem__.side_effect = lambda key: {
+            "azure_ai_resource_name": "primary-resource",
+        }.get(key, "default")
+        mock_config.get = lambda key, default=None: {
+            "realtime_azure_ai_resource_name": "realtime-resource",
+        }.get(key, default)
+
+        handler = VoiceProxyHandler(Mock())
+        endpoint = handler._build_endpoint()
+
+        assert endpoint == "https://realtime-resource.cognitiveservices.azure.com"
+
+    @patch("src.services.websocket_handler.config")
+    def test_build_endpoint_fallback_to_primary(self, mock_config):
+        """Test building endpoint URL falls back to primary resource when realtime not set."""
+        mock_config.__getitem__.side_effect = lambda key: {
+            "azure_ai_resource_name": "primary-resource",
+        }.get(key, "default")
+        mock_config.get = lambda key, default=None: {
+            "realtime_azure_ai_resource_name": "",
+        }.get(key, default)
+
+        handler = VoiceProxyHandler(Mock())
+        endpoint = handler._build_endpoint()
+
+        assert endpoint == "https://primary-resource.cognitiveservices.azure.com"
 
     @patch("src.services.websocket_handler.config")
     def test_get_model_with_azure_agent(self, mock_config):
@@ -44,7 +77,7 @@ class TestVoiceProxyHandler:
     def test_get_model_with_local_agent(self, mock_config):
         """Test getting model name with local agent configuration."""
         mock_config.__getitem__.side_effect = lambda key: {
-            "model_deployment_name": "gpt-4o",
+            "realtime_model_deployment_name": "gpt-4o-realtime",
         }.get(key, "default")
 
         handler = VoiceProxyHandler(Mock())
@@ -52,7 +85,7 @@ class TestVoiceProxyHandler:
 
         model = handler._get_model(agent_config)
 
-        assert model == "gpt-4"
+        assert model == "gpt-4o-realtime"
 
     @patch("src.services.websocket_handler.config")
     def test_get_model_without_agent_config_with_global_agent_id(self, mock_config):
@@ -71,13 +104,13 @@ class TestVoiceProxyHandler:
         """Test getting model name without agent config."""
         mock_config.__getitem__.side_effect = lambda key: {
             "agent_id": "",
-            "model_deployment_name": "gpt-4o",
+            "realtime_model_deployment_name": "gpt-4o-realtime",
         }.get(key, "")
 
         handler = VoiceProxyHandler(Mock())
         model = handler._get_model(None)
 
-        assert model == "gpt-4o"
+        assert model == "gpt-4o-realtime"
 
     @patch("src.services.websocket_handler.config")
     def test_build_query_params_with_azure_agent(self, mock_config):

@@ -34,6 +34,36 @@ class TestConfig:
             assert config["azure_ai_region"] == "westus"
             assert config["azure_ai_resource_name"] == "test-resource"
 
+    def test_realtime_resource_name_defaults_to_primary(self):
+        """Test that realtime_azure_ai_resource_name defaults to azure_ai_resource_name."""
+        with patch.dict(
+            os.environ,
+            {
+                "AZURE_AI_RESOURCE_NAME": "primary-resource",
+            },
+        ):
+            config = Config()
+            assert config["realtime_azure_ai_resource_name"] == "primary-resource"
+
+    def test_realtime_resource_name_override(self):
+        """Test that realtime_azure_ai_resource_name can be set independently."""
+        with patch.dict(
+            os.environ,
+            {
+                "AZURE_AI_RESOURCE_NAME": "primary-resource",
+                "REALTIME_AZURE_AI_RESOURCE_NAME": "realtime-resource",
+            },
+        ):
+            config = Config()
+            assert config["realtime_azure_ai_resource_name"] == "realtime-resource"
+            assert config["azure_ai_resource_name"] == "primary-resource"
+
+    def test_realtime_model_deployment_name_default(self):
+        """Test that realtime_model_deployment_name defaults to gpt-realtime."""
+        with patch.dict(os.environ, {}, clear=True):
+            config = Config()
+            assert config["realtime_model_deployment_name"] == "gpt-realtime"
+
     def test_config_get_method(self):
         """Test the get method with defaults."""
         config = Config()

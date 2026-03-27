@@ -185,6 +185,126 @@ class TestConversationAnalyzer:
             # Due to complexity of async mocking, we just verify the client is set
             assert analyzer.openai_client is not None
 
+    def test_build_rubric_evaluation_prompt(self):
+        """Test rubric-based evaluation prompt generation."""
+        analyzer = ConversationAnalyzer()
+        scenario = {"messages": [{"content": "Base evaluation prompt"}]}
+        rubric = {
+            "criteria": [
+                {
+                    "criterionId": "empathy",
+                    "name": "Empathy",
+                    "description": "Assesses empathy.",
+                    "levels": [
+                        {"level": 1, "label": "Poor", "description": "Dismissive."},
+                        {"level": 5, "label": "Excellent", "description": "Clearly acknowledges."},
+                    ],
+                }
+            ],
+            "scoring": {"scale": "1-5", "passThreshold": 3.5},
+        }
+
+        prompt = analyzer._build_rubric_evaluation_prompt(scenario, "Test transcript", rubric)
+        assert "Base evaluation prompt" in prompt
+        assert "EVALUATION RUBRIC" in prompt
+        assert "Empathy" in prompt
+        assert "1-5" in prompt
+        assert "3.5" in prompt
+        assert "Test transcript" in prompt
+
+    def test_get_rubric_response_format(self):
+        """Test rubric-based response format schema generation."""
+        analyzer = ConversationAnalyzer()
+        rubric = {
+            "criteria": [
+                {"criterionId": "empathy", "name": "Empathy", "description": "...", "levels": []},
+                {"criterionId": "clarity", "name": "Clarity", "description": "...", "levels": []},
+            ]
+        }
+
+        fmt = analyzer._get_rubric_response_format(rubric)
+        assert fmt["type"] == "json_schema"
+        assert fmt["json_schema"]["name"] == "rubric_evaluation"
+
+        props = fmt["json_schema"]["schema"]["properties"]
+        assert "criteria_scores" in props
+        assert "overall_score" in props
+        assert "passed" in props
+
+        criteria_props = props["criteria_scores"]["properties"]
+        assert "empathy" in criteria_props
+        assert "clarity" in criteria_props
+        assert criteria_props["empathy"]["properties"]["score"]["type"] == "integer"
+        assert criteria_props["empathy"]["properties"]["justification"]["type"] == "string"
+
+    def test_process_rubric_evaluation_result(self):
+        """Test rubric evaluation result processing and scoring."""
+        analyzer = ConversationAnalyzer()
+        rubric = {
+            "rubricId": "test-rubric",
+            "scoring": {"passThreshold": 3.5},
+        }
+
+        # Passing result
+        result = {
+            "criteria_scores": {
+                "empathy": {"score": 4, "justification": "Good empathy."},
+                "clarity": {"score": 5, "justification": "Very clear."},
+            },
+            "overall_score": 0,
+            "passed": False,
+            "strengths": ["Clear"],
+            "improvements": ["None"],
+            "specific_feedback": "Well done.",
+        }
+
+        processed = analyzer._process_rubric_evaluation_result(result, rubric)
+        assert processed["overall_score"] == 4.5
+        assert processed["passed"] is True
+        assert processed["rubricId"] == "test-rubric"
+        assert processed["evaluation_type"] == "rubric"
+
+        # Failing result
+        result2 = {
+            "criteria_scores": {
+                "empathy": {"score": 2, "justification": "Needs work."},
+                "clarity": {"score": 3, "justification": "OK."},
+            },
+            "overall_score": 0,
+            "passed": True,
+            "strengths": [],
+            "improvements": ["Empathy"],
+            "specific_feedback": "Needs improvement.",
+        }
+
+        processed2 = analyzer._process_rubric_evaluation_result(result2, rubric)
+        assert processed2["overall_score"] == 2.5
+        assert processed2["passed"] is False
+
+    @pytest.mark.asyncio
+    async def test_analyze_conversation_uses_rubric_when_provided(self):
+        """Test that analyze_conversation dispatches to rubric path when rubric is given."""
+        analyzer = ConversationAnalyzer()
+        analyzer.openai_client = None  # No client, will return None
+
+        rubric = {
+            "criteria": [{"criterionId": "empathy", "name": "E", "description": ".", "levels": []}],
+            "scoring": {"passThreshold": 3.0},
+        }
+
+        result = await analyzer.analyze_conversation("test", "transcript", rubric=rubric)
+        # Returns None because openai_client is not configured
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_analyze_conversation_uses_legacy_when_no_rubric(self):
+        """Test that analyze_conversation uses legacy path when no rubric is given."""
+        analyzer = ConversationAnalyzer()
+        analyzer.openai_client = None
+
+        result = await analyzer.analyze_conversation("test", "transcript", rubric=None)
+        assert result is None
+
 
 # pylint: enable=R0801
 

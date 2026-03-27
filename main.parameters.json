@@ -1,0 +1,169 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": { "value": "${AZURE_ENV_NAME}" },
+    "location": { "value": "${AZURE_LOCATION}" },
+    "cosmosLocation": { "value": "${AZURE_COSMOS_LOCATION=${AZURE_LOCATION}}" },
+    "principalId": { "value": "${AZURE_PRINCIPAL_ID}" },
+    "principalType": { "value": "${AZURE_PRINCIPAL_TYPE=User}" },
+    "deploymentTags": { "value": {} },
+    "appConfigLabel": { "value": "live-voice-practice" },
+
+    "networkIsolation": { "value": "${NETWORK_ISOLATION=false}" },
+    "useUAI": { "value": "${USE_UAI=false}" },
+    "useCAppAPIKey": { "value": "${USE_CAPP_API_KEY=false}" },
+    "useZoneRedundancy": { "value": "false" },
+    "enableAgenticRetrieval": { "value": "${ENABLE_AGENTIC_RETRIEVAL=false}" },
+
+    "deployGroundingWithBing": { "value": "false" },
+    "deployAiFoundry": { "value": "true" },
+    "deployAiFoundrySubnet": { "value": "false" },
+    "deployAppConfig": { "value": "true" },
+    "deployKeyVault": { "value": "true" },
+    "deployVmKeyVault": { "value": "false" },
+    "deployLogAnalytics": { "value": "true" },
+    "deployAppInsights": { "value": "true" },
+    "deploySearchService": { "value": "true" },
+    "deployStorageAccount": { "value": "true" },
+    "deployCosmosDb": { "value": "true" },
+    "deployContainerApps": { "value": "true" },
+    "deployContainerRegistry": { "value": "true" },
+    "deployContainerEnv": { "value": "true" },
+    "deployVM": { "value": "false" },
+    "deploySubnets": { "value": "false" },
+    "deployNsgs": { "value": "false" },
+    "sideBySideDeploy": { "value": "false" },
+    "deploySoftware": { "value": "false" },
+    "deployApim": { "value": "false" },
+    "deployAfProject": { "value": "true" },
+    "deployAAfAgentSvc": { "value": "false" },
+
+    "useExistingVNet": { "value": "${USE_EXISTING_VNET=false}" },
+    "existingVnetResourceId": { "value": "${EXISTING_VNET_RESOURCE_ID=}" },
+
+    "vmAdminPassword": { "value": "$(secretOrRandomPassword)" },
+    "vmSize": { "value": "Standard_D8s_v5" },
+
+    "modelDeploymentList": {
+      "value": [
+        {
+          "name": "chat",
+          "model": {
+            "format": "OpenAI",
+            "name": "gpt-4.1-mini",
+            "version": "2025-04-14"
+          },
+          "sku": {
+            "name": "GlobalStandard",
+            "capacity": 40
+          },
+          "canonical_name": "CHAT_DEPLOYMENT_NAME",
+          "apiVersion": "2025-01-01-preview"
+        },
+        {
+          "name": "text-embedding",
+          "model": {
+            "format": "OpenAI",
+            "name": "text-embedding-3-large",
+            "version": "1"
+          },
+          "sku": {
+            "name": "Standard",
+            "capacity": 40
+          },
+          "canonical_name": "EMBEDDING_DEPLOYMENT_NAME",
+          "apiVersion": "2025-01-01-preview"
+        },
+        {
+          "name": "gpt-realtime",
+          "model": {
+            "format": "OpenAI",
+            "name": "gpt-realtime-1.5",
+            "version": "2026-02-23"
+          },
+          "sku": {
+            "name": "GlobalStandard",
+            "capacity": 5
+          },
+          "canonical_name": "REALTIME_DEPLOYMENT_NAME",
+          "apiVersion": "2025-01-01-preview"
+        }
+      ]
+    },
+
+    "realtimeModelLocation": { "value": "${AZURE_REALTIME_LOCATION=${AZURE_LOCATION}}" },
+
+    "workloadProfiles": {
+      "value": [
+        {
+          "name": "Consumption",
+          "workloadProfileType": "Consumption"
+        },
+        {
+          "workloadProfileType": "D4",
+          "name": "main",
+          "minimumCount": 0,
+          "maximumCount": 1
+        }
+      ]
+    },
+
+    "storageAccountContainersList": {
+      "value": [
+        {
+          "name": "documents",
+          "canonical_name": "DOCUMENTS_STORAGE_CONTAINER"
+        },
+        {
+          "name": "transcripts",
+          "canonical_name": "TRANSCRIPTS_STORAGE_CONTAINER"
+        }
+      ]
+    },
+
+    "databaseContainersList": {
+      "value": [
+        {
+          "name": "rubrics",
+          "canonical_name": "RUBRICS_DATABASE_CONTAINER",
+          "partitionKeyPath": "/rubricId"
+        },
+        {
+          "name": "scenarios",
+          "canonical_name": "SCENARIOS_DATABASE_CONTAINER",
+          "partitionKeyPath": "/scenarioId"
+        },
+        {
+          "name": "conversations",
+          "canonical_name": "CONVERSATIONS_DATABASE_CONTAINER",
+          "partitionKeyPath": "/conversationId"
+        }
+      ]
+    },
+
+    "containerAppsList": {
+      "value": [
+        {
+          "name": null,
+          "external": true,
+          "service_name": "voicelab",
+          "profile_name": "main",
+          "min_replicas": 1,
+          "max_replicas": 1,
+          "canonical_name": "VOICELAB_APP",
+          "roles": [
+            "AppConfigurationDataReader",
+            "CognitiveServicesUser",
+            "CognitiveServicesOpenAIUser",
+            "AcrPull",
+            "CosmosDBBuiltInDataContributor",
+            "SearchIndexDataReader",
+            "StorageBlobDataContributor",
+            "KeyVaultSecretsUser"
+          ]
+        }
+      ]
+    }
+  }
+}

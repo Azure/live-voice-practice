@@ -37,6 +37,37 @@ azd up
 
 The deployment process provisions the required Azure resources and outputs the application endpoint.
 
+### Post-provision Speech setup
+
+This project uses an `azd` `postprovision` hook to ensure Speech is available for pronunciation assessment without changing the infrastructure submodule.
+
+After `azd provision` (or `azd up`), the hook scripts:
+
+- Create (or reuse) an Azure Speech resource (`SpeechServices`) in the current resource group
+- Assign `Cognitive Services User` to the Container App managed identity on that Speech resource
+- Write Speech settings to App Configuration (label `live-voice-practice` by default):
+	- `AZURE_SPEECH_ENDPOINT`
+	- `AZURE_SPEECH_REGION`
+	- `AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech`
+
+When `NETWORK_ISOLATION=true`, the post-provision hook also enforces private networking for Speech:
+
+- Disables public network access on the Speech resource
+- Creates a Private Endpoint in the `pe-subnet`
+- Ensures Private DNS zone/link for `privatelink.cognitiveservices.azure.com`
+
+You can disable this automation for a specific environment:
+
+```bash
+azd env set DEPLOY_SPEECH_SERVICE false
+```
+
+Optional overrides:
+
+- `AZURE_SPEECH_RESOURCE_NAME`: custom Speech account name
+- `AZURE_SPEECH_REGION`: region for the Speech resource
+- `APP_CONFIG_LABEL`: App Configuration label used by the hook
+
 
 ## Local Development
 

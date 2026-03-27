@@ -19,6 +19,7 @@ from azure.ai.voicelive.aio import (
 )
 from azure.ai.voicelive.models import (
     AudioEchoCancellation,
+    AudioInputTranscriptionOptions,
     AudioNoiseReduction,
     AvatarConfig,
     AzureSemanticVad,
@@ -136,8 +137,8 @@ class VoiceProxyHandler:
         return None
 
     def _build_endpoint(self) -> str:
-        """Build the Azure endpoint URL."""
-        resource_name = config["azure_ai_resource_name"]
+        """Build the Azure endpoint URL for the realtime model."""
+        resource_name = config.get("realtime_azure_ai_resource_name") or config["azure_ai_resource_name"]
         return f"https://{resource_name}.{AZURE_COGNITIVE_SERVICES_DOMAIN}"
 
     def _get_credential(self) -> Optional[AzureKeyCredential | TokenCredential]:
@@ -150,14 +151,12 @@ class VoiceProxyHandler:
         return DefaultAzureCredential()
 
     def _get_model(self, agent_config: Optional[Dict[str, Any]]) -> Optional[str]:
-        """Get the model name for the connection."""
+        """Get the realtime model deployment name for the VoiceLive connection."""
         if agent_config and agent_config.get("is_azure_agent"):
             return None
-        if agent_config:
-            return agent_config.get("model", config["model_deployment_name"])
-        if config["agent_id"]:
+        if config["agent_id"] and not agent_config:
             return None
-        return config["model_deployment_name"]
+        return config["realtime_model_deployment_name"]
 
     def _build_query_params(self, agent_id: Optional[str], agent_config: Optional[Dict[str, Any]]) -> Dict[str, str]:
         """Build additional query parameters for the connection."""
@@ -228,6 +227,7 @@ class VoiceProxyHandler:
         session = RequestSession(
             modalities=[Modality.TEXT, Modality.AUDIO, Modality.AVATAR],
             turn_detection=AzureSemanticVad(type=DEFAULT_TURN_DETECTION_TYPE),
+            input_audio_transcription=AudioInputTranscriptionOptions(model="whisper-1"),
             input_audio_noise_reduction=AudioNoiseReduction(type=DEFAULT_NOISE_REDUCTION_TYPE),
             input_audio_echo_cancellation=AudioEchoCancellation(type=DEFAULT_ECHO_CANCELLATION_TYPE),
             voice=AzureStandardVoice(name=voice_name, type=voice_type),

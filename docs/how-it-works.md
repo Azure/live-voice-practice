@@ -61,7 +61,7 @@ Folder: `backend/`
 
 - `backend/src/services/`
   - `managers.py`
-    - `ScenarioManager`: loads scenario YAML files from `data/scenarios/`.
+    - `ScenarioManager`: loads scenario definitions from Azure Cosmos DB and maps them into runtime prompts.
     - `AgentManager`: creates “agents” (either local instruction-based agents or Azure AI Agent Service, depending on config).
   - `websocket_handler.py`
     - `VoiceProxyHandler`: implements the WebSocket bridge between browser and Azure Voice Live using the `azure.ai.voicelive` SDK.
@@ -87,18 +87,18 @@ Folder: `frontend/`
   - `useRealtime.ts`: opens the WebSocket to `/ws/voice`, sends the initial `session.update` message, and records transcripts/audio deltas.
   - `useWebRTC.ts`: handles WebRTC-related setup (ICE servers and SDP exchange) based on messages coming from the WebSocket.
   - `useRecorder.ts` / `useAudioPlayer.ts`: audio capture and playback.
-  - `useScenarios.ts`: loads scenarios and manages custom scenarios (client side).
+  - `useScenarios.ts`: loads server-side scenarios from the backend.
 
 - `frontend/src/services/api.ts`
   - Small API client for `/api/config`, `/api/scenarios`, `/api/agents/create`, `/api/analyze`, etc.
 
 ### Data
 
-Folder: `data/`
+Folder: `samples/`
 
-- `data/scenarios/`
-  - YAML scenario files.
-  - Typically there is one “role-play” prompt and one “evaluation” prompt per scenario.
+- `samples/scenarios/`
+  - JSON scenario samples used to seed Cosmos DB.
+  - Runtime scenario selection is served from Cosmos through the backend API.
 
 - `data/graph-api-canned.json`
   - Sample input for graph-based scenario generation.
@@ -131,9 +131,7 @@ Folder: `infra/`
 When the user clicks “Start”:
 
 1. Frontend calls `POST /api/agents/create`.
-   - Either:
-     - Uses a server-side scenario by `scenario_id`, or
-     - Sends a `custom_scenario` payload (created in the UI).
+  - Uses a server-side scenario by `scenario_id` from `GET /api/scenarios`.
 2. Backend creates an agent entry and returns `{ agent_id }`.
 
 ### 4.3 Real-time voice conversation (WebSocket proxy)
@@ -178,6 +176,7 @@ The backend reads configuration from environment variables (see `backend/src/con
 - `MODEL_DEPLOYMENT_NAME`
 - `PROJECT_ENDPOINT` (used for Azure AI Project client)
 - `USE_AZURE_AI_AGENTS` (enables Agent Service mode when possible)
+- `COSMOS_ENDPOINT`, `COSMOS_DATABASE_NAME`, `COSMOS_SCENARIOS_CONTAINER` (scenario source)
 - Speech settings, voice/avatar defaults, etc.
 
 In Azure, these are set by the Container App configuration inside the Bicep templates.
@@ -249,5 +248,5 @@ From `frontend/`:
   - Check Application Insights for exceptions.
 
 - Scenario list empty:
-  - Ensure `data/scenarios/` exists and contains `*-role-play.prompt.yml` files.
-  - Check backend logs for YAML load errors.
+  - Ensure Cosmos DB is reachable and the configured scenarios container contains items.
+  - Check backend logs for Cosmos connectivity or query errors.

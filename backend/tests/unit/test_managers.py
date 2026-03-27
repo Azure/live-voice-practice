@@ -1,11 +1,7 @@
 """Tests for the managers module."""
 
-import tempfile
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
-
-import yaml
 
 from src.services.managers import AgentManager, ScenarioManager
 
@@ -13,32 +9,170 @@ from src.services.managers import AgentManager, ScenarioManager
 class TestScenarioManager:
     """Test scenario manager functionality."""
 
-    def test_scenario_manager_with_nonexistent_directory(self):
-        """Test scenario manager with non-existent directory."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            non_existent_path = Path(temp_dir) / "nonexistent"
-            manager = ScenarioManager(scenario_dir=non_existent_path)
-            assert len(manager.scenarios) == 0
+    @patch("src.services.managers.config")
+    def test_scenario_manager_without_cosmos_endpoint(self, mock_config):
+        """Test scenario manager when Cosmos endpoint is not configured."""
+        mock_config.get.side_effect = lambda key, default=None: {
+            "cosmos_endpoint": "",
+            "cosmos_key": "",
+            "cosmos_database_name": "",
+            "cosmos_scenarios_container": "scenarios",
+        }.get(key, default)
+        mock_config.__getitem__.side_effect = lambda key: {
+            "model_deployment_name": "gpt-4o",
+        }.get(key, "")
 
-    def test_scenario_manager_with_valid_scenarios(self):
-        """Test scenario manager loading valid scenarios."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            scenario_dir = Path(temp_dir)
+        manager = ScenarioManager()
+        assert len(manager.scenarios) == 0
 
-            # Create a test scenario file
-            scenario_data = {
-                "name": "Test Scenario",
-                "description": "A test scenario",
-                "messages": [{"content": "Test instructions"}],
+    @patch("src.services.managers.CosmosClient")
+    @patch("src.services.managers.config")
+    def test_scenario_manager_with_valid_scenarios(self, mock_config, mock_cosmos_client):
+        """Test scenario manager loading scenarios from Cosmos DB."""
+        mock_config.get.side_effect = lambda key, default=None: {
+            "cosmos_endpoint": "https://test.documents.azure.com:443/",
+            "cosmos_key": "fake-key",
+            "cosmos_database_name": "test-db",
+            "cosmos_scenarios_container": "scenarios",
+        }.get(key, default)
+        mock_config.__getitem__.side_effect = lambda key: {
+            "model_deployment_name": "gpt-4o",
+        }.get(key, "")
+
+        mock_container = Mock()
+        mock_container.read_all_items.return_value = [
+            {
+                "scenarioId": "contoso-001",
+                "title": "Billing Follow-up",
+                "scenarioContextIntro": "Customer is frustrated about a billing issue.",
+                "customerBackground": ["Long-term customer"],
+                "conversationGuidelines": ["Remain frustrated until clarity is provided"],
+                "openingLines": ["I still have an unresolved billing charge."],
             }
+        ]
+        mock_database = Mock()
+        mock_database.get_container_client.return_value = mock_container
+        mock_client = Mock()
+        mock_client.get_database_client.return_value = mock_database
+        mock_cosmos_client.return_value = mock_client
 
-            scenario_file = scenario_dir / "test-scenario-role-play.prompt.yml"
-            with open(scenario_file, "w", encoding="utf-8") as f:
-                yaml.safe_dump(scenario_data, f)
+        manager = ScenarioManager()
+        assert len(manager.scenarios) == 1
+        assert "contoso-001" in manager.scenarios
 
-            manager = ScenarioManager(scenario_dir=scenario_dir)
-            assert len(manager.scenarios) == 1
-            assert "test-scenario" in manager.scenarios
+        # Verify the prompt contains role-lock and structured sections
+        scenario = manager.scenarios["contoso-001"]
+        prompt = scenario["messages"][0]["content"]
+        assert "YOUR IDENTITY" in prompt
+        assert "THE CUSTOMER" in prompt
+        assert "NOT the support representative" in prompt
+        assert "Customer is frustrated about a billing issue" in prompt
+
+    @patch("src.services.managers.CosmosClient")
+    @patch("src.services.managers.config")
+    def test_build_system_prompt_contains_all_sections(self, mock_config, mock_cosmos_client):
+        """Test that the generated prompt includes all structured sections."""
+        mock_config.get.side_effect = lambda key, default=None: {
+            "cosmos_endpoint": "https://test.documents.azure.com:443/",
+            "cosmos_key": "fake-key",
+            "cosmos_database_name": "test-db",
+            "cosmos_scenarios_container": "scenarios",
+        }.get(key, default)
+        mock_config.__getitem__.side_effect = lambda key: {
+            "model_deployment_name": "gpt-4o",
+        }.get(key, "")
+
+        mock_container = Mock()
+        mock_container.read_all_items.return_value = [
+            {
+                "scenarioId": "test-prompt",
+                "title": "Test Prompt Scenario",
+                "scenarioContextIntro": "You are upset about a late delivery.",
+                "customerBackground": ["Ordered two weeks ago.", "First-time buyer."],
+                "conversationGuidelines": ["Be impatient.", "Demand a refund."],
+                "openingLines": ["Where is my package?"],
+                "skillsToProbe": ["Empathy", "Timeliness"],
+            }
+        ]
+        mock_database = Mock()
+        mock_database.get_container_client.return_value = mock_container
+        mock_client = Mock()
+        mock_client.get_database_client.return_value = mock_database
+        mock_cosmos_client.return_value = mock_client
+
+        manager = ScenarioManager()
+        prompt = manager.scenarios["test-prompt"]["messages"][0]["content"]
+
+        # Identity and role-lock
+        assert "YOUR IDENTITY" in prompt
+        assert "NOT the support representative" in prompt
+        assert "NEVER use customer-service language" in prompt
+        # Background as narrative
+        assert "YOUR BACKGROUND" in prompt
+        assert "Ordered two weeks ago. First-time buyer." in prompt
+        # Behavioral guidelines
+        assert "HOW YOU BEHAVE" in prompt
+        assert "Be impatient" in prompt
+        assert "Demand a refund" in prompt
+        # Skills evaluation
+        assert "TRAINEE IS BEING EVALUATED" in prompt
+        assert "Empathy" in prompt
+        # Opening instruction
+        assert "START THE CONVERSATION" in prompt
+        assert "Where is my package?" in prompt
+
+    @patch("src.services.managers.CosmosClient")
+    @patch("src.services.managers.config")
+    def test_build_system_prompt_includes_transcripts(self, mock_config, mock_cosmos_client):
+        """Test that referenced transcripts are loaded and included in the prompt."""
+        mock_config.get.side_effect = lambda key, default=None: {
+            "cosmos_endpoint": "https://test.documents.azure.com:443/",
+            "cosmos_key": "fake-key",
+            "cosmos_database_name": "test-db",
+            "cosmos_scenarios_container": "scenarios",
+        }.get(key, default)
+        mock_config.__getitem__.side_effect = lambda key: {
+            "model_deployment_name": "gpt-4o",
+        }.get(key, "")
+
+        mock_container = Mock()
+        mock_container.read_all_items.return_value = [
+            {
+                "scenarioId": "with-transcripts",
+                "title": "Transcript Test",
+                "scenarioContextIntro": "Billing issue.",
+                "exampleTranscripts": ["transcript-001"],
+            }
+        ]
+        mock_database = Mock()
+        mock_database.get_container_client.return_value = mock_container
+        mock_client = Mock()
+        mock_client.get_database_client.return_value = mock_database
+        mock_cosmos_client.return_value = mock_client
+
+        manager = ScenarioManager()
+        prompt = manager.scenarios["with-transcripts"]["messages"][0]["content"]
+
+        # The prompt should contain transcript reference section if file exists on disk
+        transcript_path = manager._determine_transcript_directory() / "transcript-001.txt"
+        if transcript_path.is_file():
+            assert "REFERENCE CONVERSATIONS" in prompt
+            assert "transcript-001" in prompt
+
+    def test_load_transcript_returns_none_for_missing(self):
+        """Test that _load_transcript returns None for nonexistent files."""
+        manager = ScenarioManager()
+        result = manager._load_transcript("nonexistent-transcript")
+        assert result is None
+
+    def test_load_transcript_reads_existing_file(self):
+        """Test that _load_transcript reads an existing transcript file."""
+        manager = ScenarioManager()
+        transcript_dir = manager._determine_transcript_directory()
+        if (transcript_dir / "transcript-001.txt").is_file():
+            result = manager._load_transcript("transcript-001")
+            assert result is not None
+            assert "charge" in result.lower()
 
     def test_get_scenario_existing(self):
         """Test getting an existing scenario."""
@@ -66,11 +200,9 @@ class TestScenarioManager:
         }
 
         scenarios = manager.list_scenarios()
-        assert len(scenarios) == 3
+        assert len(scenarios) == 2
         assert scenarios[0]["id"] == "scenario1"
         assert scenarios[1]["id"] == "scenario2"
-        assert scenarios[2]["id"] == "graph-api"
-        assert scenarios[2]["is_graph_scenario"] is True
 
 
 class TestAgentManager:

@@ -3,7 +3,7 @@
 #  Licensed under the MIT License. See LICENSE in the project root for license information.
 # --------------------------------------------------------------------------------------------
 
-"""Flask application for the upskilling agent."""
+"""Flask application for Live Voice Practice."""
 
 import asyncio
 import json
@@ -19,6 +19,7 @@ from flask_sock import Sock  # pyright: ignore[reportMissingTypeStubs]
 
 from src.config import config
 from src.services.analyzers import ConversationAnalyzer, PronunciationAssessor
+from src.services.conversation_manager import ConversationManager
 from src.services.managers import AgentManager, ScenarioManager
 from src.services.websocket_handler import VoiceProxyHandler
 
@@ -34,11 +35,13 @@ API_CONFIG_ENDPOINT = "/api/config"
 API_SCENARIOS_ENDPOINT = "/api/scenarios"
 API_AGENTS_CREATE_ENDPOINT = "/api/agents/create"
 API_ANALYZE_ENDPOINT = "/api/analyze"
+API_CONVERSATIONS_ENDPOINT = "/api/conversations"
 API_GRAPH_SCENARIO_ENDPOINT = "/api/scenarios/graph"
 
 # Error messages
 SCENARIO_ID_REQUIRED = "scenario_id is required"
 SCENARIO_NOT_FOUND = "Scenario not found"
+CUSTOM_SCENARIO_NOT_SUPPORTED = "custom_scenario is not supported; provide scenario_id from /api/scenarios"
 TRANSCRIPT_REQUIRED = "scenario_id and transcript are required"
 
 # HTTP status codes
@@ -57,6 +60,7 @@ sock = Sock(app)
 # Initialize managers and analyzers
 scenario_manager = ScenarioManager()
 agent_manager = AgentManager()
+conversation_manager = ConversationManager()
 conversation_analyzer = ConversationAnalyzer()
 pronunciation_assessor = PronunciationAssessor()
 voice_proxy_handler = VoiceProxyHandler(agent_manager)
@@ -98,33 +102,23 @@ def get_scenario(scenario_id: str):
 def create_agent():
     """Create a new agent for a scenario.
 
-    Supports two modes:
-    1. Server-side scenario: Pass scenario_id to use a pre-defined scenario
-    2. Custom scenario: Pass custom_scenario with full scenario data (for client-side scenarios)
+    This endpoint accepts only scenario IDs returned by /api/scenarios.
     """
     data = cast(Dict[str, Any], request.json)
     scenario_id = data.get("scenario_id")
     custom_scenario = data.get("custom_scenario")
     avatar_config = data.get("avatar")
 
-    # Support custom scenarios passed directly from the client
-    if custom_scenario:
-        scenario = custom_scenario
-        scenario_id = custom_scenario.get("id", f"custom-{int(time.time())}")
-        logger.info("Creating agent with custom scenario: %s", scenario_id)
-    else:
-        if not scenario_id:
-            return jsonify({"error": SCENARIO_ID_REQUIRED}), HTTP_BAD_REQUEST
+    if custom_scenario is not None:
+        return jsonify({"error": CUSTOM_SCENARIO_NOT_SUPPORTED}), HTTP_BAD_REQUEST
 
-        scenario = scenario_manager.get_scenario(scenario_id)
-        if not scenario:
-            logger.error(
-                "Scenario not found: %s. Available scenarios: %s + generated: %s",
-                scenario_id,
-                list(scenario_manager.scenarios.keys()),
-                list(scenario_manager.generated_scenarios.keys()),
-            )
-            return jsonify({"error": SCENARIO_NOT_FOUND}), HTTP_NOT_FOUND
+    if not scenario_id:
+        return jsonify({"error": SCENARIO_ID_REQUIRED}), HTTP_BAD_REQUEST
+
+    scenario = scenario_manager.get_scenario(scenario_id)
+    if not scenario:
+        logger.error("Scenario not found: %s", scenario_id)
+        return jsonify({"error": SCENARIO_NOT_FOUND}), HTTP_NOT_FOUND
 
     try:
         agent_id = agent_manager.create_agent(scenario_id, scenario, avatar_config)
@@ -153,13 +147,20 @@ def analyze_conversation():
     transcript = cast(str, data.get("transcript"))
     audio_data = data.get("audio_data", [])
     reference_text = cast(str, data.get("reference_text"))
+    conversation_messages = cast(List[Dict[str, Any]], data.get("conversation_messages", []))
 
     _log_analyze_request(scenario_id, transcript, reference_text)
 
     if not scenario_id or not transcript:
         return jsonify({"error": TRANSCRIPT_REQUIRED}), HTTP_BAD_REQUEST
 
-    return _perform_conversation_analysis(scenario_id, transcript, audio_data, reference_text)
+    return _perform_conversation_analysis(
+        scenario_id,
+        transcript,
+        audio_data,
+        reference_text,
+        conversation_messages,
+    )
 
 
 def _log_analyze_request(scenario_id: str, transcript: str, reference_text: str):
@@ -177,14 +178,17 @@ def _perform_conversation_analysis(
     transcript: str,
     audio_data: List[Dict[str, Any]],
     reference_text: str,
+    conversation_messages: List[Dict[str, Any]],
 ):
     """Perform the actual conversation analysis."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    rubric = conversation_manager.get_rubric_for_scenario(scenario_id)
+
     try:
         tasks = [
-            conversation_analyzer.analyze_conversation(scenario_id, transcript),
+            conversation_analyzer.analyze_conversation(scenario_id, transcript, rubric=rubric),
             pronunciation_assessor.assess_pronunciation(audio_data, reference_text),
         ]
 
@@ -200,7 +204,23 @@ def _perform_conversation_analysis(
             logger.error("Pronunciation assessment failed: %s", pronunciation)
             pronunciation = None
 
-        return jsonify({"ai_assessment": ai_assessment, "pronunciation_assessment": pronunciation})
+        # Persist the conversation and evaluation to Cosmos DB
+        conversation_id = conversation_manager.save_conversation(
+            scenario_id=scenario_id,
+            transcript=transcript,
+            conversation_messages=conversation_messages,
+            evaluation=ai_assessment if isinstance(ai_assessment, dict) else None,
+            pronunciation=pronunciation if isinstance(pronunciation, dict) else None,
+        )
+
+        response: Dict[str, Any] = {
+            "ai_assessment": ai_assessment,
+            "pronunciation_assessment": pronunciation,
+        }
+        if conversation_id:
+            response["conversation_id"] = conversation_id
+
+        return jsonify(response)
 
     finally:
         loop.close()
@@ -210,6 +230,23 @@ def _perform_conversation_analysis(
 def audio_processor():
     """Serve the audio processor JavaScript file."""
     return send_from_directory("static", AUDIO_PROCESSOR_FILE)
+
+
+@app.route(API_CONVERSATIONS_ENDPOINT)
+def list_conversations():
+    """List conversation records, optionally filtered by scenario_id."""
+    scenario_id = request.args.get("scenario_id")
+    conversations = conversation_manager.list_conversations(scenario_id=scenario_id)
+    return jsonify(conversations)
+
+
+@app.route(f"{API_CONVERSATIONS_ENDPOINT}/<conversation_id>")
+def get_conversation(conversation_id: str):
+    """Retrieve a single conversation with its evaluation."""
+    record = conversation_manager.get_conversation(conversation_id)
+    if record:
+        return jsonify(record)
+    return jsonify({"error": "Conversation not found"}), HTTP_NOT_FOUND
 
 
 @sock.route(WEBSOCKET_ENDPOINT)  # pyright: ignore[reportUnknownMemberType]
@@ -259,7 +296,7 @@ def main():
     """Run the Flask application."""
     host = config["host"]
     port = config["port"]
-    print(f"Starting Voice Live Demo on http://{host}:{port}")
+    print(f"Starting Live Voice Practice on http://{host}:{port}")
 
     debug_mode = os.getenv("FLASK_ENV") == "development"
     app.run(host=host, port=port, debug=debug_mode)

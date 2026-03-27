@@ -1,0 +1,12 @@
+{
+  "tag": "v1.0.0",
+  "repo": "https://github.com/Azure/live-voice-practice.git",
+  "install_script": "https://raw.githubusercontent.com/Azure/bicep-ptn-aiml-landing-zone/refs/tags/v1.0.0/install.ps1",
+  "components": [
+    {
+      "name": "live-voice-practice",
+      "repo": "https://github.com/Azure/live-voice-practice.git",
+      "tag": "main"
+    }
+  ]
+}

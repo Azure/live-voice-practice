@@ -108,27 +108,24 @@ class TestFlaskApp:
 
     @patch("src.app.agent_manager")
     @patch("src.app.scenario_manager")
-    def test_create_agent_with_custom_scenario(self, mock_scenario_manager, mock_agent_manager):
-        """Test agent creation with custom scenario data."""
+    def test_create_agent_with_custom_scenario_not_supported(self, mock_scenario_manager, mock_agent_manager):
+        """Test custom scenario payloads are rejected."""
         custom_scenario = {
             "id": "custom-123",
             "name": "Custom Scenario",
             "messages": [{"role": "system", "content": "You are a test assistant"}],
         }
-        mock_agent_manager.create_agent.return_value = "agent-456"
 
         response = self.client.post(
             "/api/agents/create",
             json={"custom_scenario": custom_scenario},
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 400
         data = json.loads(response.data)
-        assert data["agent_id"] == "agent-456"
-        assert data["scenario_id"] == "custom-123"
-        # Should not call get_scenario for custom scenarios
+        assert data["error"] == "custom_scenario is not supported; provide scenario_id from /api/scenarios"
         mock_scenario_manager.get_scenario.assert_not_called()
-        mock_agent_manager.create_agent.assert_called_once_with("custom-123", custom_scenario, None)
+        mock_agent_manager.create_agent.assert_not_called()
 
     def test_create_agent_missing_scenario_id(self):
         """Test agent creation without scenario_id."""
@@ -251,3 +248,51 @@ class TestFlaskApp:
         from src.app import _perform_conversation_analysis  # pylint: disable=C0415
 
         assert callable(_perform_conversation_analysis)
+
+    @patch("src.app.conversation_manager")
+    def test_list_conversations_endpoint(self, mock_conversation_manager):
+        """Test the GET /api/conversations endpoint."""
+        mock_conversation_manager.list_conversations.return_value = [
+            {"id": "conv-1", "scenarioId": "s1", "overallScore": 4.0}
+        ]
+
+        response = self.client.get("/api/conversations")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert len(data) == 1
+        assert data[0]["id"] == "conv-1"
+        mock_conversation_manager.list_conversations.assert_called_once_with(scenario_id=None)
+
+    @patch("src.app.conversation_manager")
+    def test_list_conversations_filtered_by_scenario(self, mock_conversation_manager):
+        """Test conversations listing filtered by scenario_id."""
+        mock_conversation_manager.list_conversations.return_value = []
+
+        response = self.client.get("/api/conversations?scenario_id=contoso-billing-001")
+
+        assert response.status_code == 200
+        mock_conversation_manager.list_conversations.assert_called_once_with(scenario_id="contoso-billing-001")
+
+    @patch("src.app.conversation_manager")
+    def test_get_conversation_found(self, mock_conversation_manager):
+        """Test getting an existing conversation by ID."""
+        record = {"id": "conv-abc", "conversationId": "conv-abc", "scenarioId": "s1"}
+        mock_conversation_manager.get_conversation.return_value = record
+
+        response = self.client.get("/api/conversations/conv-abc")
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["id"] == "conv-abc"
+
+    @patch("src.app.conversation_manager")
+    def test_get_conversation_not_found(self, mock_conversation_manager):
+        """Test getting a non-existent conversation returns 404."""
+        mock_conversation_manager.get_conversation.return_value = None
+
+        response = self.client.get("/api/conversations/nonexistent")
+
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert data["error"] == "Conversation not found"

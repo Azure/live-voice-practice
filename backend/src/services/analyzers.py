@@ -146,14 +146,20 @@ class ConversationAnalyzer:
             logger.error("Failed to initialize OpenAI client: %s", e)
             return None
 
-    async def analyze_conversation(self, scenario_id: str, transcript: str) -> Optional[Dict[str, Any]]:
+    async def analyze_conversation(
+        self, scenario_id: str, transcript: str, rubric: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Analyze a conversation transcript.
+
+        When a rubric is provided its criteria drive the evaluation scoring (1-5 per criterion).
+        Otherwise the legacy fixed-weight scoring is used.
 
         Args:
             scenario_id: The scenario identifier.
                          For AI generated scenario, use "graph_generated"
             transcript: The conversation transcript to analyze
+            rubric: Optional evaluation rubric loaded from Cosmos DB
 
         Returns:
             Optional[Dict[str, Any]]: Analysis results or None if analysis fails
@@ -168,6 +174,9 @@ class ConversationAnalyzer:
         if not self.openai_client:
             logger.error("OpenAI client not configured")
             return None
+
+        if rubric and rubric.get("criteria"):
+            return await self._call_rubric_evaluation_model(evaluation_scenario, transcript, rubric)
 
         return await self._call_evaluation_model(evaluation_scenario, transcript)
 
@@ -336,6 +345,168 @@ class ConversationAnalyzer:
 
         logger.info("Evaluation processed with score: %s", evaluation_json.get("overall_score"))
         return evaluation_json
+
+    # ------------------------------------------------------------------
+    # Rubric-based evaluation
+    # ------------------------------------------------------------------
+
+    async def _call_rubric_evaluation_model(
+        self, scenario: Dict[str, Any], transcript: str, rubric: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Run evaluation using rubric criteria and structured output."""
+        if not self.openai_client:
+            logger.error("OpenAI client not configured")
+            return None
+        openai_client = self.openai_client
+
+        try:
+            prompt = self._build_rubric_evaluation_prompt(scenario, transcript, rubric)
+            response_format = self._get_rubric_response_format(rubric)
+
+            completion = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: openai_client.chat.completions.create(
+                    model=config["model_deployment_name"],
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are an expert conversation evaluator. "
+                                "Score the trainee's performance using the rubric criteria provided. "
+                                "Return a structured evaluation."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],  # pyright: ignore[reportArgumentType]
+                    response_format=response_format,  # pyright: ignore[reportArgumentType]
+                ),
+            )
+
+            if completion.choices[0].message.content:
+                result = json.loads(completion.choices[0].message.content)
+                return self._process_rubric_evaluation_result(result, rubric)
+
+            logger.error("No content received from OpenAI (rubric evaluation)")
+            return None
+        except Exception as e:
+            logger.error("Error in rubric evaluation model: %s", e)
+            return None
+
+    def _build_rubric_evaluation_prompt(
+        self, scenario: Dict[str, Any], transcript: str, rubric: Dict[str, Any]
+    ) -> str:
+        """Build a prompt that incorporates the rubric criteria."""
+        base_prompt = scenario["messages"][0]["content"]
+        scoring = rubric.get("scoring", {})
+        scale = scoring.get("scale", "1-5")
+        pass_threshold = scoring.get("passThreshold", 3.5)
+
+        criteria_lines: List[str] = []
+        for criterion in rubric.get("criteria", []):
+            cid = criterion.get("criterionId", "unknown")
+            name = criterion.get("name", cid)
+            description = criterion.get("description", "")
+            levels_text = ""
+            for level in criterion.get("levels", []):
+                levels_text += f"  - {level.get('level')}: {level.get('label')} — {level.get('description')}\n"
+            criteria_lines.append(
+                f"**{name}** (`{cid}`, scale {scale}):\n{description}\n{levels_text}"
+            )
+
+        criteria_block = "\n".join(criteria_lines)
+
+        return f"""{base_prompt}
+
+EVALUATION RUBRIC (score each criterion on a {scale} scale):
+
+{criteria_block}
+
+SCORING RULES:
+- Score each criterion independently using the level descriptions above.
+- The overall_score is the average of all criterion scores (scale {scale}).
+- A score >= {pass_threshold} is considered passing.
+- You are evaluating the conversation from the perspective of the user/trainee.
+- DO NOT rate the conversation of the 'assistant' (the customer avatar).
+
+Provide a maximum of {MAX_STRENGTHS_COUNT} strengths and {MAX_IMPROVEMENTS_COUNT} areas for improvement.
+
+CONVERSATION TO EVALUATE:
+{transcript}
+"""
+
+    def _get_rubric_response_format(self, rubric: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a structured-output JSON schema driven by the rubric criteria."""
+        criteria = rubric.get("criteria", [])
+
+        criterion_props: Dict[str, Any] = {}
+        criterion_required: List[str] = []
+        for criterion in criteria:
+            cid = criterion.get("criterionId", "unknown")
+            criterion_props[cid] = {
+                "type": "object",
+                "properties": {
+                    "score": {"type": "integer"},
+                    "justification": {"type": "string"},
+                },
+                "required": ["score", "justification"],
+                "additionalProperties": False,
+            }
+            criterion_required.append(cid)
+
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "rubric_evaluation",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "criteria_scores": {
+                            "type": "object",
+                            "properties": criterion_props,
+                            "required": criterion_required,
+                            "additionalProperties": False,
+                        },
+                        "overall_score": {"type": "number"},
+                        "passed": {"type": "boolean"},
+                        "strengths": {"type": "array", "items": {"type": "string"}},
+                        "improvements": {"type": "array", "items": {"type": "string"}},
+                        "specific_feedback": {"type": "string"},
+                    },
+                    "required": [
+                        "criteria_scores",
+                        "overall_score",
+                        "passed",
+                        "strengths",
+                        "improvements",
+                        "specific_feedback",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        }
+
+    def _process_rubric_evaluation_result(
+        self, result: Dict[str, Any], rubric: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Validate and enrich rubric evaluation results."""
+        criteria_scores = result.get("criteria_scores", {})
+        scores = [entry.get("score", 0) for entry in criteria_scores.values() if isinstance(entry, dict)]
+
+        if scores:
+            result["overall_score"] = round(sum(scores) / len(scores), 2)
+
+        pass_threshold = rubric.get("scoring", {}).get("passThreshold", 3.5)
+        result["passed"] = result["overall_score"] >= pass_threshold
+        result["rubricId"] = rubric.get("rubricId")
+        result["evaluation_type"] = "rubric"
+
+        logger.info(
+            "Rubric evaluation processed — overall: %s, passed: %s",
+            result.get("overall_score"),
+            result.get("passed"),
+        )
+        return result
 
 
 class PronunciationAssessor:

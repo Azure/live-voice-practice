@@ -5,9 +5,13 @@
 
 """Configuration management for the upskilling agent application."""
 
+import logging
 import os
 from typing import Any, Dict
 
+from azure.appconfiguration import AzureAppConfigurationClient
+from azure.core.exceptions import AzureError
+from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,6 +30,8 @@ DEFAULT_VOICE_TYPE = "azure-standard"
 DEFAULT_AVATAR_CHARACTER = "lisa"
 DEFAULT_AVATAR_STYLE = "casual-sitting"
 
+logger = logging.getLogger(__name__)
+
 
 class Config:
     """Application configuration class."""
@@ -36,41 +42,265 @@ class Config:
 
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from environment variables with defaults."""
+        app_config_values = self._load_app_configuration_values()
+
+        azure_ai_region = self._get_setting(
+            env_var="AZURE_AI_REGION",
+            app_config=app_config_values,
+            app_config_key="LOCATION",
+            default=DEFAULT_REGION,
+        )
+
+        azure_ai_resource_name = self._get_setting(
+            env_var="AZURE_AI_RESOURCE_NAME",
+            app_config=app_config_values,
+            app_config_key="AI_FOUNDRY_ACCOUNT_NAME",
+            default="",
+        )
+
+        azure_openai_endpoint = self._get_setting(
+            env_var="AZURE_OPENAI_ENDPOINT",
+            app_config=app_config_values,
+            app_config_key="AI_FOUNDRY_ACCOUNT_ENDPOINT",
+            default="",
+        )
+
+        if not azure_ai_resource_name and azure_openai_endpoint:
+            azure_ai_resource_name = self._extract_resource_name_from_endpoint(azure_openai_endpoint)
+
+        realtime_azure_ai_resource_name = self._get_setting(
+            env_var="REALTIME_AZURE_AI_RESOURCE_NAME",
+            app_config=app_config_values,
+            app_config_key="REALTIME_AI_FOUNDRY_ACCOUNT_NAME",
+            default=azure_ai_resource_name,
+        )
+
+        speech_endpoint = self._get_setting(
+            env_var="AZURE_SPEECH_ENDPOINT",
+            app_config=app_config_values,
+            app_config_key="AZURE_SPEECH_ENDPOINT",
+            default=azure_openai_endpoint,
+        )
+
         result: Dict[str, Any] = {
-            "azure_ai_resource_name": os.getenv("AZURE_AI_RESOURCE_NAME", ""),
-            "azure_ai_region": os.getenv("AZURE_AI_REGION", DEFAULT_REGION),
-            "azure_ai_project_name": os.getenv("AZURE_AI_PROJECT_NAME", ""),
-            "project_endpoint": os.getenv("PROJECT_ENDPOINT", ""),
-            "use_azure_ai_agents": self._parse_bool_env("USE_AZURE_AI_AGENTS"),
-            "agent_id": os.getenv("AGENT_ID", ""),
+            "azure_ai_resource_name": azure_ai_resource_name,
+            "realtime_azure_ai_resource_name": realtime_azure_ai_resource_name,
+            "azure_ai_region": azure_ai_region,
+            "azure_ai_project_name": self._get_setting(
+                env_var="AZURE_AI_PROJECT_NAME",
+                app_config=app_config_values,
+                app_config_key="AI_FOUNDRY_PROJECT_NAME",
+                default="",
+            ),
+            "project_endpoint": self._get_setting(
+                env_var="PROJECT_ENDPOINT",
+                app_config=app_config_values,
+                app_config_key="AI_FOUNDRY_PROJECT_ENDPOINT",
+                default="",
+            ),
+            "use_azure_ai_agents": self._parse_bool_value(
+                self._get_setting(
+                    env_var="USE_AZURE_AI_AGENTS",
+                    app_config=app_config_values,
+                    app_config_key="USE_AZURE_AI_AGENTS",
+                    default="false",
+                )
+            ),
+            "agent_id": self._get_setting(
+                env_var="AGENT_ID",
+                app_config=app_config_values,
+                app_config_key="AGENT_ID",
+                default="",
+            ),
             "port": int(os.getenv("PORT", str(DEFAULT_PORT))),
             "host": os.getenv("HOST", DEFAULT_HOST),
-            "azure_openai_endpoint": os.getenv("AZURE_OPENAI_ENDPOINT", ""),
-            "azure_openai_api_key": os.getenv("AZURE_OPENAI_API_KEY", ""),
-            "model_deployment_name": os.getenv("MODEL_DEPLOYMENT_NAME", DEFAULT_MODEL),
-            "subscription_id": os.getenv("SUBSCRIPTION_ID", ""),
-            "resource_group_name": os.getenv("RESOURCE_GROUP_NAME", ""),
-            "azure_speech_key": os.getenv("AZURE_SPEECH_KEY", ""),
-            "azure_speech_endpoint": os.getenv("AZURE_SPEECH_ENDPOINT", ""),
-            "azure_speech_region": os.getenv("AZURE_SPEECH_REGION", DEFAULT_REGION),
-            "azure_speech_language": os.getenv("AZURE_SPEECH_LANGUAGE", DEFAULT_SPEECH_LANGUAGE),
+            "azure_openai_endpoint": azure_openai_endpoint,
+            "azure_openai_api_key": self._get_setting(
+                env_var="AZURE_OPENAI_API_KEY",
+                app_config=app_config_values,
+                app_config_key="AZURE_OPENAI_API_KEY",
+                default="",
+            ),
+            "model_deployment_name": self._get_setting(
+                env_var="MODEL_DEPLOYMENT_NAME",
+                app_config=app_config_values,
+                app_config_key="CHAT_DEPLOYMENT_NAME",
+                default=DEFAULT_MODEL,
+            ),
+            "realtime_model_deployment_name": self._get_setting(
+                env_var="REALTIME_MODEL_DEPLOYMENT_NAME",
+                app_config=app_config_values,
+                app_config_key="REALTIME_DEPLOYMENT_NAME",
+                default="gpt-realtime",
+            ),
+            "subscription_id": self._get_setting(
+                env_var="SUBSCRIPTION_ID",
+                app_config=app_config_values,
+                app_config_key="SUBSCRIPTION_ID",
+                default="",
+            ),
+            "resource_group_name": self._get_setting(
+                env_var="RESOURCE_GROUP_NAME",
+                app_config=app_config_values,
+                app_config_key="AZURE_RESOURCE_GROUP",
+                default="",
+            ),
+            "azure_speech_key": self._get_setting(
+                env_var="AZURE_SPEECH_KEY",
+                app_config=app_config_values,
+                app_config_key="AZURE_SPEECH_KEY",
+                default=self._get_setting(
+                    env_var="AZURE_OPENAI_API_KEY",
+                    app_config=app_config_values,
+                    app_config_key="AZURE_OPENAI_API_KEY",
+                    default="",
+                ),
+            ),
+            "azure_speech_endpoint": speech_endpoint,
+            "azure_speech_region": self._get_setting(
+                env_var="AZURE_SPEECH_REGION",
+                app_config=app_config_values,
+                app_config_key="AZURE_SPEECH_REGION",
+                default=azure_ai_region,
+            ),
+            "azure_speech_language": self._get_setting(
+                env_var="AZURE_SPEECH_LANGUAGE",
+                app_config=app_config_values,
+                app_config_key="AZURE_SPEECH_LANGUAGE",
+                default=DEFAULT_SPEECH_LANGUAGE,
+            ),
             "api_version": DEFAULT_API_VERSION,
-            # NEW ADDITIONS
-            "azure_input_transcription_model": os.getenv(
-                "AZURE_INPUT_TRANSCRIPTION_MODEL", DEFAULT_INPUT_TRANSCRIPTION_MODEL
+            "azure_input_transcription_model": self._get_setting(
+                env_var="AZURE_INPUT_TRANSCRIPTION_MODEL",
+                app_config=app_config_values,
+                app_config_key="AZURE_INPUT_TRANSCRIPTION_MODEL",
+                default=DEFAULT_INPUT_TRANSCRIPTION_MODEL,
             ),
-            "azure_input_transcription_language": os.getenv(
-                "AZURE_INPUT_TRANSCRIPTION_LANGUAGE", DEFAULT_SPEECH_LANGUAGE
+            "azure_input_transcription_language": self._get_setting(
+                env_var="AZURE_INPUT_TRANSCRIPTION_LANGUAGE",
+                app_config=app_config_values,
+                app_config_key="AZURE_INPUT_TRANSCRIPTION_LANGUAGE",
+                default=DEFAULT_SPEECH_LANGUAGE,
             ),
-            "azure_input_noise_reduction_type": os.getenv(
-                "AZURE_INPUT_NOISE_REDUCTION_TYPE", DEFAULT_INPUT_NOISE_REDUCTION_TYPE
+            "azure_input_noise_reduction_type": self._get_setting(
+                env_var="AZURE_INPUT_NOISE_REDUCTION_TYPE",
+                app_config=app_config_values,
+                app_config_key="AZURE_INPUT_NOISE_REDUCTION_TYPE",
+                default=DEFAULT_INPUT_NOISE_REDUCTION_TYPE,
             ),
-            "azure_voice_name": os.getenv("AZURE_VOICE_NAME", DEFAULT_VOICE_NAME),
-            "azure_voice_type": os.getenv("AZURE_VOICE_TYPE", DEFAULT_VOICE_TYPE),
-            "azure_avatar_character": os.getenv("AZURE_AVATAR_CHARACTER", DEFAULT_AVATAR_CHARACTER),
-            "azure_avatar_style": os.getenv("AZURE_AVATAR_STYLE", DEFAULT_AVATAR_STYLE),
+            "azure_voice_name": self._get_setting(
+                env_var="AZURE_VOICE_NAME",
+                app_config=app_config_values,
+                app_config_key="AZURE_VOICE_NAME",
+                default=DEFAULT_VOICE_NAME,
+            ),
+            "azure_voice_type": self._get_setting(
+                env_var="AZURE_VOICE_TYPE",
+                app_config=app_config_values,
+                app_config_key="AZURE_VOICE_TYPE",
+                default=DEFAULT_VOICE_TYPE,
+            ),
+            "azure_avatar_character": self._get_setting(
+                env_var="AZURE_AVATAR_CHARACTER",
+                app_config=app_config_values,
+                app_config_key="AZURE_AVATAR_CHARACTER",
+                default=DEFAULT_AVATAR_CHARACTER,
+            ),
+            "azure_avatar_style": self._get_setting(
+                env_var="AZURE_AVATAR_STYLE",
+                app_config=app_config_values,
+                app_config_key="AZURE_AVATAR_STYLE",
+                default=DEFAULT_AVATAR_STYLE,
+            ),
+            "cosmos_endpoint": self._get_setting(
+                env_var="COSMOS_ENDPOINT",
+                app_config=app_config_values,
+                app_config_key="COSMOS_DB_ENDPOINT",
+                default="",
+            ),
+            "cosmos_key": self._get_setting(
+                env_var="COSMOS_KEY",
+                app_config=app_config_values,
+                app_config_key="COSMOS_DB_KEY",
+                default="",
+            ),
+            "cosmos_database_name": self._get_setting(
+                env_var="COSMOS_DATABASE_NAME",
+                app_config=app_config_values,
+                app_config_key="DATABASE_NAME",
+                default="",
+            ),
+            "cosmos_scenarios_container": self._get_setting(
+                env_var="COSMOS_SCENARIOS_CONTAINER",
+                app_config=app_config_values,
+                app_config_key="SCENARIOS_DATABASE_CONTAINER",
+                default="scenarios",
+            ),
+            "cosmos_rubrics_container": self._get_setting(
+                env_var="COSMOS_RUBRICS_CONTAINER",
+                app_config=app_config_values,
+                app_config_key="RUBRICS_DATABASE_CONTAINER",
+                default="rubrics",
+            ),
+            "cosmos_conversations_container": self._get_setting(
+                env_var="COSMOS_CONVERSATIONS_CONTAINER",
+                app_config=app_config_values,
+                app_config_key="CONVERSATIONS_DATABASE_CONTAINER",
+                default="conversations",
+            ),
         }
         return result
+
+    def _load_app_configuration_values(self) -> Dict[str, str]:
+        """Load key-values from Azure App Configuration when endpoint is available."""
+        endpoint = os.getenv("APP_CONFIG_ENDPOINT", "")
+        if not endpoint:
+            return {}
+
+        label = os.getenv("APP_CONFIG_LABEL", "live-voice-practice")
+        values: Dict[str, str] = {}
+
+        try:
+            client = AzureAppConfigurationClient(base_url=endpoint, credential=DefaultAzureCredential())
+
+            for setting in client.list_configuration_settings(label_filter=label):
+                if setting.value is not None:
+                    values[setting.key] = setting.value
+
+            if not values:
+                for setting in client.list_configuration_settings():
+                    if setting.value is not None:
+                        values[setting.key] = setting.value
+
+            logger.info("Loaded %s settings from Azure App Configuration", len(values))
+        except AzureError as error:
+            logger.warning("Failed to load App Configuration values: %s", error)
+
+        return values
+
+    def _get_setting(self, env_var: str, app_config: Dict[str, str], app_config_key: str, default: str) -> str:
+        """Get setting preferring environment variables, then App Configuration, then default."""
+        env_value = os.getenv(env_var)
+        if env_value is not None and env_value != "":
+            return env_value
+
+        app_value = app_config.get(app_config_key)
+        if app_value is not None and app_value != "":
+            return app_value
+
+        return default
+
+    def _extract_resource_name_from_endpoint(self, endpoint: str) -> str:
+        """Extract Azure resource name from endpoint host."""
+        try:
+            host = endpoint.replace("https://", "").split("/")[0]
+            return host.split(".")[0]
+        except Exception:
+            return ""
+
+    def _parse_bool_value(self, value: str) -> bool:
+        """Parse boolean-like values from string."""
+        return str(value).strip().lower() in {"1", "true", "yes", "y", "t"}
 
     def _parse_bool_env(self, env_var: str, default: bool = False) -> bool:
         """Parse boolean environment variable."""

@@ -31,7 +31,7 @@ node_modules/
 .npm
 .yarn/
 
-# Build outputs (built inside container) 
+# Build outputs (built inside container)
 dist/
 build/
 frontend/static/
@@ -49,6 +49,8 @@ pids
 *.pid
 *.seed
 *.pid.lock
+.azure/
+.temp/
 
 # Coverage directory used by tools like istanbul
 coverage/
@@ -67,6 +69,11 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
+**/.venv/
+**/venv/
+backend/.venv/
+backend/venv/
 ENV/
 env.bak/
 venv.bak/
@@ -80,6 +87,13 @@ venv.bak/
 
 # Development containers
 .devcontainer/
+
+# Infra and auxiliary artifacts not needed by backend image build
+infra/
+samples/rubrics/
+samples/scenarios/
+docs/
+static/
 
 # Testing
 .pytest_cache/

@@ -1,40 +1,40 @@
-﻿[Guest-1]: I'm calling about a charge on my bill that I don't think is correct.
-[Guest-1]: Okay, I can look into that.
-[Guest-1]: What charge are you referring to?
-[Guest-1]: It's $50.
-[Guest-1]: It's on my latest statement.
-[Guest-1]: I called last time and they said it would be removed, but remember it's still there.
-[Guest-1]: Alright.
-[Guest-1]: Do you have the date the charge posted?
-[Guest-1]: January 15th.
-[Guest-1]: Thanks.
-[Guest-1]: Give me a moment.
-[Guest-1]: I do see a $50 service fee.
-[Guest-1]: Usually that's tied to a plan change or an add-on.
-[Guest-1]: I didn't change anything.
-[Guest-1]: And I already called about it.
-[Guest-1]: That's the point.
-[Guest-1]: Right.
-[Guest-1]: I understand.
-[Guest-1]: Let me check the notes from the previous contact.
-[Guest-1]: I really just want to know if you're actually going to fix it today.
-[Guest-1]: I'm going to do my best.
-[Guest-1]: I see a note that a request was submitted but it looks like it didn't complete.
-[Guest-1]: I can submit it again for removal.
-[Guest-1]: Submit it again?
-[Guest-1]: That's what they said last time.
-[Guest-1]: How long will it take?
-[Guest-1]: It should reflect on a future bill.
-[Guest-1]: I don't have the exact timing, but it's typically within a billing cycle.
-[Guest-1]: That's not very reassuring.
-[Guest-1]: Is there a confirmation number or anything?
-[Guest-1]: Yes, I can provide a case reference.
-[Guest-1]: And I can send an e-mail confirmation as well.
-[Guest-1]: Okay.
-[Guest-1]: Please do.
-[Guest-1]: I'm not trying to be difficult, I'm just tired of chasing this.
-[Guest-1]: I understand.
-[Guest-1]: I've submitted the request again and I'll send the e-mail confirmation now.
-[Guest-1]: Is there anything else I can help you with?
-[Guest-1]: No.
-[Guest-1]: I just hope this actually works.
+﻿[Customer]: I'm calling about a charge on my bill that I don't think is correct.
+[Agent]: Okay, I can look into that.
+[Agent]: What charge are you referring to?
+[Customer]: It's $50.
+[Customer]: It's on my latest statement.
+[Customer]: I called last time and they said it would be removed, but remember it's still there.
+[Agent]: Alright.
+[Agent]: Do you have the date the charge posted?
+[Customer]: January 15th.
+[Agent]: Thanks.
+[Agent]: Give me a moment.
+[Agent]: I do see a $50 service fee.
+[Agent]: Usually that's tied to a plan change or an add-on.
+[Customer]: I didn't change anything.
+[Customer]: And I already called about it.
+[Customer]: That's the point.
+[Agent]: Right.
+[Agent]: I understand.
+[Agent]: Let me check the notes from the previous contact.
+[Customer]: I really just want to know if you're actually going to fix it today.
+[Agent]: I'm going to do my best.
+[Agent]: I see a note that a request was submitted but it looks like it didn't complete.
+[Agent]: I can submit it again for removal.
+[Customer]: Submit it again?
+[Customer]: That's what they said last time.
+[Customer]: How long will it take?
+[Agent]: It should reflect on a future bill.
+[Agent]: I don't have the exact timing, but it's typically within a billing cycle.
+[Customer]: That's not very reassuring.
+[Customer]: Is there a confirmation number or anything?
+[Agent]: Yes, I can provide a case reference.
+[Agent]: And I can send an e-mail confirmation as well.
+[Customer]: Okay.
+[Customer]: Please do.
+[Customer]: I'm not trying to be difficult, I'm just tired of chasing this.
+[Agent]: I understand.
+[Agent]: I've submitted the request again and I'll send the e-mail confirmation now.
+[Agent]: Is there anything else I can help you with?
+[Customer]: No.
+[Customer]: I just hope this actually works.

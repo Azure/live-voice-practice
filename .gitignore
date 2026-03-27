@@ -167,3 +167,4 @@ Thumbs.db
 .pytest_cache
 .azure
 static
+scripts/.tmp-search/

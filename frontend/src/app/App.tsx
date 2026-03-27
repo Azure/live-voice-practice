@@ -4,25 +4,26 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-  Dialog,
-  DialogBody,
-  DialogSurface,
-  Spinner,
-  Text,
-  makeStyles,
-  tokens,
+    Button,
+    Dialog,
+    DialogBody,
+    DialogSurface,
+    makeStyles,
+    Spinner,
+    Text,
+    tokens,
 } from '@fluentui/react-components'
 import { useCallback, useState } from 'react'
 import { AssessmentPanel } from '../components/AssessmentPanel'
 import { ChatPanel } from '../components/ChatPanel'
 import { ScenarioList } from '../components/ScenarioList'
-import { VideoPanel } from '../components/VideoPanel'
+import { ConnectionStage, VideoPanel } from '../components/VideoPanel'
 import { useAudioPlayer } from '../hooks/useAudioPlayer'
 import { useRealtime } from '../hooks/useRealtime'
 import { useRecorder } from '../hooks/useRecorder'
 import { useScenarios } from '../hooks/useScenarios'
 import { useWebRTC } from '../hooks/useWebRTC'
-import { api, parseAvatarValue } from '../services/api'
+import { api, AvatarConfig, parseAvatarValue } from '../services/api'
 import { Assessment } from '../types'
 
 const useStyles = makeStyles({
@@ -64,28 +65,29 @@ export default function App() {
   const [showAssessment, setShowAssessment] = useState(false)
   const [currentAgent, setCurrentAgent] = useState<string | null>(null)
   const [assessment, setAssessment] = useState<Assessment | null>(null)
-  const [selectedScenarioData, setSelectedScenarioData] = useState<any>(null)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [connectionStage, setConnectionStage] = useState<ConnectionStage>('creating')
+  const [avatarEnabled, setAvatarEnabled] = useState(true)
+  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig | null>(null)
 
   const {
     scenarios,
-    serverScenarios,
-    customScenarios,
     selectedScenario,
     setSelectedScenario,
     loading,
-    getCustomScenario,
-    addCustomScenario,
-    updateCustomScenario,
-    deleteCustomScenario,
   } = useScenarios()
   const { playAudio } = useAudioPlayer()
-  const activeScenario =
-    selectedScenarioData ||
-    scenarios.find(s => s.id === selectedScenario) ||
-    null
+  const activeScenario = scenarios.find(s => s.id === selectedScenario) || null
 
   const handleWebRTCMessage = useCallback((msg: any) => {
-    if (msg.type === 'session.updated') {
+    if (!avatarEnabled) return
+
+    if (msg.type === 'proxy.connected') {
+      setConnectionStage('connecting')
+    } else if (msg.type === 'session.created') {
+      setConnectionStage('configuring')
+    } else if (msg.type === 'session.updated') {
+      setConnectionStage('rendering')
       const session = msg.session
       const servers =
         session?.avatar?.ice_servers ||
@@ -111,7 +113,7 @@ export default function App() {
     ) {
       handleAnswer(msg)
     }
-  }, [])
+  }, [avatarEnabled])
 
   const { connected, messages, send, clearMessages, getRecordings } =
     useRealtime({
@@ -142,20 +144,18 @@ export default function App() {
   const handleStart = async (avatarValue: string) => {
     if (!selectedScenario) return
 
+    const parsedAvatar = parseAvatarValue(avatarValue)
+    const isAudioOnly = parsedAvatar === null
+    setAvatarConfig(parsedAvatar)
+    setAvatarEnabled(!isAudioOnly)
+
+    setConnectionStage('creating')
     try {
-      const avatarConfig = parseAvatarValue(avatarValue)
-      const customScenario = getCustomScenario(selectedScenario)
+      const { agent_id } = await api.createAgent(selectedScenario, parsedAvatar)
 
-      const { agent_id } = customScenario
-        ? await api.createAgentWithCustomScenario(
-            selectedScenario,
-            customScenario.name,
-            customScenario.description,
-            customScenario.scenarioData,
-            avatarConfig
-          )
-        : await api.createAgent(selectedScenario, avatarConfig)
-
+      if (!isAudioOnly) {
+        setConnectionStage('connecting')
+      }
       setCurrentAgent(agent_id)
       setShowSetup(false)
     } catch (error) {
@@ -172,6 +172,7 @@ export default function App() {
     if (!recordings.conversation.length) return
 
     setShowLoading(true)
+    setAnalysisError(null)
 
     try {
       const transcript = recordings.conversation
@@ -189,14 +190,11 @@ export default function App() {
       setShowAssessment(true)
     } catch (error) {
       console.error('Analysis failed:', error)
+      setAnalysisError('Performance analysis failed. Please try again.')
     } finally {
       setShowLoading(false)
     }
   }
-
-  const handleScenarioGenerated = useCallback((scenario: any) => {
-    setSelectedScenarioData(scenario)
-  }, [])
 
   return (
     <div className={styles.container}>
@@ -210,15 +208,10 @@ export default function App() {
               <Spinner label="Loading scenarios..." />
             ) : (
               <ScenarioList
-                scenarios={serverScenarios}
-                customScenarios={customScenarios}
+                scenarios={scenarios}
                 selectedScenario={selectedScenario}
                 onSelect={setSelectedScenario}
                 onStart={handleStart}
-                onScenarioGenerated={handleScenarioGenerated}
-                onAddCustomScenario={addCustomScenario}
-                onUpdateCustomScenario={updateCustomScenario}
-                onDeleteCustomScenario={deleteCustomScenario}
               />
             )}
           </DialogBody>
@@ -243,7 +236,7 @@ export default function App() {
                 block
                 style={{ marginTop: tokens.spacingVerticalS }}
               >
-                This may take up to 30 seconds
+                This may take a few moments
               </Text>
             </div>
           </DialogBody>
@@ -256,9 +249,29 @@ export default function App() {
         onClose={() => setShowAssessment(false)}
       />
 
+      <Dialog open={!!analysisError} onOpenChange={() => setAnalysisError(null)}>
+        <DialogSurface>
+          <DialogBody>
+            <Text size={400} weight="semibold" block>
+              Analysis Error
+            </Text>
+            <Text size={300} block style={{ marginTop: tokens.spacingVerticalM }}>
+              {analysisError}
+            </Text>
+            <div style={{ marginTop: tokens.spacingVerticalL, display: 'flex', justifyContent: 'flex-end' }}>
+              <Button appearance="primary" onClick={() => setAnalysisError(null)}>
+                OK
+              </Button>
+            </div>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
       {!showSetup && (
         <div className={styles.mainLayout}>
-          <VideoPanel videoRef={videoRef} />
+          {avatarEnabled && (
+            <VideoPanel videoRef={videoRef} connectionStage={connectionStage} />
+          )}
           <ChatPanel
             messages={messages}
             recording={recording}
@@ -268,6 +281,9 @@ export default function App() {
             onClear={clearMessages}
             onAnalyze={handleAnalyze}
             scenario={activeScenario}
+            avatarEnabled={avatarEnabled}
+            onToggleAvatar={() => setAvatarEnabled(prev => !prev)}
+            hasAvatarConfig={avatarConfig !== null}
           />
         </div>
       )}

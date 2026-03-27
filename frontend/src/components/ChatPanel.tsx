@@ -4,17 +4,18 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-  Card,
-  Button,
-  Text,
-  makeStyles,
-  tokens,
+    Button,
+    Card,
+    Switch,
+    Text,
+    makeStyles,
+    tokens,
 } from '@fluentui/react-components'
 import {
-  MicRegular,
-  MicOffRegular,
-  DeleteRegular,
-  ChartMultipleRegular,
+    ChartMultipleRegular,
+    DeleteRegular,
+    MicOffRegular,
+    MicRegular,
 } from '@fluentui/react-icons'
 import { Message, Scenario } from '../types'
 
@@ -85,6 +86,9 @@ interface Props {
   onClear: () => void
   onAnalyze: () => void
   scenario?: Scenario | null
+  avatarEnabled?: boolean
+  onToggleAvatar?: () => void
+  hasAvatarConfig?: boolean
 }
 
 export function ChatPanel({
@@ -96,6 +100,9 @@ export function ChatPanel({
   onClear,
   onAnalyze,
   scenario,
+  avatarEnabled,
+  onToggleAvatar,
+  hasAvatarConfig,
 }: Props) {
   const styles = useStyles()
 
@@ -164,6 +171,14 @@ export function ChatPanel({
         >
           Analyze Performance
         </Button>
+
+        {hasAvatarConfig && onToggleAvatar && (
+          <Switch
+            checked={avatarEnabled}
+            onChange={onToggleAvatar}
+            label="Show Avatar"
+          />
+        )}
       </div>
     </Card>
   )

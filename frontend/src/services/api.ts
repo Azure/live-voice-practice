@@ -4,10 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-  Assessment,
-  AVATAR_OPTIONS,
-  CustomScenarioData,
-  Scenario,
+    Assessment,
+    AVATAR_OPTIONS,
+    Scenario,
 } from '../types'
 
 export interface AvatarConfig {
@@ -16,7 +15,11 @@ export interface AvatarConfig {
   is_photo_avatar: boolean
 }
 
-export function parseAvatarValue(value: string): AvatarConfig {
+export function parseAvatarValue(value: string): AvatarConfig | null {
+  if (value === 'audio-only') {
+    return null
+  }
+
   const avatarOption = AVATAR_OPTIONS.find(opt => opt.value === value)
   const isPhotoAvatar = avatarOption?.isPhotoAvatar ?? false
 
@@ -50,44 +53,16 @@ export const api = {
     return res.json()
   },
 
-  async createAgent(scenarioId: string, avatarConfig?: AvatarConfig) {
+  async createAgent(scenarioId: string, avatarConfig?: AvatarConfig | null) {
     const res = await fetch('/api/agents/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         scenario_id: scenarioId,
-        avatar: avatarConfig,
+        avatar: avatarConfig ?? undefined,
       }),
     })
     if (!res.ok) throw new Error('Failed to create agent')
-    return res.json()
-  },
-
-  /**
-   * Create an agent with a custom scenario
-   * Transforms the simplified scenario data into the backend format
-   */
-  async createAgentWithCustomScenario(
-    scenarioId: string,
-    name: string,
-    description: string,
-    scenarioData: CustomScenarioData,
-    avatarConfig?: AvatarConfig
-  ) {
-    const res = await fetch('/api/agents/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        custom_scenario: {
-          id: scenarioId,
-          name,
-          description,
-          messages: [{ role: 'system', content: scenarioData.systemPrompt }],
-        },
-        avatar: avatarConfig,
-      }),
-    })
-    if (!res.ok) throw new Error('Failed to create agent with custom scenario')
     return res.json()
   },
 
@@ -107,18 +82,11 @@ export const api = {
         transcript,
         audio_data: audioData,
         reference_text: referenceText,
+        conversation_messages: conversationMessages,
       }),
     })
     if (!res.ok) throw new Error('Analysis failed')
     return res.json()
   },
 
-  async generateGraphScenario(): Promise<Scenario> {
-    const res = await fetch('/api/scenarios/graph', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    if (!res.ok) throw new Error('Failed to generate Graph scenario')
-    return res.json()
-  },
 }

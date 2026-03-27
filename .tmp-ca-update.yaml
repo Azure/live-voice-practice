@@ -1,0 +1,20 @@
+properties:
+  template:
+    containers:
+    - name: voicelab
+      image: crhvus3cnolfuf4.azurecr.io/voicelab-sales-training/voicelab-live-voice:azd-deploy-1773862757
+      probes:
+      - type: Readiness
+        httpGet:
+          path: /api/config
+          port: 8000
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        failureThreshold: 10
+      - type: Startup
+        httpGet:
+          path: /api/config
+          port: 8000
+        initialDelaySeconds: 3
+        periodSeconds: 5
+        failureThreshold: 30

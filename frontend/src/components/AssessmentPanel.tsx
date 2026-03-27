@@ -4,25 +4,25 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogActions,
-  Button,
-  Card,
-  CardHeader,
-  Text,
-  ProgressBar,
-  Badge,
-  makeStyles,
-  tokens,
-  TabList,
-  Tab,
-  TabValue,
+    Badge,
+    Button,
+    Card,
+    CardHeader,
+    Dialog,
+    DialogActions,
+    DialogBody,
+    DialogSurface,
+    DialogTitle,
+    makeStyles,
+    ProgressBar,
+    Tab,
+    TabList,
+    TabValue,
+    Text,
+    tokens,
 } from '@fluentui/react-components'
-import { Assessment } from '../types'
 import { useState } from 'react'
+import { Assessment } from '../types'
 
 const useStyles = makeStyles({
   dialogBody: {
@@ -150,9 +150,22 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
 
   if (!assessment) return null
 
+  const ai = assessment.ai_assessment
+  const pron = assessment.pronunciation_assessment
+  const hasData = !!(ai || pron)
+
+  const isRubricBased = !!(ai?.criteria_scores && Object.keys(ai.criteria_scores).length > 0)
+
   const getScoreColor = (score: number): 'success' | 'warning' | 'danger' => {
     if (score >= 80) return 'success'
     if (score >= 60) return 'warning'
+    return 'danger'
+  }
+
+  const getRubricScoreColor = (score: number, max: number = 5): 'success' | 'warning' | 'danger' => {
+    const pct = (score / max) * 100
+    if (pct >= 70) return 'success'
+    if (pct >= 50) return 'warning'
     return 'danger'
   }
 
@@ -163,30 +176,54 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
       >
         <DialogTitle>Performance Assessment</DialogTitle>
         <DialogBody className={styles.dialogBody}>
+          {!hasData && (
+            <div className={styles.noContent}>
+              <Text size={400} weight="semibold">
+                No assessment data available.
+              </Text>
+              <Text size={300} block style={{ marginTop: '8px' }}>
+                The analysis could not produce results. Please try again or check that the conversation has enough content.
+              </Text>
+            </div>
+          )}
+
           {/* Overall Score Section */}
-          {assessment.ai_assessment && (
+          {ai && typeof ai.overall_score === 'number' && (
             <div className={styles.headerBar}>
               <Text size={600} weight="semibold">
                 Overall Score
               </Text>
               <div className={styles.scoreRow}>
                 <span className={styles.scoreValue}>
-                  {assessment.ai_assessment.overall_score}
+                  {isRubricBased ? ai.overall_score.toFixed(1) : ai.overall_score}
                 </span>
-                <Badge
-                  color={getScoreColor(assessment.ai_assessment.overall_score)}
-                  appearance="filled"
-                  size="large"
-                >
-                  {assessment.ai_assessment.overall_score >= 80
-                    ? 'Great'
-                    : assessment.ai_assessment.overall_score >= 60
-                      ? 'Good'
-                      : 'Needs Work'}
-                </Badge>
+                {isRubricBased ? (
+                  <>
+                    <Text size={400} weight="regular">/ 5</Text>
+                    <Badge
+                      color={getRubricScoreColor(ai.overall_score)}
+                      appearance="filled"
+                      size="large"
+                    >
+                      {ai.passed ? '✓ Passed' : '✗ Failed'}
+                    </Badge>
+                  </>
+                ) : (
+                  <Badge
+                    color={getScoreColor(ai.overall_score)}
+                    appearance="filled"
+                    size="large"
+                  >
+                    {ai.overall_score >= 80
+                      ? 'Great'
+                      : ai.overall_score >= 60
+                        ? 'Good'
+                        : 'Needs Work'}
+                  </Badge>
+                )}
               </div>
               <ProgressBar
-                value={assessment.ai_assessment.overall_score / 100}
+                value={isRubricBased ? ai.overall_score / 5 : ai.overall_score / 100}
                 thickness="large"
               />
             </div>
@@ -208,7 +245,43 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
           {/* Content Section */}
           {tab === 'overview' && (
             <div className={styles.grid}>
-              {assessment.ai_assessment && (
+              {isRubricBased && ai?.criteria_scores && (
+                <Card className={styles.card}>
+                  <CardHeader
+                    header={
+                      <Text size={500} weight="semibold">
+                        🎯 Rubric Criteria Scores
+                      </Text>
+                    }
+                  />
+                  {Object.entries(ai.criteria_scores).map(([criterionId, criterion]) => (
+                    <div key={criterionId} className={styles.metric}>
+                      <div className={styles.metricHeader}>
+                        <Text size={300}>
+                          {criterionId.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                        </Text>
+                        <Badge
+                          color={getRubricScoreColor(criterion.score)}
+                          appearance="filled"
+                        >
+                          {criterion.score}/5
+                        </Badge>
+                      </div>
+                      <ProgressBar value={criterion.score / 5} />
+                      {criterion.justification && (
+                        <Text
+                          size={200}
+                          style={{ marginTop: '4px', color: tokens.colorNeutralForeground3, display: 'block' }}
+                        >
+                          {criterion.justification}
+                        </Text>
+                      )}
+                    </div>
+                  ))}
+                </Card>
+              )}
+
+              {!isRubricBased && ai?.speaking_tone_style && ai?.conversation_content && (
                 <Card className={styles.card}>
                   <CardHeader
                     header={
@@ -221,7 +294,7 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                   <div className={styles.sectionTitle}>
                     <Text size={400} weight="semibold">
                       Speaking Tone & Style (
-                      {assessment.ai_assessment.speaking_tone_style.total}/30)
+                      {ai.speaking_tone_style.total}/30)
                     </Text>
                   </div>
 
@@ -229,18 +302,11 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     <div className={styles.metricHeader}>
                       <Text size={300}>Professional Tone</Text>
                       <Badge appearance="tint">
-                        {
-                          assessment.ai_assessment.speaking_tone_style
-                            .professional_tone
-                        }
-                        /10
+                        {ai.speaking_tone_style.professional_tone}/10
                       </Badge>
                     </div>
                     <ProgressBar
-                      value={
-                        assessment.ai_assessment.speaking_tone_style
-                          .professional_tone / 10
-                      }
+                      value={ai.speaking_tone_style.professional_tone / 10}
                     />
                   </div>
 
@@ -248,18 +314,11 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     <div className={styles.metricHeader}>
                       <Text size={300}>Active Listening</Text>
                       <Badge appearance="tint">
-                        {
-                          assessment.ai_assessment.speaking_tone_style
-                            .active_listening
-                        }
-                        /10
+                        {ai.speaking_tone_style.active_listening}/10
                       </Badge>
                     </div>
                     <ProgressBar
-                      value={
-                        assessment.ai_assessment.speaking_tone_style
-                          .active_listening / 10
-                      }
+                      value={ai.speaking_tone_style.active_listening / 10}
                     />
                   </div>
 
@@ -267,25 +326,18 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     <div className={styles.metricHeader}>
                       <Text size={300}>Engagement Quality</Text>
                       <Badge appearance="tint">
-                        {
-                          assessment.ai_assessment.speaking_tone_style
-                            .engagement_quality
-                        }
-                        /10
+                        {ai.speaking_tone_style.engagement_quality}/10
                       </Badge>
                     </div>
                     <ProgressBar
-                      value={
-                        assessment.ai_assessment.speaking_tone_style
-                          .engagement_quality / 10
-                      }
+                      value={ai.speaking_tone_style.engagement_quality / 10}
                     />
                   </div>
 
                   <div className={styles.sectionTitle}>
                     <Text size={400} weight="semibold">
                       Content Quality (
-                      {assessment.ai_assessment.conversation_content.total}/70)
+                      {ai.conversation_content.total}/70)
                     </Text>
                   </div>
 
@@ -293,18 +345,11 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     <div className={styles.metricHeader}>
                       <Text size={300}>Needs Assessment</Text>
                       <Badge appearance="tint">
-                        {
-                          assessment.ai_assessment.conversation_content
-                            .needs_assessment
-                        }
-                        /25
+                        {ai.conversation_content.needs_assessment}/25
                       </Badge>
                     </div>
                     <ProgressBar
-                      value={
-                        assessment.ai_assessment.conversation_content
-                          .needs_assessment / 25
-                      }
+                      value={ai.conversation_content.needs_assessment / 25}
                     />
                   </div>
 
@@ -312,18 +357,11 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     <div className={styles.metricHeader}>
                       <Text size={300}>Value Proposition</Text>
                       <Badge appearance="tint">
-                        {
-                          assessment.ai_assessment.conversation_content
-                            .value_proposition
-                        }
-                        /25
+                        {ai.conversation_content.value_proposition}/25
                       </Badge>
                     </div>
                     <ProgressBar
-                      value={
-                        assessment.ai_assessment.conversation_content
-                          .value_proposition / 25
-                      }
+                      value={ai.conversation_content.value_proposition / 25}
                     />
                   </div>
 
@@ -331,24 +369,17 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     <div className={styles.metricHeader}>
                       <Text size={300}>Objection Handling</Text>
                       <Badge appearance="tint">
-                        {
-                          assessment.ai_assessment.conversation_content
-                            .objection_handling
-                        }
-                        /20
+                        {ai.conversation_content.objection_handling}/20
                       </Badge>
                     </div>
                     <ProgressBar
-                      value={
-                        assessment.ai_assessment.conversation_content
-                          .objection_handling / 20
-                      }
+                      value={ai.conversation_content.objection_handling / 20}
                     />
                   </div>
                 </Card>
               )}
 
-              {assessment.pronunciation_assessment && (
+              {pron && typeof pron.accuracy_score === 'number' && (
                 <Card className={styles.card}>
                   <CardHeader
                     header={
@@ -362,45 +393,29 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     <div className={styles.metricHeader}>
                       <Text size={300}>Accuracy</Text>
                       <Badge
-                        color={getScoreColor(
-                          assessment.pronunciation_assessment.accuracy_score
-                        )}
+                        color={getScoreColor(pron.accuracy_score)}
                         appearance="filled"
                       >
-                        {assessment.pronunciation_assessment.accuracy_score.toFixed(
-                          1
-                        )}
+                        {pron.accuracy_score.toFixed(1)}
                       </Badge>
                     </div>
-                    <ProgressBar
-                      value={
-                        assessment.pronunciation_assessment.accuracy_score / 100
-                      }
-                    />
+                    <ProgressBar value={pron.accuracy_score / 100} />
                   </div>
 
                   <div className={styles.metric}>
                     <div className={styles.metricHeader}>
                       <Text size={300}>Fluency</Text>
                       <Badge
-                        color={getScoreColor(
-                          assessment.pronunciation_assessment.fluency_score
-                        )}
+                        color={getScoreColor(pron.fluency_score)}
                         appearance="filled"
                       >
-                        {assessment.pronunciation_assessment.fluency_score.toFixed(
-                          1
-                        )}
+                        {pron.fluency_score.toFixed(1)}
                       </Badge>
                     </div>
-                    <ProgressBar
-                      value={
-                        assessment.pronunciation_assessment.fluency_score / 100
-                      }
-                    />
+                    <ProgressBar value={pron.fluency_score / 100} />
                   </div>
 
-                  {assessment.pronunciation_assessment.words && (
+                  {pron.words && (
                     <>
                       <div className={styles.sectionTitle}>
                         <Text size={400} weight="semibold">
@@ -408,27 +423,32 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                         </Text>
                       </div>
                       <div className={styles.wordGrid}>
-                        {assessment.pronunciation_assessment.words
-                          .slice(0, 12)
-                          .map((word, i) => (
-                            <Badge
-                              key={i}
-                              color={getScoreColor(word.accuracy)}
-                              appearance="tint"
-                              size="small"
-                            >
-                              {word.word} ({word.accuracy}%)
-                            </Badge>
-                          ))}
+                        {pron.words.slice(0, 12).map((word, i) => (
+                          <Badge
+                            key={i}
+                            color={getScoreColor(word.accuracy)}
+                            appearance="tint"
+                            size="small"
+                          >
+                            {word.word} ({word.accuracy}%)
+                          </Badge>
+                        ))}
                       </div>
                     </>
                   )}
                 </Card>
               )}
+
+              {!isRubricBased && !ai?.speaking_tone_style && !pron && (
+                <div className={styles.noContent}>
+                  <Text>No detailed scores available for this session.</Text>
+                </div>
+              )}
             </div>
           )}
 
-          {tab === 'recommendations' && assessment.ai_assessment && (
+          {tab === 'recommendations' && (
+            ai ? (
             <Card className={styles.feedbackCard}>
               <CardHeader
                 header={
@@ -444,9 +464,9 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     Strengths
                   </Text>
                 </div>
-                {assessment.ai_assessment.strengths.length > 0 ? (
+                {(ai.strengths?.length ?? 0) > 0 ? (
                   <div className={styles.feedbackGrid}>
-                    {assessment.ai_assessment.strengths.map((strength, i) => (
+                    {ai.strengths.map((strength, i) => (
                       <div
                         key={i}
                         className={`${styles.feedbackItem} ${styles.strengthItem}`}
@@ -470,9 +490,9 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     Areas for Improvement
                   </Text>
                 </div>
-                {assessment.ai_assessment.improvements.length > 0 ? (
+                {(ai.improvements?.length ?? 0) > 0 ? (
                   <div className={styles.feedbackGrid}>
-                    {assessment.ai_assessment.improvements.map(
+                    {ai.improvements.map(
                       (improvement, i) => (
                         <div
                           key={i}
@@ -492,6 +512,11 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                 )}
               </div>
             </Card>
+            ) : (
+              <div className={styles.noContent}>
+                <Text>No recommendations available for this session.</Text>
+              </div>
+            )
           )}
 
           {tab === 'notes' && (
@@ -504,7 +529,7 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                 }
               />
               <Text size={300} style={{ lineHeight: 1.6 }}>
-                {assessment.ai_assessment?.specific_feedback ||
+                {ai?.specific_feedback ||
                   'No evaluator notes available.'}
               </Text>
             </Card>

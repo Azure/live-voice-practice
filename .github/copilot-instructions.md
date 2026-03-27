@@ -20,6 +20,31 @@ When generating or modifying code, keep changes focused, minimal, and aligned wi
 - Do not introduce new dependencies unless they are clearly required.
 - Reuse existing services/hooks/components before creating new ones.
 
+## Azure Dev Environment Targeting
+
+For any Azure-related build, deploy, validation, or test operation in this repository, target this development environment by default:
+
+- Subscription: `9788a92c-2f71-4629-8173-7ad449cb50e1`
+- Resource group: `rg-live-voice`
+- Full scope: `/subscriptions/9788a92c-2f71-4629-8173-7ad449cb50e1/resourceGroups/rg-live-voice`
+- AZD environment name: `live-voice`
+- JSON setting: `"azd-env-name": "live-voice"`
+
+When an agent is asked to update the solution and run tests in Azure, it should prefer this environment and avoid creating or switching to a different subscription/resource group unless explicitly requested.
+
+If using AZD, use/select the `live-voice` environment before provisioning/deploying/testing (for example: `azd env select live-voice`).
+
+## AZD Deployment Workflow
+
+For Azure-related application changes in this repository, prefer `azd deploy` as the default deployment path.
+
+- After changing backend, frontend, container configuration, deployment hooks, or app runtime settings that affect the deployed app, prefer running `azd deploy` from the repository root instead of ad-hoc Azure CLI, portal, or one-off container deployment commands.
+- Treat `azd deploy` as the expected happy path for incremental application delivery. Use `azd provision` only when infrastructure changes require it, then follow with `azd deploy`. Use `azd up` only when the task explicitly needs the full provision-and-deploy flow.
+- Before any AZD deploy/provision operation, select the `live-voice` environment and keep the deploy scoped to the default subscription and resource group unless the user explicitly asks otherwise.
+- If `azd deploy` fails, treat that as a blocker to resolve rather than something to work around. Investigate the root cause, fix the relevant code, configuration, script, or environment issue, and rerun `azd deploy`.
+- Do not claim Azure work is complete if the intended deployment path is `azd deploy` and it is still broken, unless an external blocker remains that cannot be resolved from the repository or current environment. In that case, report the exact blocker and the next required action.
+- When making changes that are meant to be exercised in Azure, prefer validating them with `azd deploy` before finishing whenever credentials and environment access are available.
+
 ## Backend (Python) Conventions
 
 Applies to files under `backend/**/*.py`.
