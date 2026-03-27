@@ -92,6 +92,69 @@ resource speechService 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
   }
 }
 
+// Cosmos DB for storing user conversations
+resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
+  name: '${abbrs.documentDBDatabaseAccounts}voicelab-${resourceToken}'
+  location: location
+  tags: tags
+  kind: 'GlobalDocumentDB'
+  properties: {
+    databaseAccountOfferType: 'Standard'
+    consistencyPolicy: {
+      defaultConsistencyLevel: 'Session'
+    }
+    locations: [
+      {
+        locationName: location
+        failoverPriority: 0
+        isZoneRedundant: false
+      }
+    ]
+    capabilities: [
+      {
+        name: 'EnableServerless'
+      }
+    ]
+  }
+}
+
+resource cosmosDatabase 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2024-05-15' = {
+  parent: cosmosAccount
+  name: 'voicelab'
+  properties: {
+    resource: {
+      id: 'voicelab'
+    }
+  }
+}
+
+resource cosmosContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: cosmosDatabase
+  name: 'conversations'
+  properties: {
+    resource: {
+      id: 'conversations'
+      partitionKey: {
+        paths: ['/user_id']
+        kind: 'Hash'
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        includedPaths: [
+          {
+            path: '/*'
+          }
+        ]
+        excludedPaths: [
+          {
+            path: '/"_etag"/?'
+          }
+        ]
+      }
+    }
+  }
+}
+
 // Monitor application with Azure Monitor
 module monitoring 'br/public:avm/ptn/azd/monitoring:0.1.0' = {
   name: 'monitoring'
@@ -224,6 +287,18 @@ module voicelab 'br/public:avm/res/app/container-app:0.8.0' = {
             name: 'HOST'
             value: '0.0.0.0'
           }
+          {
+            name: 'COSMOS_DB_ENDPOINT'
+            value: cosmosAccount.properties.documentEndpoint
+          }
+          {
+            name: 'COSMOS_DB_DATABASE'
+            value: cosmosDatabase.name
+          }
+          {
+            name: 'COSMOS_DB_CONTAINER'
+            value: cosmosContainer.name
+          }
         ]
       }
     ]
@@ -283,6 +358,17 @@ resource containerAppSpeechUserRole 'Microsoft.Authorization/roleAssignments@202
   }
 }
 
+// Cosmos DB Data Contributor role for container app identity
+resource containerAppCosmosDataContributorRole 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
+  parent: cosmosAccount
+  name: guid(cosmosAccount.id, voicelabIdentity.outputs.principalId, '00000000-0000-0000-0000-000000000002')
+  properties: {
+    principalId: voicelabIdentity.outputs.principalId
+    roleDefinitionId: '${cosmosAccount.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002'
+    scope: cosmosAccount.id
+  }
+}
+
 resource userAzureAIDeveloperRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(principalId)) {
   name: guid(resourceGroup().id, principalId, '64702f94-c441-49e6-a78b-ef80e0188fee')
   properties: {
@@ -313,3 +399,6 @@ output PROJECT_ENDPOINT string = '${aiFoundryResource.properties.endpoint}api/pr
 output AZURE_OPENAI_ENDPOINT string = aiFoundryResource.properties.endpoint
 output AZURE_SPEECH_REGION string =  location
 output AI_FOUNDRY_RESOURCE_NAME string = aiFoundryResource.name
+output COSMOS_DB_ENDPOINT string = cosmosAccount.properties.documentEndpoint
+output COSMOS_DB_DATABASE string = cosmosDatabase.name
+output COSMOS_DB_CONTAINER string = cosmosContainer.name

@@ -26,6 +26,10 @@ DEFAULT_VOICE_TYPE = "azure-standard"
 DEFAULT_AVATAR_CHARACTER = "lisa"
 DEFAULT_AVATAR_STYLE = "casual-sitting"
 
+# Cosmos DB defaults
+DEFAULT_COSMOS_DATABASE = "voicelab"
+DEFAULT_COSMOS_CONTAINER = "conversations"
+
 
 class Config:
     """Application configuration class."""
@@ -69,6 +73,10 @@ class Config:
             "azure_voice_type": os.getenv("AZURE_VOICE_TYPE", DEFAULT_VOICE_TYPE),
             "azure_avatar_character": os.getenv("AZURE_AVATAR_CHARACTER", DEFAULT_AVATAR_CHARACTER),
             "azure_avatar_style": os.getenv("AZURE_AVATAR_STYLE", DEFAULT_AVATAR_STYLE),
+            # Cosmos DB configuration
+            "cosmos_db_endpoint": os.getenv("COSMOS_DB_ENDPOINT", ""),
+            "cosmos_db_database": os.getenv("COSMOS_DB_DATABASE", DEFAULT_COSMOS_DATABASE),
+            "cosmos_db_container": os.getenv("COSMOS_DB_CONTAINER", DEFAULT_COSMOS_CONTAINER),
         }
         return result
 

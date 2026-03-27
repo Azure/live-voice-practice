@@ -11,14 +11,18 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Optional, cast
 
 import simple_websocket.ws  # pyright: ignore[reportMissingTypeStubs]
 from flask import Flask, jsonify, request, send_from_directory
 from flask_sock import Sock  # pyright: ignore[reportMissingTypeStubs]
 
+from src.services.auth import UserIdentity
+
 from src.config import config
 from src.services.analyzers import ConversationAnalyzer, PronunciationAssessor
+from src.services.auth import get_current_user, require_auth
+from src.services.database import conversation_store
 from src.services.managers import AgentManager, ScenarioManager
 from src.services.websocket_handler import VoiceProxyHandler
 
@@ -35,14 +39,19 @@ API_SCENARIOS_ENDPOINT = "/api/scenarios"
 API_AGENTS_CREATE_ENDPOINT = "/api/agents/create"
 API_ANALYZE_ENDPOINT = "/api/analyze"
 API_GRAPH_SCENARIO_ENDPOINT = "/api/scenarios/graph"
+API_CONVERSATIONS_ENDPOINT = "/api/conversations"
 
 # Error messages
 SCENARIO_ID_REQUIRED = "scenario_id is required"
 SCENARIO_NOT_FOUND = "Scenario not found"
 TRANSCRIPT_REQUIRED = "scenario_id and transcript are required"
+ACCESS_DENIED = "Access denied"
+CONVERSATION_NOT_FOUND = "Conversation not found"
 
 # HTTP status codes
 HTTP_BAD_REQUEST = 400
+HTTP_UNAUTHORIZED = 401
+HTTP_FORBIDDEN = 403
 HTTP_NOT_FOUND = 404
 HTTP_INTERNAL_SERVER_ERROR = 500
 
@@ -147,7 +156,7 @@ def delete_agent(agent_id: str):
 
 @app.route(API_ANALYZE_ENDPOINT, methods=["POST"])
 def analyze_conversation():
-    """Analyze a conversation for performance assessment."""
+    """Analyze a conversation for performance assessment and save it."""
     data = cast(Dict[str, Any], request.json)
     scenario_id = cast(str, data.get("scenario_id"))
     transcript = cast(str, data.get("transcript"))
@@ -159,7 +168,10 @@ def analyze_conversation():
     if not scenario_id or not transcript:
         return jsonify({"error": TRANSCRIPT_REQUIRED}), HTTP_BAD_REQUEST
 
-    return _perform_conversation_analysis(scenario_id, transcript, audio_data, reference_text)
+    # Get current user (may be None if not authenticated)
+    user = get_current_user()
+
+    return _perform_conversation_analysis(scenario_id, transcript, audio_data, reference_text, user)
 
 
 def _log_analyze_request(scenario_id: str, transcript: str, reference_text: str):
@@ -177,8 +189,9 @@ def _perform_conversation_analysis(
     transcript: str,
     audio_data: List[Dict[str, Any]],
     reference_text: str,
+    user: Optional[UserIdentity] = None,
 ):
-    """Perform the actual conversation analysis."""
+    """Perform the actual conversation analysis and save to database if user is authenticated."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -200,10 +213,153 @@ def _perform_conversation_analysis(
             logger.error("Pronunciation assessment failed: %s", pronunciation)
             pronunciation = None
 
-        return jsonify({"ai_assessment": ai_assessment, "pronunciation_assessment": pronunciation})
+        response_data: Dict[str, Any] = {
+            "ai_assessment": ai_assessment,
+            "pronunciation_assessment": pronunciation,
+        }
+
+        # Save conversation to database if user is authenticated
+        if user is not None:
+            assessment_data = {
+                "ai_assessment": ai_assessment,
+                "pronunciation_assessment": pronunciation,
+            }
+            metadata = {
+                "user_name": user.name,
+                "user_email": user.email,
+            }
+            conversation_id = conversation_store.save_conversation(
+                user_id=user.user_id,
+                scenario_id=scenario_id,
+                transcript=transcript,
+                assessment=assessment_data,
+                metadata=metadata,
+            )
+            if conversation_id:
+                response_data["conversation_id"] = conversation_id
+                logger.info("Conversation saved with ID: %s for user: %s", conversation_id, user.user_id)
+            else:
+                logger.warning("Failed to save conversation for user: %s", user.user_id)
+
+        return jsonify(response_data)
 
     finally:
         loop.close()
+
+
+@app.route(API_CONVERSATIONS_ENDPOINT, methods=["GET"])
+@require_auth
+def list_conversations():
+    """List conversations for the authenticated user."""
+    user = get_current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
+
+    limit = request.args.get("limit", 50, type=int)
+    offset = request.args.get("offset", 0, type=int)
+
+    # Validate pagination parameters
+    limit = max(1, min(100, limit))
+    offset = max(0, offset)
+
+    conversations = conversation_store.list_user_conversations(
+        user_id=user.user_id,
+        limit=limit,
+        offset=offset,
+    )
+
+    return jsonify({"conversations": conversations, "limit": limit, "offset": offset})
+
+
+@app.route(f"{API_CONVERSATIONS_ENDPOINT}/<conversation_id>", methods=["GET"])
+@require_auth
+def get_conversation(conversation_id: str):
+    """Get a specific conversation by ID.
+
+    Users can only access their own conversations unless they have admin role.
+    """
+    user = get_current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
+
+    # First, try to get conversation using user's ID as partition key (efficient)
+    conversation = conversation_store.get_conversation(
+        user_id=user.user_id,
+        conversation_id=conversation_id,
+    )
+
+    # If not found and user is admin, try cross-partition query
+    if conversation is None and user.is_admin:
+        conversation = conversation_store.get_conversation_by_id_admin(conversation_id)
+
+    if conversation is None:
+        return jsonify({"error": CONVERSATION_NOT_FOUND}), HTTP_NOT_FOUND
+
+    # Check access: user must own the conversation or be an admin
+    if not user.can_access_user_data(conversation.get("user_id", "")):
+        return jsonify({"error": ACCESS_DENIED}), HTTP_FORBIDDEN
+
+    return jsonify(conversation)
+
+
+@app.route(f"{API_CONVERSATIONS_ENDPOINT}/<conversation_id>", methods=["DELETE"])
+@require_auth
+def delete_conversation(conversation_id: str):
+    """Delete a specific conversation.
+
+    Users can only delete their own conversations unless they have admin role.
+    """
+    user = get_current_user()
+    if user is None:
+        return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
+
+    # First check if conversation exists and user has access
+    conversation = conversation_store.get_conversation(
+        user_id=user.user_id,
+        conversation_id=conversation_id,
+    )
+
+    # If not found with user's partition key and user is admin, try admin lookup
+    target_user_id = user.user_id
+    if conversation is None and user.is_admin:
+        conversation = conversation_store.get_conversation_by_id_admin(conversation_id)
+        if conversation:
+            target_user_id = conversation.get("user_id", "")
+
+    if conversation is None:
+        return jsonify({"error": CONVERSATION_NOT_FOUND}), HTTP_NOT_FOUND
+
+    # Check access: user must own the conversation or be an admin
+    if not user.can_access_user_data(conversation.get("user_id", "")):
+        return jsonify({"error": ACCESS_DENIED}), HTTP_FORBIDDEN
+
+    # Delete the conversation
+    success = conversation_store.delete_conversation(
+        user_id=target_user_id,
+        conversation_id=conversation_id,
+    )
+
+    if success:
+        return jsonify({"success": True})
+    return jsonify({"error": "Failed to delete conversation"}), HTTP_INTERNAL_SERVER_ERROR
+
+
+@app.route("/api/me", methods=["GET"])
+def get_current_user_info():
+    """Get information about the current authenticated user."""
+    user = get_current_user()
+    if user is None:
+        return jsonify({"authenticated": False})
+
+    return jsonify(
+        {
+            "authenticated": True,
+            "user_id": user.user_id,
+            "name": user.name,
+            "email": user.email,
+            "is_admin": user.is_admin,
+        }
+    )
 
 
 @app.route(f"/{AUDIO_PROCESSOR_FILE}")
