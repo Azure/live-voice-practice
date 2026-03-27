@@ -36,12 +36,12 @@ class ConversationStore:
         if self._initialized:
             return self._container is not None
 
-        endpoint = config.get("cosmos_db_endpoint")
-        database_name = config.get("cosmos_db_database", "voicelab")
-        container_name = config.get("cosmos_db_container", "conversations")
+        endpoint = config.get("cosmos_endpoint")
+        database_name = config.get("cosmos_database_name", "voicelab")
+        container_name = config.get("cosmos_conversations_container", "conversations")
 
         if not endpoint:
-            logger.warning("COSMOS_DB_ENDPOINT not configured, conversation storage disabled")
+            logger.warning("cosmos_endpoint not configured, conversation storage disabled")
             self._initialized = True
             return False
 

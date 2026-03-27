@@ -128,6 +128,14 @@ export const api = {
     return res.json()
   },
 
+  async deleteConversation(conversationId: string): Promise<{ success: boolean }> {
+    const res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error('Failed to delete conversation')
+    return res.json()
+  },
+
   async listConversations(
     limit: number = 20,
     offset: number = 0,

@@ -22,9 +22,11 @@ import {
     ArrowSortDownRegular,
     ArrowSortUpRegular,
     ChartMultipleRegular,
+    DeleteRegular,
 } from '@fluentui/react-icons'
 import { Assessment, ConversationSummary } from '../types'
 import { useConversations } from '../hooks/useConversations'
+import { api } from '../services/api'
 
 const useStyles = makeStyles({
   card: {
@@ -62,6 +64,12 @@ const useStyles = makeStyles({
     color: tokens.colorBrandForeground1,
     '&:hover': {
       color: tokens.colorBrandForeground2,
+    },
+  },
+  deleteIcon: {
+    color: tokens.colorNeutralForeground3,
+    '&:hover': {
+      color: tokens.colorPaletteRedForeground1,
     },
   },
   pagination: {
@@ -120,6 +128,7 @@ export function ConversationList({
     sortOrder,
     setPage,
     setSort,
+    refresh,
   } = useConversations()
 
   const handleSort = (column: SortableColumn) => {
@@ -146,6 +155,16 @@ export function ConversationList({
     e.stopPropagation()
     if (conv.assessment) {
       onViewAssessment(conv.assessment)
+    }
+  }
+
+  const handleDelete = async (e: React.MouseEvent, convId: string) => {
+    e.stopPropagation()
+    try {
+      await api.deleteConversation(convId)
+      refresh()
+    } catch (err) {
+      console.error('Failed to delete conversation:', err)
     }
   }
 
@@ -197,6 +216,7 @@ export function ConversationList({
                   <TableHeaderCell>
                     <div className={styles.headerCell}>Assessment</div>
                   </TableHeaderCell>
+                  <TableHeaderCell />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -230,6 +250,16 @@ export function ConversationList({
                           title="View assessment"
                         />
                       ) : null}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        appearance="subtle"
+                        icon={<DeleteRegular />}
+                        size="small"
+                        className={styles.deleteIcon}
+                        onClick={e => handleDelete(e, conv.id)}
+                        title="Delete conversation"
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
