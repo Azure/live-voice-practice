@@ -37,9 +37,10 @@ const useStyles = makeStyles({
     maxHeight: '90vh',
     display: 'flex',
     flexDirection: 'column',
+    overflow: 'hidden',
   },
   dialogBody: {
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
@@ -74,8 +75,9 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalL,
   },
   card: {
-    padding: tokens.spacingVerticalL,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
     height: 'fit-content',
+    overflow: 'hidden',
   },
   tabContent: {
     minHeight: '200px',
@@ -116,17 +118,14 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalM,
   },
   feedbackItem: {
-    padding: tokens.spacingVerticalL,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
     marginBottom: '0',
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusLarge,
     borderLeft: `4px solid ${tokens.colorBrandBackground}`,
     boxShadow: tokens.shadow4,
-    transition: 'all 0.2s ease',
-    '&:hover': {
-      boxShadow: tokens.shadow8,
-      transform: 'translateY(-1px)',
-    },
+    overflow: 'hidden',
+    wordBreak: 'break-word' as const,
   },
   improvementItem: {
     borderLeftColor: tokens.colorPaletteYellowBackground3,
@@ -143,6 +142,7 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalS,
     flexWrap: 'wrap' as const,
     gap: tokens.spacingHorizontalS,
+    minWidth: 0,
   },
   feedbackText: {
     lineHeight: 1.6,
@@ -334,7 +334,7 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                   <CardHeader
                     header={
                       <Text size={500} weight="semibold">
-                        🎯 AI Sales Assessment
+                        🎯 Practice Assessment
                       </Text>
                     }
                   />
@@ -466,6 +466,17 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                       </Text>
                     }
                   />
+
+                  {pron.accuracy_score === 0 && pron.fluency_score === 0 && (
+                    <Text
+                      size={300}
+                      block
+                      style={{ marginBottom: tokens.spacingVerticalM, color: tokens.colorNeutralForeground3, fontStyle: 'italic' }}
+                    >
+                      Pronunciation scores are zero because the speech service did not detect enough spoken content to evaluate.
+                      This can happen when the session is too short, the microphone input is low, or the language spoken differs from the expected one.
+                    </Text>
+                  )}
 
                   <div className={styles.metric}>
                     <div className={styles.metricHeader}>
