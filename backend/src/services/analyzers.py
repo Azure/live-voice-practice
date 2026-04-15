@@ -597,6 +597,35 @@ CONVERSATION TO EVALUATE:
             if isinstance(improvement, dict):
                 improvement["max_score"] = scale_max
 
+        # Backfill missing improvements: every criterion with score < scale_max must have an entry
+        rubric_criteria = {c.get("criterionId", ""): c.get("name", c.get("criterionId", ""))
+                          for c in rubric.get("criteria", [])}
+        existing_criteria = set()
+        for imp in result.get("improvements", []):
+            if isinstance(imp, dict) and imp.get("criterion"):
+                existing_criteria.add(imp["criterion"].lower().replace(" ", "_"))
+                existing_criteria.add(imp["criterion"].lower())
+
+        improvements = result.get("improvements", [])
+        for cid, entry in criteria_scores.items():
+            if not isinstance(entry, dict):
+                continue
+            score = entry.get("score", 0)
+            if score >= scale_max:
+                continue
+            if cid.lower() in existing_criteria:
+                continue
+            name = rubric_criteria.get(cid, cid)
+            if name.lower() in existing_criteria:
+                continue
+            improvements.append({
+                "criterion": name,
+                "score": score,
+                "max_score": scale_max,
+                "recommendation": entry.get("justification", "Review this criterion for improvement."),
+            })
+        result["improvements"] = improvements
+
         result["passed"] = result["overall_score"] >= pass_threshold
         result["pass_threshold"] = pass_threshold
         result["scale_max"] = scale_max

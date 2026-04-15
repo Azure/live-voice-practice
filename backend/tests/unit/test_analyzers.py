@@ -290,10 +290,14 @@ class TestConversationAnalyzer:
         analyzer = ConversationAnalyzer()
         rubric = {
             "rubricId": "test-rubric",
-            "scoring": {"passThreshold": 3.5},
+            "criteria": [
+                {"criterionId": "empathy", "name": "Empathy"},
+                {"criterionId": "clarity", "name": "Clarity"},
+            ],
+            "scoring": {"passThreshold": 3.5, "scale": "1-5"},
         }
 
-        # Passing result
+        # Passing result — clarity has perfect score (5), empathy (4) has improvement provided by LLM
         result = {
             "criteria_scores": {
                 "empathy": {"score": 4, "justification": "Good empathy."},
@@ -317,8 +321,10 @@ class TestConversationAnalyzer:
         assert processed["scale_max"] == 5
         # max_score in improvements must be normalized to the rubric scale
         assert processed["improvements"][0]["max_score"] == 5
+        # clarity scored 5/5 (perfect) so no backfill; only 1 improvement
+        assert len(processed["improvements"]) == 1
 
-        # Failing result
+        # Failing result — LLM only returned empathy improvement, clarity (3/5) should be backfilled
         result2 = {
             "criteria_scores": {
                 "empathy": {"score": 2, "justification": "Needs work."},
@@ -336,6 +342,12 @@ class TestConversationAnalyzer:
         processed2 = analyzer._process_rubric_evaluation_result(result2, rubric)
         assert processed2["overall_score"] == 2.5
         assert processed2["passed"] is False
+        # clarity was missing from improvements and scored < 5, so it should be backfilled
+        assert len(processed2["improvements"]) == 2
+        backfilled = [i for i in processed2["improvements"] if i["criterion"] == "Clarity"]
+        assert len(backfilled) == 1
+        assert backfilled[0]["score"] == 3
+        assert backfilled[0]["max_score"] == 5
 
     @pytest.mark.asyncio
     async def test_analyze_conversation_uses_rubric_when_provided(self):
