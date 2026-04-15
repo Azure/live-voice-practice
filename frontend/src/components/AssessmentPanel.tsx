@@ -37,7 +37,6 @@ const useStyles = makeStyles({
     maxHeight: '90vh',
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
   },
   dialogBody: {
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
@@ -45,8 +44,10 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     overflowY: 'auto',
-    flex: '1',
+    overflowX: 'hidden',
+    flex: '1 1 auto',
     minHeight: 0,
+    maxHeight: '70vh',
   },
   headerBar: {
     backgroundColor: tokens.colorNeutralBackground2,
