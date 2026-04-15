@@ -24,6 +24,7 @@ from src.services.conversation_manager import ConversationManager
 from src.services.database import conversation_store
 from src.services.managers import AgentManager, ScenarioManager
 from src.services.role_store import role_store
+from src.services.search_service import SupportMaterialsSearchService
 from src.services.websocket_handler import VoiceProxyHandler
 
 # Constants
@@ -68,7 +69,55 @@ sock = Sock(app)
 scenario_manager = ScenarioManager()
 agent_manager = AgentManager()
 conversation_manager = ConversationManager()
-conversation_analyzer = ConversationAnalyzer()
+
+
+def _initialize_search_service():
+    """Initialize the supporting materials search service if configured."""
+    search_endpoint = config.get("azure_search_endpoint", "")
+    if not search_endpoint:
+        logger.info("Azure AI Search endpoint not configured — search service disabled")
+        return None
+
+    try:
+        from openai import AzureOpenAI as _AzureOpenAI  # pylint: disable=C0415
+        from azure.identity import (  # pylint: disable=C0415
+            DefaultAzureCredential as _DefaultAzureCredential,
+            get_bearer_token_provider as _get_bearer_token_provider,
+        )
+
+        endpoint = config["azure_openai_endpoint"]
+        api_key = config.get("azure_openai_api_key", "")
+
+        if api_key:
+            openai_client = _AzureOpenAI(
+                api_version=config["api_version"],
+                azure_endpoint=endpoint,
+                api_key=api_key,
+            )
+        else:
+            token_provider = _get_bearer_token_provider(
+                _DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
+            )
+            openai_client = _AzureOpenAI(
+                api_version=config["api_version"],
+                azure_endpoint=endpoint,
+                azure_ad_token_provider=token_provider,
+            )
+
+        return SupportMaterialsSearchService(
+            search_endpoint=search_endpoint,
+            index_name=config.get("azure_search_index", "support-materials"),
+            openai_client=openai_client,
+            embedding_deployment=config.get("azure_search_embedding_deployment", "text-embedding-3-small"),
+            search_api_key=config.get("azure_search_api_key", ""),
+        )
+    except Exception as e:
+        logger.warning("Failed to initialize search service (non-blocking): %s", e)
+        return None
+
+
+search_service = _initialize_search_service()
+conversation_analyzer = ConversationAnalyzer(search_service=search_service)
 pronunciation_assessor = PronunciationAssessor()
 voice_proxy_handler = VoiceProxyHandler(agent_manager)
 

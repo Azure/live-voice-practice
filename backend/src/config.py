@@ -264,6 +264,30 @@ class Config:
                 app_config_key="APP_DISPLAY_NAME",
                 default="Live Voice Practice",
             ),
+            "azure_search_endpoint": self._get_setting(
+                env_var="AZURE_SEARCH_ENDPOINT",
+                app_config=app_config_values,
+                app_config_key="AZURE_SEARCH_ENDPOINT",
+                default="",
+            ),
+            "azure_search_index": self._get_setting(
+                env_var="AZURE_SEARCH_INDEX",
+                app_config=app_config_values,
+                app_config_key="AZURE_SEARCH_INDEX",
+                default="support-materials",
+            ),
+            "azure_search_api_key": self._get_setting(
+                env_var="AZURE_SEARCH_API_KEY",
+                app_config=app_config_values,
+                app_config_key="AZURE_SEARCH_API_KEY",
+                default="",
+            ),
+            "azure_search_embedding_deployment": self._get_setting(
+                env_var="AZURE_SEARCH_EMBEDDING_DEPLOYMENT",
+                app_config=app_config_values,
+                app_config_key="AZURE_SEARCH_EMBEDDING_DEPLOYMENT",
+                default="text-embedding-3-small",
+            ),
 
         }
         return result

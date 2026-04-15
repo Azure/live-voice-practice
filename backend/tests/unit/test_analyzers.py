@@ -101,8 +101,51 @@ class TestConversationAnalyzer:
         assert "conversation_content" in schema["properties"]
         assert "overall_score" in schema["properties"]
 
+        # Verify sub-criteria are now { score, explanation } objects
+        tone_props = schema["properties"]["speaking_tone_style"]["properties"]
+        assert tone_props["professional_tone"]["type"] == "object"
+        assert "score" in tone_props["professional_tone"]["properties"]
+        assert "explanation" in tone_props["professional_tone"]["properties"]
+
+        # Verify improvements are structured objects
+        improvement_schema = schema["properties"]["improvements"]["items"]
+        assert improvement_schema["type"] == "object"
+        assert "criterion" in improvement_schema["properties"]
+        assert "recommendation" in improvement_schema["properties"]
+
     def test_process_evaluation_result(self):
-        """Test processing evaluation results."""
+        """Test processing evaluation results with new nested score format."""
+        analyzer = ConversationAnalyzer()
+
+        evaluation_json = {
+            "speaking_tone_style": {
+                "professional_tone": {"score": 8, "explanation": "Good tone throughout."},
+                "active_listening": {"score": 7, "explanation": "Decent listening."},
+                "engagement_quality": {"score": 9, "explanation": "Great engagement."},
+                "total": 0,
+            },
+            "conversation_content": {
+                "needs_assessment": {"score": 20, "explanation": "Solid assessment."},
+                "value_proposition": {"score": 18, "explanation": "Clear value."},
+                "objection_handling": {"score": 15, "explanation": "Handled well."},
+                "total": 0,
+            },
+            "overall_score": 77,
+            "strengths": ["Good engagement"],
+            "improvements": [
+                {"criterion": "Active Listening", "score": 7, "max_score": 10, "recommendation": "Ask more questions"}
+            ],
+            "specific_feedback": "Overall good performance",
+        }
+
+        result = analyzer._process_evaluation_result(evaluation_json)
+
+        assert result["speaking_tone_style"]["total"] == 24
+        assert result["conversation_content"]["total"] == 53
+        assert result["overall_score"] == 77
+
+    def test_process_evaluation_result_legacy_format(self):
+        """Test processing legacy evaluation results with flat integer scores."""
         analyzer = ConversationAnalyzer()
 
         evaluation_json = {
@@ -110,13 +153,13 @@ class TestConversationAnalyzer:
                 "professional_tone": 8,
                 "active_listening": 7,
                 "engagement_quality": 9,
-                "total": 0,  # Will be recalculated
+                "total": 0,
             },
             "conversation_content": {
                 "needs_assessment": 20,
                 "value_proposition": 18,
                 "objection_handling": 15,
-                "total": 0,  # Will be recalculated
+                "total": 0,
             },
             "overall_score": 77,
             "strengths": ["Good engagement"],
@@ -128,7 +171,12 @@ class TestConversationAnalyzer:
 
         assert result["speaking_tone_style"]["total"] == 24
         assert result["conversation_content"]["total"] == 53
-        assert result["overall_score"] == 77
+
+    def test_extract_score(self):
+        """Test _extract_score handles both formats."""
+        assert ConversationAnalyzer._extract_score(8) == 8
+        assert ConversationAnalyzer._extract_score({"score": 7, "explanation": "Good"}) == 7
+        assert ConversationAnalyzer._extract_score({}) == 0
 
     def test_build_evaluation_messages(self):
         """Test building evaluation messages for API call."""
@@ -254,7 +302,9 @@ class TestConversationAnalyzer:
             "overall_score": 0,
             "passed": False,
             "strengths": ["Clear"],
-            "improvements": ["None"],
+            "improvements": [
+                {"criterion": "Empathy", "score": 4, "max_score": 5, "recommendation": "More acknowledgment"}
+            ],
             "specific_feedback": "Well done.",
         }
 
@@ -273,7 +323,9 @@ class TestConversationAnalyzer:
             "overall_score": 0,
             "passed": True,
             "strengths": [],
-            "improvements": ["Empathy"],
+            "improvements": [
+                {"criterion": "Empathy", "score": 2, "max_score": 5, "recommendation": "Show more empathy"}
+            ],
             "specific_feedback": "Needs improvement.",
         }
 
@@ -304,6 +356,24 @@ class TestConversationAnalyzer:
 
         result = await analyzer.analyze_conversation("test", "transcript", rubric=None)
         assert result is None
+
+    def test_criteria_mention_support_materials(self):
+        """Test detection of support material keywords in criteria."""
+        assert ConversationAnalyzer._criteria_mention_support_materials(
+            ["Check if agent followed company policy"]
+        ) is True
+        assert ConversationAnalyzer._criteria_mention_support_materials(
+            ["Use compliance guidelines for evaluation"]
+        ) is True
+        assert ConversationAnalyzer._criteria_mention_support_materials(
+            ["Check tone and empathy"]
+        ) is False
+
+    def test_init_with_search_service(self):
+        """Test analyzer can be initialized with a search service."""
+        mock_search = Mock()
+        analyzer = ConversationAnalyzer(search_service=mock_search)
+        assert analyzer.search_service is mock_search
 
 
 # pylint: enable=R0801

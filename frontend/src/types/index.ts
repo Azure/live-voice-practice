@@ -32,25 +32,39 @@ export interface CriterionScore {
   justification: string
 }
 
+/** Scored criterion with explanation (new format) or plain number (legacy stored data). */
+export type ScoredCriterion = { score: number; explanation: string } | number
+
+/** Structured improvement recommendation tied to a specific criterion. */
+export interface Improvement {
+  criterion: string
+  score: number
+  max_score: number
+  recommendation: string
+}
+
+/** An improvement entry can be the new structured format or a legacy plain string. */
+export type ImprovementEntry = Improvement | string
+
 export interface Assessment {
   ai_assessment?: {
     speaking_tone_style?: {
-      professional_tone: number
-      active_listening: number
-      engagement_quality: number
+      professional_tone: ScoredCriterion
+      active_listening: ScoredCriterion
+      engagement_quality: ScoredCriterion
       total: number
     }
     conversation_content?: {
-      needs_assessment: number
-      value_proposition: number
-      objection_handling: number
+      needs_assessment: ScoredCriterion
+      value_proposition: ScoredCriterion
+      objection_handling: ScoredCriterion
       total: number
     }
     criteria_scores?: Record<string, CriterionScore>
     overall_score: number
     passed?: boolean
     strengths: string[]
-    improvements: string[]
+    improvements: ImprovementEntry[]
     specific_feedback?: string
   }
   pronunciation_assessment?: {

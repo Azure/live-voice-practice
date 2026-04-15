@@ -27,7 +27,7 @@ ehthumbs.db
 Thumbs.db
 
 # Dependencies (installed inside container)
-node_modules/
+**/node_modules/
 .npm
 .yarn/
 

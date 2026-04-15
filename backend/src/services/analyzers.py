@@ -50,7 +50,13 @@ AUDIO_BITS_PER_SAMPLE = 16
 
 # Assessment constants
 MAX_STRENGTHS_COUNT = 3
-MAX_IMPROVEMENTS_COUNT = 3
+
+# Keywords that indicate criteria reference supporting documentation / policies
+SUPPORT_MATERIAL_KEYWORDS = [
+    "policy", "policies", "procedure", "procedures", "guideline", "guidelines",
+    "supporting", "documentation", "compliance", "regulation", "protocol",
+    "standard", "handbook", "manual", "reference", "knowledge base",
+]
 
 # Fallback evaluation prompt for custom scenarios
 FALLBACK_EVALUATION_PROMPT = """You are an expert communication coach evaluating a role-play conversation.
@@ -67,16 +73,18 @@ Provide constructive feedback to help improve their skills."""
 class ConversationAnalyzer:
     """Analyzes sales conversations using Azure OpenAI."""
 
-    def __init__(self, scenario_dir: Optional[Path] = None):
+    def __init__(self, scenario_dir: Optional[Path] = None, search_service: Optional[Any] = None):
         """
         Initialize the conversation analyzer.
 
         Args:
             scenario_dir: Directory containing evaluation scenario files
+            search_service: Optional SupportMaterialsSearchService for retrieving supporting materials
         """
         self.scenario_dir = determine_scenario_directory(scenario_dir)
         self.evaluation_scenarios = self._load_evaluation_scenarios()
         self.openai_client = self._initialize_openai_client()
+        self.search_service = search_service
 
     def _load_evaluation_scenarios(self) -> Dict[str, Any]:
         """
@@ -180,9 +188,20 @@ class ConversationAnalyzer:
 
         return await self._call_evaluation_model(evaluation_scenario, transcript)
 
-    def _build_evaluation_prompt(self, scenario: Dict[str, Any], transcript: str) -> str:
+    def _build_evaluation_prompt(
+        self, scenario: Dict[str, Any], transcript: str, supporting_materials: str = ""
+    ) -> str:
         """Build the evaluation prompt."""
         base_prompt = scenario["messages"][0]["content"]
+
+        materials_section = ""
+        if supporting_materials:
+            materials_section = f"""
+
+SUPPORTING MATERIALS (use these as reference when evaluating policy adherence and accuracy):
+{supporting_materials}
+"""
+
         return f"""{base_prompt}
 
         EVALUATION CRITERIA:
@@ -199,11 +218,18 @@ class ConversationAnalyzer:
 
         Calculate overall_score as the sum of all individual scores (max {MAX_OVERALL_SCORE}).
 
+        For EACH criterion, provide:
+        - A numeric score within the specified range
+        - A one-sentence explanation justifying WHY you assigned that score
+
         You are evaluating the conversation from perspective of the user (Starting the conversation)
         DO NOT rate the conversation of the 'assistant'!
 
-        Provide maximum of {MAX_STRENGTHS_COUNT} strengths and {MAX_IMPROVEMENTS_COUNT} areas of improvement.
-
+        Provide maximum of {MAX_STRENGTHS_COUNT} strengths.
+        For areas of improvement, provide a recommendation for EVERY criterion that did not receive a
+        perfect score. Each improvement must reference the specific criterion name, include its score,
+        and provide an actionable recommendation. Sort by lowest score first.
+        {materials_section}
         CONVERSATION TO EVALUATE:
         {transcript}
         """
@@ -226,7 +252,8 @@ class ConversationAnalyzer:
         openai_client = self.openai_client
 
         try:
-            evaluation_prompt = self._build_evaluation_prompt(scenario, transcript)
+            supporting_materials = await self._fetch_supporting_materials_for_scenario(scenario)
+            evaluation_prompt = self._build_evaluation_prompt(scenario, transcript, supporting_materials)
 
             completion = await asyncio.get_event_loop().run_in_executor(
                 None,
@@ -261,6 +288,28 @@ class ConversationAnalyzer:
 
     def _get_response_format(self) -> Dict[str, Any]:
         """Get the structured response format for OpenAI."""
+        scored_criterion = {
+            "type": "object",
+            "properties": {
+                "score": {"type": "integer"},
+                "explanation": {"type": "string"},
+            },
+            "required": ["score", "explanation"],
+            "additionalProperties": False,
+        }
+
+        improvement_item = {
+            "type": "object",
+            "properties": {
+                "criterion": {"type": "string"},
+                "score": {"type": "integer"},
+                "max_score": {"type": "integer"},
+                "recommendation": {"type": "string"},
+            },
+            "required": ["criterion", "score", "max_score", "recommendation"],
+            "additionalProperties": False,
+        }
+
         return {
             "type": "json_schema",
             "json_schema": {
@@ -272,9 +321,9 @@ class ConversationAnalyzer:
                         "speaking_tone_style": {
                             "type": "object",
                             "properties": {
-                                "professional_tone": {"type": "integer"},
-                                "active_listening": {"type": "integer"},
-                                "engagement_quality": {"type": "integer"},
+                                "professional_tone": scored_criterion,
+                                "active_listening": scored_criterion,
+                                "engagement_quality": scored_criterion,
                                 "total": {"type": "integer"},
                             },
                             "required": [
@@ -288,9 +337,9 @@ class ConversationAnalyzer:
                         "conversation_content": {
                             "type": "object",
                             "properties": {
-                                "needs_assessment": {"type": "integer"},
-                                "value_proposition": {"type": "integer"},
-                                "objection_handling": {"type": "integer"},
+                                "needs_assessment": scored_criterion,
+                                "value_proposition": scored_criterion,
+                                "objection_handling": scored_criterion,
                                 "total": {"type": "integer"},
                             },
                             "required": [
@@ -308,7 +357,7 @@ class ConversationAnalyzer:
                         },
                         "improvements": {
                             "type": "array",
-                            "items": {"type": "string"},
+                            "items": improvement_item,
                         },
                         "specific_feedback": {"type": "string"},
                     },
@@ -325,21 +374,30 @@ class ConversationAnalyzer:
             },
         }
 
+    @staticmethod
+    def _extract_score(value: Any) -> int:
+        """Extract numeric score from a criterion value (handles both int and {score, explanation} formats)."""
+        if isinstance(value, dict):
+            return int(value.get("score", 0))
+        return int(value)
+
     def _process_evaluation_result(self, evaluation_json: Dict[str, Any]) -> Dict[str, Any]:
         """Process and validate evaluation results."""
-        evaluation_json["speaking_tone_style"]["total"] = sum(
+        tone = evaluation_json["speaking_tone_style"]
+        tone["total"] = sum(
             [
-                evaluation_json["speaking_tone_style"]["professional_tone"],
-                evaluation_json["speaking_tone_style"]["active_listening"],
-                evaluation_json["speaking_tone_style"]["engagement_quality"],
+                self._extract_score(tone["professional_tone"]),
+                self._extract_score(tone["active_listening"]),
+                self._extract_score(tone["engagement_quality"]),
             ]
         )
 
-        evaluation_json["conversation_content"]["total"] = sum(
+        content = evaluation_json["conversation_content"]
+        content["total"] = sum(
             [
-                evaluation_json["conversation_content"]["needs_assessment"],
-                evaluation_json["conversation_content"]["value_proposition"],
-                evaluation_json["conversation_content"]["objection_handling"],
+                self._extract_score(content["needs_assessment"]),
+                self._extract_score(content["value_proposition"]),
+                self._extract_score(content["objection_handling"]),
             ]
         )
 
@@ -360,7 +418,12 @@ class ConversationAnalyzer:
         openai_client = self.openai_client
 
         try:
-            prompt = self._build_rubric_evaluation_prompt(scenario, transcript, rubric)
+            supporting_materials = await self._fetch_supporting_materials(
+                scenario, rubric
+            )
+            prompt = self._build_rubric_evaluation_prompt(
+                scenario, transcript, rubric, supporting_materials
+            )
             response_format = self._get_rubric_response_format(rubric)
 
             completion = await asyncio.get_event_loop().run_in_executor(
@@ -393,7 +456,8 @@ class ConversationAnalyzer:
             return None
 
     def _build_rubric_evaluation_prompt(
-        self, scenario: Dict[str, Any], transcript: str, rubric: Dict[str, Any]
+        self, scenario: Dict[str, Any], transcript: str, rubric: Dict[str, Any],
+        supporting_materials: str = "",
     ) -> str:
         """Build a prompt that incorporates the rubric criteria."""
         base_prompt = scenario["messages"][0]["content"]
@@ -415,6 +479,14 @@ class ConversationAnalyzer:
 
         criteria_block = "\n".join(criteria_lines)
 
+        materials_section = ""
+        if supporting_materials:
+            materials_section = f"""
+
+SUPPORTING MATERIALS (use these as reference when evaluating policy adherence and accuracy):
+{supporting_materials}
+"""
+
         return f"""{base_prompt}
 
 EVALUATION RUBRIC (score each criterion on a {scale} scale):
@@ -428,8 +500,11 @@ SCORING RULES:
 - You are evaluating the conversation from the perspective of the user/trainee.
 - DO NOT rate the conversation of the 'assistant' (the customer avatar).
 
-Provide a maximum of {MAX_STRENGTHS_COUNT} strengths and {MAX_IMPROVEMENTS_COUNT} areas for improvement.
-
+Provide a maximum of {MAX_STRENGTHS_COUNT} strengths.
+For areas of improvement, provide a recommendation for EVERY criterion that did not receive a
+perfect score. Each improvement must reference the specific criterion name, include its score,
+and provide an actionable recommendation. Sort by lowest score first.
+{materials_section}
 CONVERSATION TO EVALUATE:
 {transcript}
 """
@@ -470,7 +545,20 @@ CONVERSATION TO EVALUATE:
                         "overall_score": {"type": "number"},
                         "passed": {"type": "boolean"},
                         "strengths": {"type": "array", "items": {"type": "string"}},
-                        "improvements": {"type": "array", "items": {"type": "string"}},
+                        "improvements": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "criterion": {"type": "string"},
+                                    "score": {"type": "integer"},
+                                    "max_score": {"type": "integer"},
+                                    "recommendation": {"type": "string"},
+                                },
+                                "required": ["criterion", "score", "max_score", "recommendation"],
+                                "additionalProperties": False,
+                            },
+                        },
                         "specific_feedback": {"type": "string"},
                     },
                     "required": [
@@ -507,6 +595,80 @@ CONVERSATION TO EVALUATE:
             result.get("passed"),
         )
         return result
+
+    # ------------------------------------------------------------------
+    # Supporting materials retrieval from AI Search
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _criteria_mention_support_materials(criteria_texts: List[str]) -> bool:
+        """Check if any criteria text mentions policy/supporting documentation keywords."""
+        combined = " ".join(criteria_texts).lower()
+        return any(kw in combined for kw in SUPPORT_MATERIAL_KEYWORDS)
+
+    async def _fetch_supporting_materials(
+        self, scenario: Dict[str, Any], rubric: Dict[str, Any]
+    ) -> str:
+        """Fetch supporting materials from AI Search when criteria reference policies."""
+        if not self.search_service:
+            return ""
+
+        try:
+            criteria_texts = []
+            for criterion in rubric.get("criteria", []):
+                criteria_texts.append(criterion.get("name", ""))
+                criteria_texts.append(criterion.get("description", ""))
+
+            if not self._criteria_mention_support_materials(criteria_texts):
+                return ""
+
+            base_prompt = scenario.get("messages", [{}])[0].get("content", "")
+            query = f"{base_prompt[:200]} {' '.join(criteria_texts[:5])}"
+
+            materials = await self.search_service.search_supporting_materials(query)
+            if not materials:
+                return ""
+
+            sections = []
+            for mat in materials:
+                title = mat.get("title", "Untitled")
+                content = mat.get("content", "")
+                if content:
+                    sections.append(f"--- {title} ---\n{content}")
+
+            return "\n\n".join(sections)
+        except Exception as e:
+            logger.warning("Failed to fetch supporting materials: %s", e)
+            return ""
+
+    async def _fetch_supporting_materials_for_scenario(
+        self, scenario: Dict[str, Any]
+    ) -> str:
+        """Fetch supporting materials for the legacy (non-rubric) evaluation."""
+        if not self.search_service:
+            return ""
+
+        try:
+            base_prompt = scenario.get("messages", [{}])[0].get("content", "")
+            if not self._criteria_mention_support_materials([base_prompt]):
+                return ""
+
+            query = base_prompt[:300]
+            materials = await self.search_service.search_supporting_materials(query)
+            if not materials:
+                return ""
+
+            sections = []
+            for mat in materials:
+                title = mat.get("title", "Untitled")
+                content = mat.get("content", "")
+                if content:
+                    sections.append(f"--- {title} ---\n{content}")
+
+            return "\n\n".join(sections)
+        except Exception as e:
+            logger.warning("Failed to fetch supporting materials for scenario: %s", e)
+            return ""
 
 
 class PronunciationAssessor:
