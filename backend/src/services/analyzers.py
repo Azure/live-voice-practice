@@ -584,8 +584,22 @@ CONVERSATION TO EVALUATE:
         if scores:
             result["overall_score"] = round(sum(scores) / len(scores), 2)
 
-        pass_threshold = rubric.get("scoring", {}).get("passThreshold", 3.5)
+        scoring = rubric.get("scoring", {})
+        pass_threshold = scoring.get("passThreshold", 3.5)
+        scale_str = scoring.get("scale", "1-5")
+        try:
+            scale_max = int(scale_str.split("-")[-1])
+        except (ValueError, IndexError):
+            scale_max = 5
+
+        # Normalize max_score in improvements to match the rubric scale
+        for improvement in result.get("improvements", []):
+            if isinstance(improvement, dict):
+                improvement["max_score"] = scale_max
+
         result["passed"] = result["overall_score"] >= pass_threshold
+        result["pass_threshold"] = pass_threshold
+        result["scale_max"] = scale_max
         result["rubricId"] = rubric.get("rubricId")
         result["evaluation_type"] = "rubric"
 

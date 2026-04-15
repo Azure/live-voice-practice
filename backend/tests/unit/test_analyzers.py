@@ -313,6 +313,10 @@ class TestConversationAnalyzer:
         assert processed["passed"] is True
         assert processed["rubricId"] == "test-rubric"
         assert processed["evaluation_type"] == "rubric"
+        assert processed["pass_threshold"] == 3.5
+        assert processed["scale_max"] == 5
+        # max_score in improvements must be normalized to the rubric scale
+        assert processed["improvements"][0]["max_score"] == 5
 
         # Failing result
         result2 = {

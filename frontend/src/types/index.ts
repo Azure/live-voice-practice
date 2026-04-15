@@ -63,6 +63,8 @@ export interface Assessment {
     criteria_scores?: Record<string, CriterionScore>
     overall_score: number
     passed?: boolean
+    pass_threshold?: number
+    scale_max?: number
     strengths: string[]
     improvements: ImprovementEntry[]
     specific_feedback?: string

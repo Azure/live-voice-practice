@@ -215,7 +215,10 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
     return 'danger'
   }
 
-  const getRubricScoreColor = (score: number, max: number = 5): 'success' | 'warning' | 'danger' => {
+  const scaleMax = ai?.scale_max ?? 5
+  const passThreshold = ai?.pass_threshold ?? 3.5
+
+  const getRubricScoreColor = (score: number, max: number = scaleMax): 'success' | 'warning' | 'danger' => {
     const pct = (score / max) * 100
     if (pct >= 70) return 'success'
     if (pct >= 50) return 'warning'
@@ -250,7 +253,7 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                 </span>
                 {isRubricBased ? (
                   <>
-                    <Text size={400} weight="regular">/ 5</Text>
+                    <Text size={400} weight="regular">/ {scaleMax}</Text>
                     <Badge
                       color={getRubricScoreColor(ai.overall_score)}
                       appearance="filled"
@@ -274,15 +277,15 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                 )}
               </div>
               <ProgressBar
-                value={isRubricBased ? ai.overall_score / 5 : ai.overall_score / 100}
+                value={isRubricBased ? ai.overall_score / scaleMax : ai.overall_score / 100}
                 thickness="large"
               />
               {isRubricBased && ai.criteria_scores && (
                 <Text size={200} style={{ marginTop: '6px', color: tokens.colorNeutralForeground3 }}>
-                  Average score across {Object.keys(ai.criteria_scores).length} criteria, each rated 1–5.{' '}
+                  Average score across {Object.keys(ai.criteria_scores).length} criteria, each rated 1–{scaleMax}.{' '}
                   {ai.passed
-                    ? 'A score of 3.5 or above is considered passing.'
-                    : 'A score below 3.5 is considered failing — review the recommendations for tips to improve.'}
+                    ? `A score of ${passThreshold} or above is considered passing.`
+                    : `A score below ${passThreshold} is considered failing — review the recommendations for tips to improve.`}
                 </Text>
               )}
             </div>
@@ -324,10 +327,10 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                           color={getRubricScoreColor(criterion.score)}
                           appearance="filled"
                         >
-                          {criterion.score}/5
+                          {criterion.score}/{scaleMax}
                         </Badge>
                       </div>
-                      <ProgressBar value={criterion.score / 5} />
+                      <ProgressBar value={criterion.score / scaleMax} />
                       {criterion.justification && (
                         <Text
                           size={200}
