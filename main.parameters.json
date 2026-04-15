@@ -30,11 +30,11 @@
     "deployContainerApps": { "value": "true" },
     "deployContainerRegistry": { "value": "true" },
     "deployContainerEnv": { "value": "true" },
-    "deployVM": { "value": "false" },
-    "deploySubnets": { "value": "false" },
+    "deployVM": { "value": "true" },
+    "deploySubnets": { "value": "true" },
     "deployNsgs": { "value": "false" },
     "sideBySideDeploy": { "value": "false" },
-    "deploySoftware": { "value": "false" },
+    "deploySoftware": { "value": "true" },
     "deployApim": { "value": "false" },
     "deployAfProject": { "value": "true" },
     "deployAAfAgentSvc": { "value": "false" },
@@ -56,7 +56,7 @@
           },
           "sku": {
             "name": "GlobalStandard",
-            "capacity": 40
+            "capacity": 100
           },
           "canonical_name": "CHAT_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"
@@ -69,8 +69,8 @@
             "version": "1"
           },
           "sku": {
-            "name": "Standard",
-            "capacity": 40
+            "name": "GlobalStandard",
+            "capacity": 100
           },
           "canonical_name": "EMBEDDING_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"
@@ -84,7 +84,7 @@
           },
           "sku": {
             "name": "GlobalStandard",
-            "capacity": 5
+            "capacity": 50000
           },
           "canonical_name": "REALTIME_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"
@@ -153,6 +153,7 @@
           "name": null,
           "external": true,
           "service_name": "voicelab",
+          "target_port": 8000,
           "profile_name": "main",
           "min_replicas": 1,
           "max_replicas": 1,
