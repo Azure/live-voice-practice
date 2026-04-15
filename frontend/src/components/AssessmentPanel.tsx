@@ -81,7 +81,9 @@ const useStyles = makeStyles({
     overflow: 'hidden',
   },
   tabContent: {
-    minHeight: '200px',
+    overflowY: 'auto' as const,
+    flex: '1 1 auto',
+    minHeight: 0,
   },
   sectionTitle: {
     marginBottom: tokens.spacingVerticalM,
@@ -275,6 +277,14 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                 value={isRubricBased ? ai.overall_score / 5 : ai.overall_score / 100}
                 thickness="large"
               />
+              {isRubricBased && ai.criteria_scores && (
+                <Text size={200} style={{ marginTop: '6px', color: tokens.colorNeutralForeground3 }}>
+                  Average score across {Object.keys(ai.criteria_scores).length} criteria, each rated 1–5.{' '}
+                  {ai.passed
+                    ? 'A score of 3.5 or above is considered passing.'
+                    : 'A score below 3.5 is considered failing — review the recommendations for tips to improve.'}
+                </Text>
+              )}
             </div>
           )}
 
@@ -292,6 +302,7 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
           </TabList>
 
           {/* Content Section */}
+          <div className={styles.tabContent}>
           {tab === 'overview' && (
             <div className={styles.grid}>
               {isRubricBased && ai?.criteria_scores && (
@@ -490,6 +501,9 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                       </Badge>
                     </div>
                     <ProgressBar value={pron.accuracy_score / 100} />
+                    <Text size={200} style={{ marginTop: '4px', color: tokens.colorNeutralForeground3, display: 'block' }}>
+                      How correctly each word was pronounced compared to a native speaker (0–100).
+                    </Text>
                   </div>
 
                   <div className={styles.metric}>
@@ -503,6 +517,9 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                       </Badge>
                     </div>
                     <ProgressBar value={pron.fluency_score / 100} />
+                    <Text size={200} style={{ marginTop: '4px', color: tokens.colorNeutralForeground3, display: 'block' }}>
+                      How smoothly and naturally the speech flowed, including rhythm, pace, and pauses (0–100).
+                    </Text>
                   </div>
 
                   {pron.words && (
@@ -512,6 +529,9 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                           Word-Level Analysis
                         </Text>
                       </div>
+                      <Text size={200} style={{ color: tokens.colorNeutralForeground3, display: 'block', marginBottom: tokens.spacingVerticalS }}>
+                        Each word shows its individual pronunciation accuracy. Green means well pronounced, yellow needs some work, and red indicates significant mispronunciation.
+                      </Text>
                       <div className={styles.wordGrid}>
                         {pron.words.slice(0, 12).map((word, i) => (
                           <Badge
@@ -642,6 +662,7 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
               )}
             </Card>
           )}
+          </div>
         </DialogBody>
         <DialogActions>
           <Button appearance="primary" onClick={onClose}>
