@@ -57,16 +57,12 @@ SPEECH_ENDPOINT="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$S
 
 if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
   echo "🔒 NETWORK_ISOLATION=true: enforcing private network for Speech..."
-  az cognitiveservices account update \
-    --name "$SPEECH_ACCOUNT_NAME" \
-    --resource-group "$RESOURCE_GROUP" \
-    --public-network-access Disabled >/dev/null
+  az resource update --ids "$SPEECH_RESOURCE_ID" --set properties.publicNetworkAccess=Disabled >/dev/null
 
-  vnet_id="$(az network vnet list -g "$RESOURCE_GROUP" --query "[0].id" -o tsv 2>/dev/null || true)"
-  pe_subnet_id="$(az network vnet subnet list -g "$RESOURCE_GROUP" --query "[?name=='pe-subnet']|[0].id" -o tsv 2>/dev/null || true)"
-
-  if [[ -z "$pe_subnet_id" && -n "$vnet_id" ]]; then
-    pe_subnet_id="$(az network vnet subnet list --ids "$vnet_id" --query "[?name=='pe-subnet']|[0].id" -o tsv 2>/dev/null || true)"
+  vnet_name="$(az network vnet list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null || true)"
+  pe_subnet_id=""
+  if [[ -n "$vnet_name" ]]; then
+    pe_subnet_id="$(az network vnet subnet list -g "$RESOURCE_GROUP" --vnet-name "$vnet_name" --query "[?name=='pe-subnet']|[0].id" -o tsv 2>/dev/null || true)"
   fi
 
   if [[ -z "$pe_subnet_id" ]]; then
@@ -81,8 +77,8 @@ if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
     dns_zone_id="$(az network private-dns zone show -g "$RESOURCE_GROUP" -n "$dns_zone_name" --query id -o tsv)"
   fi
 
-  if [[ -n "$vnet_id" ]]; then
-    vnet_name="$(basename "$vnet_id")"
+  if [[ -n "$vnet_name" ]]; then
+    vnet_id="$(az network vnet list -g "$RESOURCE_GROUP" --query "[0].id" -o tsv 2>/dev/null || true)"
     dns_link_name="${vnet_name}-speech-link"
     if ! az network private-dns link vnet show -g "$RESOURCE_GROUP" -z "$dns_zone_name" -n "$dns_link_name" >/dev/null 2>&1; then
       az network private-dns link vnet create \

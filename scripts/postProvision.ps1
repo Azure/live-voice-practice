@@ -56,12 +56,12 @@ $speechEndpoint = az cognitiveservices account show -g $resourceGroup -n $speech
 
 if ($networkIsolationEnabled) {
   Write-Host "🔒 NETWORK_ISOLATION=true: enforcing private network for Speech..."
-  az cognitiveservices account update --name $speechAccountName --resource-group $resourceGroup --public-network-access Disabled | Out-Null
+  az resource update --ids $speechResourceId --set properties.publicNetworkAccess=Disabled | Out-Null
 
-  $vnetId = az network vnet list -g $resourceGroup --query "[0].id" -o tsv 2>$null
-  $peSubnetId = az network vnet subnet list -g $resourceGroup --query "[?name=='pe-subnet']|[0].id" -o tsv 2>$null
-  if (-not $peSubnetId -and $vnetId) {
-    $peSubnetId = az network vnet subnet list --ids $vnetId --query "[?name=='pe-subnet']|[0].id" -o tsv 2>$null
+  $vnetName = az network vnet list -g $resourceGroup --query "[0].name" -o tsv 2>$null
+  $peSubnetId = $null
+  if ($vnetName) {
+    $peSubnetId = az network vnet subnet list -g $resourceGroup --vnet-name $vnetName --query "[?name=='pe-subnet']|[0].id" -o tsv 2>$null
   }
 
   if (-not $peSubnetId) {
@@ -76,8 +76,8 @@ if ($networkIsolationEnabled) {
     $dnsZoneId = az network private-dns zone show -g $resourceGroup -n $dnsZoneName --query id -o tsv
   }
 
+  $vnetId = if ($vnetName) { az network vnet list -g $resourceGroup --query "[0].id" -o tsv 2>$null } else { $null }
   if ($vnetId) {
-    $vnetName = Split-Path -Leaf $vnetId
     $dnsLinkName = "$vnetName-speech-link"
     $dnsLinkExists = $false
     try {
