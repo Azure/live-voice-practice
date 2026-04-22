@@ -35,7 +35,6 @@
     "deployNsgs": { "value": "false" },
     "sideBySideDeploy": { "value": "false" },
     "deploySoftware": { "value": "true" },
-    "deployApim": { "value": "false" },
     "deployAfProject": { "value": "true" },
     "deployAAfAgentSvc": { "value": "false" },
 
@@ -92,8 +91,6 @@
       ]
     },
 
-    "realtimeModelLocation": { "value": "${AZURE_REALTIME_LOCATION=${AZURE_LOCATION}}" },
-
     "workloadProfiles": {
       "value": [
         {
@@ -127,22 +124,22 @@
         {
           "name": "rubrics",
           "canonical_name": "RUBRICS_DATABASE_CONTAINER",
-          "partitionKeyPath": "/rubricId"
+          "partitionKey": "/rubricId"
         },
         {
           "name": "scenarios",
           "canonical_name": "SCENARIOS_DATABASE_CONTAINER",
-          "partitionKeyPath": "/scenarioId"
+          "partitionKey": "/scenarioId"
         },
         {
           "name": "conversations",
           "canonical_name": "CONVERSATIONS_DATABASE_CONTAINER",
-          "partitionKeyPath": "/conversationId"
+          "partitionKey": "/conversationId"
         },
         {
           "name": "role_assignments",
           "canonical_name": "ROLE_ASSIGNMENTS_DATABASE_CONTAINER",
-          "partitionKeyPath": "/userId"
+          "partitionKey": "/userId"
         }
       ]
     },
