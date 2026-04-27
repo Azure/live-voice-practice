@@ -15,6 +15,14 @@ MAIN_BICEP="$INFRA_DIR/main.bicep"
 echo "${CYAN}Initializing infrastructure submodule...${NC}"
 git -C "$PROJECT_ROOT" submodule update --init --recursive 2>/dev/null || true
 
+# Read desired ref from .gitmodules so we can pin even if parent gitlink is older.
+GITMODULES="$PROJECT_ROOT/.gitmodules"
+INFRA_REF=""
+if [ -f "$GITMODULES" ]; then
+    BRANCH_LINE=$(grep -m1 'branch\s*=' "$GITMODULES" | sed 's/.*=\s*//' | tr -d '[:space:]' || true)
+    [ -n "$BRANCH_LINE" ] && INFRA_REF="$BRANCH_LINE"
+fi
+
 # Fallback: when the repo was scaffolded via 'azd init' (ZIP download), the git
 # index has no submodule gitlink entries, so 'git submodule update' silently does
 # nothing and infra/ remains empty.  Detect that case and clone the landing-zone
@@ -24,13 +32,9 @@ if [ ! -f "$MAIN_BICEP" ]; then
 
     GITMODULES="$PROJECT_ROOT/.gitmodules"
     INFRA_URL=""
-    INFRA_REF="main"  # safe default
+    INFRA_REF="${INFRA_REF:-main}"  # safe default
     if [ -f "$GITMODULES" ]; then
         INFRA_URL=$(grep -m1 'url\s*=' "$GITMODULES" | sed 's/.*=\s*//' | tr -d '[:space:]')
-        BRANCH_LINE=$(grep -m1 'branch\s*=' "$GITMODULES" | sed 's/.*=\s*//' | tr -d '[:space:]')
-        if [ -n "$BRANCH_LINE" ]; then
-            INFRA_REF="$BRANCH_LINE"
-        fi
     fi
     if [ -z "$INFRA_URL" ]; then
         echo "${YELLOW}Error: Could not determine infra repository URL from .gitmodules.${NC}"
@@ -46,6 +50,15 @@ if [ ! -f "$MAIN_BICEP" ]; then
         exit 1
     fi
     echo "${CYAN}Infrastructure submodule cloned successfully.${NC}"
+fi
+
+# Force the submodule to the desired ref from .gitmodules.
+if [ -n "${INFRA_REF:-}" ] && [ -f "$MAIN_BICEP" ]; then
+    echo "${CYAN}Pinning infra submodule to '$INFRA_REF'...${NC}"
+    git -C "$INFRA_DIR" fetch --tags origin 2>/dev/null || true
+    git -C "$INFRA_DIR" -c advice.detachedHead=false checkout "$INFRA_REF" 2>/dev/null || \
+      { git -C "$INFRA_DIR" fetch origin "refs/tags/${INFRA_REF}:refs/tags/${INFRA_REF}" 2>/dev/null || true; \
+        git -C "$INFRA_DIR" -c advice.detachedHead=false checkout "$INFRA_REF" 2>/dev/null || true; }
 fi
 
 for FILE_NAME in manifest.json main.parameters.json; do

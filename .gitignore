@@ -169,3 +169,13 @@ Thumbs.db
 static/
 !static/images/
 scripts/.tmp-search/
+
+.local/
+
+# Local debug/log artifacts
+.azd-*.log
+.azd-env-dump.txt
+.dep-outputs.json
+.ni-env-name.txt
+.tmp-*
+

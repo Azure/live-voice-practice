@@ -16,7 +16,7 @@ if [[ "${DEPLOY_SPEECH_SERVICE:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
 fi
 
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-}"
-LOCATION="${AZURE_LOCATION:-}"
+LOCATION="${AZURE_LOCATION:-${LOCATION:-}}"
 SPEECH_REGION="${AZURE_SPEECH_REGION:-${AZURE_AI_REGION:-$LOCATION}}"
 APP_CONFIG_ENDPOINT="${APP_CONFIG_ENDPOINT:-}"
 APP_CONFIG_LABEL="${APP_CONFIG_LABEL:-live-voice-practice}"
@@ -30,6 +30,12 @@ if [[ -z "$RESOURCE_GROUP" || -z "$SPEECH_REGION" ]]; then
   echo "❌ Missing AZURE_RESOURCE_GROUP or AZURE_LOCATION/AZURE_SPEECH_REGION."
   exit 1
 fi
+
+# Note: starting with bicep-ptn-aiml-landing-zone v1.1.0 the Azure Firewall
+# Policy already ships the full jumpbox bootstrap FQDN allow-list by default
+# (controlled by `extendFirewallForJumpboxBootstrap`). No post-provision hook
+# is needed here. If you need to tweak it on an existing deployment, edit the
+# Firewall Policy directly.
 
 env_base="$(echo "${AZURE_ENV_NAME:-voicelab}" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')"
 [[ -z "$env_base" ]] && env_base="voicelab"
@@ -48,12 +54,19 @@ else
     --location "$SPEECH_REGION" \
     --kind SpeechServices \
     --sku S0 \
+    --custom-domain "$SPEECH_ACCOUNT_NAME" \
     --yes >/dev/null
   echo "✅ Speech resource created."
 fi
 
 SPEECH_RESOURCE_ID="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$SPEECH_ACCOUNT_NAME" --query id -o tsv)"
 SPEECH_ENDPOINT="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$SPEECH_ACCOUNT_NAME" --query properties.endpoint -o tsv)"
+SPEECH_CUSTOM_SUBDOMAIN="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$SPEECH_ACCOUNT_NAME" --query properties.customSubDomainName -o tsv 2>/dev/null || true)"
+if [[ -z "$SPEECH_CUSTOM_SUBDOMAIN" ]]; then
+  echo "🔧 Patching Speech resource with customSubDomainName '$SPEECH_ACCOUNT_NAME'..."
+  az resource update --ids "$SPEECH_RESOURCE_ID" --set "properties.customSubDomainName=$SPEECH_ACCOUNT_NAME" >/dev/null
+  SPEECH_ENDPOINT="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$SPEECH_ACCOUNT_NAME" --query properties.endpoint -o tsv)"
+fi
 
 if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
   echo "🔒 NETWORK_ISOLATION=true: enforcing private network for Speech..."
@@ -62,7 +75,7 @@ if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
   vnet_name="$(az network vnet list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null || true)"
   pe_subnet_id=""
   if [[ -n "$vnet_name" ]]; then
-    pe_subnet_id="$(az network vnet subnet list -g "$RESOURCE_GROUP" --vnet-name "$vnet_name" --query "[?name=='pe-subnet']|[0].id" -o tsv 2>/dev/null || true)"
+    pe_subnet_id="$(az network vnet subnet show -g "$RESOURCE_GROUP" --vnet-name "$vnet_name" -n pe-subnet --query id -o tsv 2>/dev/null || true)"
   fi
 
   if [[ -z "$pe_subnet_id" ]]; then
@@ -140,25 +153,64 @@ else
   echo "⚠️ No Container App found to assign role."
 fi
 
+echo "📦 Ensuring ACR endpoint is persisted and Container App is bound to ACR via managed identity..."
+ACR_NAME="$(az acr list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null || true)"
+if [[ -n "$ACR_NAME" ]]; then
+  ACR_LOGIN_SERVER="$(az acr show -g "$RESOURCE_GROUP" -n "$ACR_NAME" --query loginServer -o tsv 2>/dev/null || true)"
+  if [[ -n "$ACR_LOGIN_SERVER" ]]; then
+    if [[ "${AZURE_CONTAINER_REGISTRY_ENDPOINT:-}" != "$ACR_LOGIN_SERVER" ]]; then
+      azd env set AZURE_CONTAINER_REGISTRY_ENDPOINT "$ACR_LOGIN_SERVER" >/dev/null
+      echo "✅ AZURE_CONTAINER_REGISTRY_ENDPOINT set to '$ACR_LOGIN_SERVER'."
+    fi
+    if [[ -n "${CONTAINER_APP_NAME:-}" ]]; then
+      CURRENT_IDENTITY="$(az containerapp show -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --query "properties.configuration.registries[?server=='$ACR_LOGIN_SERVER'] | [0].identity" -o tsv 2>/dev/null || true)"
+      if [[ "$CURRENT_IDENTITY" != "system" ]]; then
+        az containerapp registry set -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --server "$ACR_LOGIN_SERVER" --identity system >/dev/null 2>&1 || true
+        echo "✅ Container App '$CONTAINER_APP_NAME' bound to ACR '$ACR_LOGIN_SERVER' via system-assigned identity."
+      else
+        echo "✅ Container App registry binding already in place."
+      fi
+    fi
+  fi
+else
+  echo "⚠️ No ACR found in resource group; skipping registry wiring."
+fi
+
 if [[ -n "$APP_CONFIG_ENDPOINT" ]]; then
   echo "🧩 Writing Speech settings to App Configuration..."
-  az appconfig kv set --endpoint "$APP_CONFIG_ENDPOINT" --key AZURE_SPEECH_ENDPOINT --value "$SPEECH_ENDPOINT" --label "$APP_CONFIG_LABEL" --yes >/dev/null
-  az appconfig kv set --endpoint "$APP_CONFIG_ENDPOINT" --key AZURE_SPEECH_REGION --value "$SPEECH_REGION" --label "$APP_CONFIG_LABEL" --yes >/dev/null
-  az appconfig kv set --endpoint "$APP_CONFIG_ENDPOINT" --key AZURE_INPUT_TRANSCRIPTION_MODEL --value "azure-speech" --label "$APP_CONFIG_LABEL" --yes >/dev/null
-  echo "✅ App Configuration updated."
+  appcfg_failed=0
+  az appconfig kv set --endpoint "$APP_CONFIG_ENDPOINT" --key AZURE_SPEECH_ENDPOINT --value "$SPEECH_ENDPOINT" --label "$APP_CONFIG_LABEL" --auth-mode login --yes >/dev/null 2>&1 || appcfg_failed=1
+  az appconfig kv set --endpoint "$APP_CONFIG_ENDPOINT" --key AZURE_SPEECH_REGION --value "$SPEECH_REGION" --label "$APP_CONFIG_LABEL" --auth-mode login --yes >/dev/null 2>&1 || appcfg_failed=1
+  az appconfig kv set --endpoint "$APP_CONFIG_ENDPOINT" --key AZURE_INPUT_TRANSCRIPTION_MODEL --value "azure-speech" --label "$APP_CONFIG_LABEL" --auth-mode login --yes >/dev/null 2>&1 || appcfg_failed=1
+  if [[ "$appcfg_failed" == 1 ]]; then
+    if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
+      echo "⚠️ App Configuration data-plane not reachable from current network (NI mode). Run this step from the jumpbox inside the vnet. Continuing."
+    else
+      echo "⚠️ App Configuration updates failed."
+    fi
+  else
+    echo "✅ App Configuration updated."
+  fi
 else
   echo "⚠️ APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
 fi
 
 if [[ ! "${ENABLE_SEARCH_DATAPLANE_SETUP:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
-  echo "🔎 Running Search data-plane setup hook..."
-  bash "$(dirname "$0")/setup_search_dataplane.sh"
+  if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
+    echo "⏭️ NETWORK_ISOLATION=true: skipping Search data-plane setup (requires vnet access; run from jumpbox)."
+  else
+    echo "🔎 Running Search data-plane setup hook..."
+    bash "$(dirname "$0")/setup_search_dataplane.sh"
+  fi
 else
   echo "⏭️ ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
 fi
 
 if [[ ! "${ENABLE_COSMOS_SAMPLE_SEED:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
-  echo "🌱 Running Cosmos sample seed hook..."
+  if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
+    echo "⏭️ NETWORK_ISOLATION=true: skipping Cosmos sample seed (requires vnet access; run from jumpbox)."
+  else
+    echo "🌱 Running Cosmos sample seed hook..."
   DATABASE_ACCOUNT_NAME="${DATABASE_ACCOUNT_NAME:-}"
   if [[ -z "$DATABASE_ACCOUNT_NAME" ]]; then
     DATABASE_ACCOUNT_NAME="$(az cosmosdb list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null || true)"
@@ -189,6 +241,7 @@ if [[ ! "${ENABLE_COSMOS_SAMPLE_SEED:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
     fi
   else
     echo "⚠️ Cosmos account name could not be resolved. Skipping Cosmos sample seed."
+  fi
   fi
 else
   echo "⏭️ ENABLE_COSMOS_SAMPLE_SEED=false, skipping Cosmos sample seed."

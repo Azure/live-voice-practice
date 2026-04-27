@@ -5,6 +5,7 @@
     "environmentName": { "value": "${AZURE_ENV_NAME}" },
     "location": { "value": "${AZURE_LOCATION}" },
     "cosmosLocation": { "value": "${AZURE_COSMOS_LOCATION=${AZURE_LOCATION}}" },
+    "searchServiceLocation": { "value": "${AZURE_SEARCH_LOCATION=swedencentral}" },
     "principalId": { "value": "${AZURE_PRINCIPAL_ID}" },
     "principalType": { "value": "${AZURE_PRINCIPAL_TYPE=User}" },
     "deploymentTags": { "value": {} },
@@ -42,7 +43,7 @@
     "existingVnetResourceId": { "value": "${EXISTING_VNET_RESOURCE_ID=}" },
 
     "vmAdminPassword": { "value": "$(secretOrRandomPassword)" },
-    "vmSize": { "value": "Standard_D8s_v5" },
+    "vmSize": { "value": "Standard_D2s_v3" },
 
     "modelDeploymentList": {
       "value": [
@@ -55,7 +56,7 @@
           },
           "sku": {
             "name": "GlobalStandard",
-            "capacity": 100
+            "capacity": 50
           },
           "canonical_name": "CHAT_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"
@@ -68,8 +69,8 @@
             "version": "1"
           },
           "sku": {
-            "name": "GlobalStandard",
-            "capacity": 100
+            "name": "Standard",
+            "capacity": 50
           },
           "canonical_name": "EMBEDDING_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"
@@ -83,7 +84,7 @@
           },
           "sku": {
             "name": "GlobalStandard",
-            "capacity": 50000
+            "capacity": 5
           },
           "canonical_name": "REALTIME_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"
