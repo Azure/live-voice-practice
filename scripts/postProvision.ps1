@@ -28,7 +28,24 @@ $networkIsolationEnabled = $networkIsolationValue -match '^(true|True|1|yes|YES)
 # require running from inside the VNet (jumpbox / Bastion VM). Set
 # RUN_FROM_JUMPBOX=true to opt-in those steps when invoking this script directly
 # from the jumpbox after `azd provision` completed from the dev workstation.
-$runFromJumpboxEnabled = $env:RUN_FROM_JUMPBOX -match '^(true|True|1|yes|YES)$'
+# If the variable is not set and the host is interactive, prompt the user.
+if ($null -ne $env:RUN_FROM_JUMPBOX -and $env:RUN_FROM_JUMPBOX -ne '') {
+  $runFromJumpboxEnabled = $env:RUN_FROM_JUMPBOX -match '^(true|True|1|yes|YES)$'
+} elseif ($networkIsolationEnabled -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+  Write-Host ""
+  Write-Host "🔒 Network isolation is enabled. Data-plane steps (Cosmos seed, Search index"
+  Write-Host "   setup, App Configuration writes) require connectivity to private endpoints."
+  $answer = Read-Host "❓ Are you currently connected to the VNet (jumpbox/Bastion or VPN)? [y/N]"
+  if ($answer -match '^(y|Y|yes|YES|true|True|1)$') {
+    $runFromJumpboxEnabled = $true
+    Write-Host "✅ Continuing with data-plane post-provisioning."
+  } else {
+    $runFromJumpboxEnabled = $false
+    Write-Host "⏭️ Skipping data-plane steps. Re-run from the jumpbox to apply them."
+  }
+} else {
+  $runFromJumpboxEnabled = $false
+}
 
 function Test-DataplaneShouldRun {
   if (-not $networkIsolationEnabled) { return $true }

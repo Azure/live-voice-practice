@@ -30,9 +30,23 @@ fi
 # require running from inside the VNet (jumpbox / Bastion VM). Set
 # RUN_FROM_JUMPBOX=true to opt-in those steps when invoking this script directly
 # from the jumpbox after `azd provision` completed from the dev workstation.
+# If the variable is not set and the shell is interactive, prompt the user.
 RUN_FROM_JUMPBOX_ENABLED=false
-if [[ "${RUN_FROM_JUMPBOX:-false}" =~ ^(true|True|1|yes|YES)$ ]]; then
-  RUN_FROM_JUMPBOX_ENABLED=true
+if [[ -n "${RUN_FROM_JUMPBOX:-}" ]]; then
+  if [[ "${RUN_FROM_JUMPBOX}" =~ ^(true|True|1|yes|YES)$ ]]; then
+    RUN_FROM_JUMPBOX_ENABLED=true
+  fi
+elif [[ "$NETWORK_ISOLATION_ENABLED" == true ]] && [[ -t 0 ]]; then
+  echo ""
+  echo "🔒 Network isolation is enabled. Data-plane steps (Cosmos seed, Search index"
+  echo "   setup, App Configuration writes) require connectivity to private endpoints."
+  read -r -p "❓ Are you currently connected to the VNet (jumpbox/Bastion or VPN)? [y/N]: " _ni_answer
+  if [[ "${_ni_answer:-}" =~ ^(y|Y|yes|YES|true|True|1)$ ]]; then
+    RUN_FROM_JUMPBOX_ENABLED=true
+    echo "✅ Continuing with data-plane post-provisioning."
+  else
+    echo "⏭️ Skipping data-plane steps. Re-run from the jumpbox to apply them."
+  fi
 fi
 
 # A data-plane step should run when:

@@ -45,6 +45,10 @@
     "vmAdminPassword": { "value": "$(secretOrRandomPassword)" },
     "vmSize": { "value": "Standard_D2s_v3" },
 
+    "extraRepoUrls": { "value": ["https://github.com/Azure/live-voice-practice.git"] },
+    "extraRepoTags": { "value": ["main"] },
+    "extraRepoNames": { "value": ["live-voice-practice"] },
+
     "modelDeploymentList": {
       "value": [
         {
