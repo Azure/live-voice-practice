@@ -26,6 +26,28 @@ if [[ "$NETWORK_ISOLATION_VALUE" =~ ^(true|True|1|yes|YES)$ ]]; then
   NETWORK_ISOLATION_ENABLED=true
 fi
 
+# When NETWORK_ISOLATION=true, data-plane operations (Cosmos seed, Search index)
+# require running from inside the VNet (jumpbox / Bastion VM). Set
+# RUN_FROM_JUMPBOX=true to opt-in those steps when invoking this script directly
+# from the jumpbox after `azd provision` completed from the dev workstation.
+RUN_FROM_JUMPBOX_ENABLED=false
+if [[ "${RUN_FROM_JUMPBOX:-false}" =~ ^(true|True|1|yes|YES)$ ]]; then
+  RUN_FROM_JUMPBOX_ENABLED=true
+fi
+
+# A data-plane step should run when:
+#  - network isolation is disabled, OR
+#  - the user explicitly opted-in by setting RUN_FROM_JUMPBOX=true.
+dataplane_should_run() {
+  if [[ "$NETWORK_ISOLATION_ENABLED" != true ]]; then
+    return 0
+  fi
+  if [[ "$RUN_FROM_JUMPBOX_ENABLED" == true ]]; then
+    return 0
+  fi
+  return 1
+}
+
 if [[ -z "$RESOURCE_GROUP" || -z "$SPEECH_REGION" ]]; then
   echo "❌ Missing AZURE_RESOURCE_GROUP or AZURE_LOCATION/AZURE_SPEECH_REGION."
   exit 1
@@ -196,19 +218,21 @@ else
 fi
 
 if [[ ! "${ENABLE_SEARCH_DATAPLANE_SETUP:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
-  if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
-    echo "⏭️ NETWORK_ISOLATION=true: skipping Search data-plane setup (requires vnet access; run from jumpbox)."
-  else
+  if dataplane_should_run; then
     echo "🔎 Running Search data-plane setup hook..."
     bash "$(dirname "$0")/setup_search_dataplane.sh"
+  else
+    echo "⏭️ NETWORK_ISOLATION=true and RUN_FROM_JUMPBOX!=true: skipping Search data-plane setup."
+    echo "   Run 'RUN_FROM_JUMPBOX=true bash scripts/postProvision.sh' from the jumpbox to apply it."
   fi
 else
   echo "⏭️ ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
 fi
 
 if [[ ! "${ENABLE_COSMOS_SAMPLE_SEED:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
-  if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
-    echo "⏭️ NETWORK_ISOLATION=true: skipping Cosmos sample seed (requires vnet access; run from jumpbox)."
+  if ! dataplane_should_run; then
+    echo "⏭️ NETWORK_ISOLATION=true and RUN_FROM_JUMPBOX!=true: skipping Cosmos sample seed."
+    echo "   Run 'RUN_FROM_JUMPBOX=true bash scripts/postProvision.sh' from the jumpbox to apply it."
   else
     echo "🌱 Running Cosmos sample seed hook..."
   DATABASE_ACCOUNT_NAME="${DATABASE_ACCOUNT_NAME:-}"
@@ -245,6 +269,16 @@ if [[ ! "${ENABLE_COSMOS_SAMPLE_SEED:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
   fi
 else
   echo "⏭️ ENABLE_COSMOS_SAMPLE_SEED=false, skipping Cosmos sample seed."
+fi
+
+if [[ "$NETWORK_ISOLATION_ENABLED" == true && "$RUN_FROM_JUMPBOX_ENABLED" != true ]]; then
+  echo ""
+  echo "ℹ️  Network isolation is enabled. Two data-plane steps were skipped because they"
+  echo "   require VNet access (private endpoints):"
+  echo "     - Cosmos sample seed (scenarios/rubrics)"
+  echo "     - Azure AI Search data-plane setup"
+  echo "   Connect to the jumpbox via Bastion, clone this repo, run 'azd auth login' and"
+  echo "   then 'RUN_FROM_JUMPBOX=true bash scripts/postProvision.sh' to apply them."
 fi
 
 echo "✅ post-provision speech setup completed."

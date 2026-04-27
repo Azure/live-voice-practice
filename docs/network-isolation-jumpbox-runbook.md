@@ -132,10 +132,24 @@ azd env set AZURE_CONTAINER_APP_NAME <AZURE_CONTAINER_APP_NAME>
 ## 5. Re-run the post-provision hook from inside the VNet
 
 The hook is idempotent. Running it from the jumpbox lets the data-plane steps
-(App Configuration writes, Search indexing, Cosmos seed) succeed:
+(App Configuration writes, Search indexing, Cosmos seed) succeed.
+
+When network isolation is enabled, the hook **only runs the data-plane steps**
+(Cosmos sample seed and Search index setup) when you opt-in via
+`RUN_FROM_JUMPBOX=true`. This mirrors the GPT-RAG pattern: `azd provision` runs
+the infra-only portion from the developer workstation, then you SSH into the
+jumpbox via Bastion and re-run the hook with the opt-in to apply the
+data-plane work that requires VNet access:
 
 ```powershell
+# Windows jumpbox
+$env:RUN_FROM_JUMPBOX = 'true'
 pwsh -NoProfile -File .\scripts\postProvision.ps1
+```
+
+```bash
+# Linux jumpbox
+RUN_FROM_JUMPBOX=true bash scripts/postProvision.sh
 ```
 
 Expected output:

@@ -24,6 +24,18 @@ $appConfigLabel = if ($env:APP_CONFIG_LABEL) { $env:APP_CONFIG_LABEL } else { 'l
 $networkIsolationValue = if ($env:NETWORK_ISOLATION) { $env:NETWORK_ISOLATION } else { $env:AZURE_NETWORK_ISOLATION }
 $networkIsolationEnabled = $networkIsolationValue -match '^(true|True|1|yes|YES)$'
 
+# When NETWORK_ISOLATION=true, data-plane operations (Cosmos seed, Search index)
+# require running from inside the VNet (jumpbox / Bastion VM). Set
+# RUN_FROM_JUMPBOX=true to opt-in those steps when invoking this script directly
+# from the jumpbox after `azd provision` completed from the dev workstation.
+$runFromJumpboxEnabled = $env:RUN_FROM_JUMPBOX -match '^(true|True|1|yes|YES)$'
+
+function Test-DataplaneShouldRun {
+  if (-not $networkIsolationEnabled) { return $true }
+  if ($runFromJumpboxEnabled) { return $true }
+  return $false
+}
+
 if (-not $resourceGroup -or -not $speechRegion) {
   Write-Host "❌ Missing AZURE_RESOURCE_GROUP or AZURE_LOCATION/AZURE_SPEECH_REGION."
   exit 1
@@ -194,19 +206,21 @@ if ($appConfigEndpoint) {
 }
 
 if (-not ($env:ENABLE_SEARCH_DATAPLANE_SETUP -match '^(false|False|0|no|NO)$')) {
-  if ($networkIsolationEnabled) {
-    Write-Host "⏭️ NETWORK_ISOLATION=true: skipping Search data-plane setup (requires vnet access; run from jumpbox)."
-  } else {
+  if (Test-DataplaneShouldRun) {
     Write-Host "🔎 Running Search data-plane setup hook..."
     & "$PSScriptRoot\setup_search_dataplane.ps1"
+  } else {
+    Write-Host "⏭️ NETWORK_ISOLATION=true and RUN_FROM_JUMPBOX!=true: skipping Search data-plane setup."
+    Write-Host "   Run with `$env:RUN_FROM_JUMPBOX='true'; ./scripts/postProvision.ps1` from the jumpbox to apply it."
   }
 } else {
   Write-Host "⏭️ ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
 }
 
 if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
-  if ($networkIsolationEnabled) {
-    Write-Host "⏭️ NETWORK_ISOLATION=true: skipping Cosmos sample seed (requires vnet access; run from jumpbox)."
+  if (-not (Test-DataplaneShouldRun)) {
+    Write-Host "⏭️ NETWORK_ISOLATION=true and RUN_FROM_JUMPBOX!=true: skipping Cosmos sample seed."
+    Write-Host "   Run with `$env:RUN_FROM_JUMPBOX='true'; ./scripts/postProvision.ps1` from the jumpbox to apply it."
   } else {
   Write-Host "🌱 Running Cosmos sample seed hook..."
   $databaseAccountName = if ($env:DATABASE_ACCOUNT_NAME) { $env:DATABASE_ACCOUNT_NAME } else { az cosmosdb list -g $resourceGroup --query "[0].name" -o tsv }
@@ -233,6 +247,16 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
   }
 } else {
   Write-Host "⏭️ ENABLE_COSMOS_SAMPLE_SEED=false, skipping Cosmos sample seed."
+}
+
+if ($networkIsolationEnabled -and -not $runFromJumpboxEnabled) {
+  Write-Host ""
+  Write-Host "ℹ️  Network isolation is enabled. Two data-plane steps were skipped because they"
+  Write-Host "   require VNet access (private endpoints):"
+  Write-Host "     - Cosmos sample seed (scenarios/rubrics)"
+  Write-Host "     - Azure AI Search data-plane setup"
+  Write-Host "   Connect to the jumpbox via Bastion, clone this repo, run 'azd auth login' and"
+  Write-Host "   then `$env:RUN_FROM_JUMPBOX='true'; ./scripts/postProvision.ps1` to apply them."
 }
 
 Write-Host "✅ post-provision speech setup completed."
