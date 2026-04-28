@@ -56,7 +56,7 @@
           },
           "sku": {
             "name": "GlobalStandard",
-            "capacity": 50
+            "capacity": 1
           },
           "canonical_name": "CHAT_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"
@@ -70,7 +70,7 @@
           },
           "sku": {
             "name": "Standard",
-            "capacity": 50
+            "capacity": 1
           },
           "canonical_name": "EMBEDDING_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"
@@ -84,7 +84,7 @@
           },
           "sku": {
             "name": "GlobalStandard",
-            "capacity": 5
+            "capacity": 1
           },
           "canonical_name": "REALTIME_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"

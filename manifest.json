@@ -1,7 +1,7 @@
 {
   "tag": "v1.0.0",
   "repo": "https://github.com/Azure/live-voice-practice.git",
-  "ailz_tag": "v1.1.1",
+  "ailz_tag": "v1.1.2",
   "components": [
     {
       "name": "live-voice-practice",
