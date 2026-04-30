@@ -206,11 +206,12 @@ azd auth login --managed-identity
 #    Portal → Virtual machine → testvm<token> → Security → Identity → System assigned
 #    Copy the "Object (principal) ID" value (a GUID like ca8e2735-36a9-44a7-...).
 #
-#    Then pre-populate it into the azd env so azd does NOT call Microsoft Graph
-#    (the jumpbox MI usually has no Graph permissions, which makes
-#     `azd env refresh` fail with "fetching current principal type ... not logged in"):
-azd env set AZURE_PRINCIPAL_ID   <paste-Object-principal-ID-from-portal>
-azd env set AZURE_PRINCIPAL_TYPE ServicePrincipal
+#    Set it as a PROCESS env var (not `azd env set`) — azd 1.24.x still calls
+#    `getCurrentPrincipalType()` internally during `env refresh` even though
+#    you're logged in via MI, and that call hits Microsoft Graph (which the
+#    jumpbox MI can't reach). Process env vars short-circuit that lookup.
+$env:AZURE_PRINCIPAL_ID   = '<paste-Object-principal-ID-from-portal>'
+$env:AZURE_PRINCIPAL_TYPE = 'ServicePrincipal'
 
 # 3. Refresh — pulls Bicep outputs (App Config, ACR, Speech, Cosmos, etc.) into the local .env
 azd env refresh
