@@ -33,10 +33,18 @@ if (-not $searchServiceName) {
 
 $storageAccountName = $env:STORAGE_ACCOUNT_NAME
 if (-not $storageAccountName) {
+  # Prefer accounts not used by AI Foundry (those start with "staif")
+  $storageAccountName = az storage account list -g $resourceGroup `
+    --query "[?!starts_with(name, 'staif')] | [0].name" -o tsv
+}
+if (-not $storageAccountName) {
+  # Fallback: any storage account in the RG
   $storageAccountName = az storage account list -g $resourceGroup --query "[0].name" -o tsv
 }
 if (-not $storageAccountName) {
-  throw "Could not resolve Storage account name"
+  throw "Could not resolve Storage account name in resource group '$resourceGroup'. " +
+        "Either grant the current identity 'Reader' on the resource group, or set " +
+        "`$env:STORAGE_ACCOUNT_NAME` before re-running this script."
 }
 
 $aiServicesName = $env:AI_FOUNDRY_ACCOUNT_NAME
