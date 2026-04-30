@@ -199,17 +199,14 @@ az account set --subscription <AZURE_SUBSCRIPTION_ID>
 
 azd auth login --tenant-id <AZURE_TENANT_ID>
 
-# The AILZ bootstrap may have already provisioned a local azd env with the same
-# name as your workstation env (the .azure/<env>/ folder is committed-in-place
-# during the jumpbox install). Pick the right path:
-
-# (a) If `azd env list` already shows your env, just select it and refresh:
-azd env list
-azd env select <env-name>
+# The AILZ bootstrap pre-provisions the local azd env (the .azure/<env>/ folder
+# is brought over during the jumpbox install) and marks it as the default, so
+# you can refresh it directly without selecting:
 azd env refresh                  # pulls outputs from the existing deployment
 
-# (b) If the env is NOT present, create it and re-set the inputs:
-# azd env new <env-name>
+# (Fallback) If `azd env list` shows nothing or the wrong default, create/select:
+# azd env list
+# azd env select <env-name>      # or: azd env new <env-name>
 # azd env set AZURE_LOCATION        <region>
 # azd env set AZURE_SUBSCRIPTION_ID <subscription-guid>
 # azd env set NETWORK_ISOLATION     true
