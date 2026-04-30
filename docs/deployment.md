@@ -191,40 +191,33 @@ cd live-voice-practice
 git submodule update --init --recursive
 ```
 
-#### B.3. Sign in (managed identity) and refresh the azd environment
+#### B.3. Sign in and refresh the azd environment
 
-The jumpbox is provisioned with a **system-assigned managed identity** that already has
-the right RBAC on the resource group. Use it for both `az` and `azd` so you don't have to
-authenticate as your own user inside the VNet.
+> **Why device-code instead of MI here:** `azd` 1.24.x has a known limitation —
+> `azd env refresh` (and `provision`) internally calls `getCurrentPrincipalType()`
+> which always tries to read the user/SP profile from Microsoft Graph. The
+> jumpbox MI can't reach Graph, so even with `azd auth login --managed-identity`
+> succeeding, `env refresh` fails with `fetching login details: not logged in`.
+> Use device-code for this single read-only step. (For `azd deploy` later we use
+> ACR Tasks, so MI/Graph is never needed for the actual app deploy.)
 
 ```powershell
-# 1. Sign in az CLI + azd with the VM's system-assigned managed identity
-az login --identity
-azd auth login --managed-identity
+# 1. Sign in via device code on the jumpbox (browse to the URL on your laptop)
+az login --tenant <AZURE_TENANT_ID> --use-device-code
+az account set --subscription <AZURE_SUBSCRIPTION_ID>
+azd auth login --tenant-id <AZURE_TENANT_ID> --use-device-code
 
-# 2. Get the MI Object (principal) ID from the Azure portal:
-#    Portal → Virtual machine → testvm<token> → Security → Identity → System assigned
-#    Copy the "Object (principal) ID" value (a GUID like ca8e2735-36a9-44a7-...).
-#
-#    Set it as a PROCESS env var (not `azd env set`) — azd 1.24.x still calls
-#    `getCurrentPrincipalType()` internally during `env refresh` even though
-#    you're logged in via MI, and that call hits Microsoft Graph (which the
-#    jumpbox MI can't reach). Process env vars short-circuit that lookup.
-$env:AZURE_PRINCIPAL_ID   = '<paste-Object-principal-ID-from-portal>'
-$env:AZURE_PRINCIPAL_TYPE = 'ServicePrincipal'
-
-# 3. Refresh — pulls Bicep outputs (App Config, ACR, Speech, Cosmos, etc.) into the local .env
+# 2. Refresh — pulls Bicep outputs (App Config, ACR, Speech, Cosmos, etc.) into the local .env
 azd env refresh
 ```
 
-> **Note (user-account fallback):** if for some reason the MI path is blocked,
-> you can still authenticate as a user from the jumpbox:
+> **Tip — managed identity for downstream `az` commands:** after the refresh, you
+> can switch `az` to the VM's MI for everything else (e.g. `az containerapp ...`,
+> `az search ...`, `az cosmosdb ...` invoked from `postProvision.ps1`):
 >
 > ```powershell
-> az login --tenant <AZURE_TENANT_ID> --use-device-code
+> az login --identity
 > az account set --subscription <AZURE_SUBSCRIPTION_ID>
-> azd auth login --tenant-id <AZURE_TENANT_ID>
-> azd env refresh
 > ```
 
 > **Fallback:** if `azd env list` shows nothing or the wrong default, run:
