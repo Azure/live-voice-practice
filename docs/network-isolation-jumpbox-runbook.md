@@ -78,10 +78,13 @@ The jumpbox boots with the AILZ bootstrap installed: Azure CLI, `azd`, Git, Powe
 
 ## Re-running the post-provision hook (jumpbox)
 
+The repo is pre-cloned by the AILZ bootstrap (via `manifest.json#components`), but the `infra/` submodule is **not** initialized — do that on first use.
+
 ```powershell
-cd C:\github\live-voice-practice    # clone the repo on first use
+cd C:\github\live-voice-practice
 git pull
-azd env refresh                      # pull deployment outputs into the local .env
+git submodule update --init --recursive   # first run only
+azd env refresh                            # pull deployment outputs into the local .env
 pwsh -NoProfile -File .\scripts\postProvision.ps1
 # When asked: "Are you running this script from inside the VNet or via VPN? [Y/n]"  → Y
 ```

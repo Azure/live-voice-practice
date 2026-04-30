@@ -168,9 +168,21 @@ Save them somewhere you can paste into the Bastion session (Bastion has a copy/p
 2. **Connect → Bastion**.
 3. Sign in with the admin credentials from `azd env get-value VM_ADMIN_USERNAME` and the password you set (or that the template generated; reset it via the portal if you didn't).
 
-The jumpbox already has the AILZ bootstrap installed: Azure CLI, `azd`, Git, PowerShell 7, Python 3.11, Bicep CLI, the AILZ repo cloned at `C:\github\bicep-ptn-aiml-landing-zone`, and the firewall allow-list opens the FQDNs needed by all of those tools.
+The jumpbox already has the AILZ bootstrap installed: Azure CLI, `azd`, Git, PowerShell 7, Python 3.11, Bicep CLI, the AILZ repo cloned at `C:\github\bicep-ptn-aiml-landing-zone`, **this repo cloned at `C:\github\live-voice-practice`** (via the `manifest.json#components` extension point — the parent repo is checked out but submodules are **not** initialized), and the firewall allow-list opens the FQDNs needed by all of those tools.
 
-#### B.2. Clone this repo on the jumpbox
+#### B.2. Initialize the repo on the jumpbox
+
+The parent repo is already on disk at `C:\github\live-voice-practice`. Pull the latest commit (in case the bootstrap clone is older than the version you provisioned from your workstation) and initialize the `infra/` submodule:
+
+```powershell
+cd C:\github\live-voice-practice
+git pull
+git submodule update --init --recursive
+# verify the submodule landed on the expected pin (v1.1.4 = 40f82ae or newer)
+git -C infra describe --tags --always
+```
+
+If the repo is **not** already at `C:\github\live-voice-practice` (e.g. you bootstrapped without the `manifest.json#components` entry), clone it manually:
 
 ```powershell
 cd C:\github
