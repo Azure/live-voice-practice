@@ -23,6 +23,19 @@ if (-not $resourceGroup) {
   throw "AZURE_RESOURCE_GROUP is required"
 }
 
+# Extract resource token from a known endpoint env var (works without ARM list permissions).
+# AILZ jumpbox MI typically lacks Reader on the RG, so list calls return [] -- we derive names instead.
+$resourceToken = $null
+foreach ($candidate in @($env:APP_CONFIG_ENDPOINT, $env:AZURE_APP_CONFIG_ENDPOINT, $env:AZURE_KEY_VAULT_ENDPOINT, $env:AZURE_CONTAINER_REGISTRY_ENDPOINT)) {
+  if ($candidate -and $candidate -match '(?:appcs|kv|cr|st|srch)-?([a-z0-9]{8,})') {
+    $resourceToken = $matches[1]
+    break
+  }
+}
+if ($resourceToken) {
+  Write-Host "[>] Resource token derived from environment: $resourceToken"
+}
+
 $searchServiceName = $env:SEARCH_SERVICE_NAME
 if (-not $searchServiceName) {
   # Prefer the general-purpose Search; AI Foundry provisions a private one named srch-aif-*
@@ -32,6 +45,11 @@ if (-not $searchServiceName) {
 if (-not $searchServiceName) {
   # Fallback: any Search service in the RG
   $searchServiceName = az search service list -g $resourceGroup --query "[0].name" -o tsv
+}
+if (-not $searchServiceName -and $resourceToken) {
+  # Last resort: derive from token (MI may lack ARM list perms even when it has data-plane roles)
+  $searchServiceName = "srch-$resourceToken"
+  Write-Host "[>] Derived Search service name from token: $searchServiceName"
 }
 if (-not $searchServiceName) {
   throw "Could not resolve Search service name in resource group '$resourceGroup'. " +
@@ -48,6 +66,11 @@ if (-not $storageAccountName) {
 if (-not $storageAccountName) {
   # Fallback: any storage account in the RG
   $storageAccountName = az storage account list -g $resourceGroup --query "[0].name" -o tsv
+}
+if (-not $storageAccountName -and $resourceToken) {
+  # Last resort: derive from token (MI may lack ARM list perms even when it has data-plane roles)
+  $storageAccountName = "st$resourceToken"
+  Write-Host "[>] Derived Storage account name from token: $storageAccountName"
 }
 if (-not $storageAccountName) {
   Write-Host "[!] Storage account lookup returned empty. Diagnostics:"
