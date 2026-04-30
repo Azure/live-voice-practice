@@ -55,13 +55,7 @@ Defined upstream in `_firewallVmBootstrapFqdns` (AILZ `main.bicep`). Ships with 
 - **Bicep CLI bootstrap** (added in v1.1.4 / issue #36): `downloads.bicep.azure.com`
 - Speech FQDNs (added when `deploySpeechService=true`): `*.cognitiveservices.azure.com`, `*.tts.speech.microsoft.com`, `*.stt.speech.microsoft.com`
 
-Need to extend the allow-list for your scenario (e.g. internal artifact feed)? Use [scripts/add-jumpbox-fw-rules.ps1](../scripts/add-jumpbox-fw-rules.ps1):
-
-```powershell
-./scripts/add-jumpbox-fw-rules.ps1 -ResourceGroup <rg-name> -SubscriptionId <sub-guid>
-```
-
-Run it **after** `azd provision` completes — the firewall policy is locked while provision is in-flight (`FirewallPolicyUpdateFailed: ... 1 faulted referenced firewalls`).
+Need to extend the allow-list for your scenario (e.g. internal artifact feed)? Edit the AILZ submodule's `_firewallVmBootstrapFqdns` (or the dedicated `extendFirewallForJumpboxBootstrap` parameter introduced in v1.1.0) and re-run `azd provision` from the workstation. The standalone `add-jumpbox-fw-rules.ps1` helper that used to live under `scripts/` was removed once v1.1.0 of the landing zone shipped the complete jumpbox bootstrap allow-list out of the box.
 
 ---
 
@@ -84,7 +78,7 @@ The repo is pre-cloned by the AILZ bootstrap (via `manifest.json#components`), b
 cd C:\github\live-voice-practice
 git pull
 git submodule update --init --recursive   # first run only
-azd env refresh                            # pull deployment outputs into the local .env
+az login --identity                        # use the jumpbox MI (no env refresh needed; .env is pre-populated by AILZ bootstrap)
 pwsh -NoProfile -File .\scripts\postProvision.ps1
 # When asked: "Are you running this script from inside the VNet or via VPN? [Y/n]"  → Y
 ```
@@ -113,4 +107,4 @@ Idempotent. Re-run any time you need to re-apply data-plane steps (e.g. after Co
 - Full deployment guide: [docs/deployment.md](deployment.md)
 - AI Search dataplane runbook: [docs/ai-search-indexing-runbook.md](ai-search-indexing-runbook.md)
 - AILZ submodule: [`infra/`](../infra/)
-- Scripts: [scripts/postProvision.ps1](../scripts/postProvision.ps1) · [scripts/setup_search_dataplane.ps1](../scripts/setup_search_dataplane.ps1) · [scripts/seed_cosmos_samples.py](../scripts/seed_cosmos_samples.py) · [scripts/add-jumpbox-fw-rules.ps1](../scripts/add-jumpbox-fw-rules.ps1)
+- Scripts: [scripts/postProvision.ps1](../scripts/postProvision.ps1) · [scripts/setup_search_dataplane.ps1](../scripts/setup_search_dataplane.ps1) · [scripts/seed_cosmos_samples.py](../scripts/seed_cosmos_samples.py)

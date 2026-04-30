@@ -42,6 +42,32 @@ az account set --subscription <AZURE_SUBSCRIPTION_ID>
 azd auth login --tenant-id <AZURE_TENANT_ID>
 ```
 
+## Authentication model — Entra ID only (no keys)
+
+This solution does **not** use any account / admin / connection-string keys end-to-end. Every component authenticates via Microsoft Entra ID:
+
+- **Container App** — system-assigned managed identity calls AI Foundry, Speech, Cosmos DB, AI Search, Key Vault, App Configuration and Storage with `DefaultAzureCredential`.
+- **AI Search** — system-assigned managed identity is used by indexers/skillsets to read from Storage and call AI Foundry embeddings; the indexer datasource connection string uses the `ResourceId=/subscriptions/.../storageAccounts/<name>;` form (no `AccountKey`).
+- **Post-provision scripts** — `scripts/setup_search_dataplane.{ps1,sh}` use `az rest --resource https://search.azure.com` and `az storage --auth-mode login`; `scripts/seed_cosmos_samples.py` uses `DefaultAzureCredential`.
+
+### RBAC is granted by the Bicep template
+
+All role assignments are created at provisioning time by `infra/main.bicep` — there is **no manual `az role assignment create` step** and the post-provision scripts no longer try to grant any role at runtime. The relevant grants include:
+
+| Principal | Role | Target | Bicep module |
+|---|---|---|---|
+| Container App MI | `AcrPull` | ACR | `assignCrAcrPullContainerApps` |
+| Container App MI | `Storage Blob Data Contributor` / `Reader` | Storage account | `assignStorageStorageBlobDataContributorAca` / `…Reader…` |
+| Container App MI | `Cosmos DB Built-in Data Contributor` | Cosmos account | `assignCosmosDBCosmosDbBuiltInDataContributorContainerApps` |
+| Container App MI | `Search Index Data Contributor` | AI Search | (executor + ACA grants in `main.bicep`) |
+| Container App MI | `Cognitive Services User` | Speech / AI Foundry | `assignSpeechCognitiveServicesUser…` |
+| Search MI | `Storage Blob Data Reader` | Storage account | `assignStorageStorageBlobDataReaderSearch` |
+| Search MI | `Cognitive Services User` | AI Foundry | `assignAiFoundryAccountCognitiveServicesUserSearch` |
+| Executor (your dev user / jumpbox MI) | `Storage Blob Data Contributor`, `Search Service Contributor`, `Search Index Data Contributor`, `App Configuration Data Owner`, `Key Vault Secrets Officer`, `Cognitive Services Contributor` | scoped to each resource | `assignExecutorRoles` |
+| TestVM MI (jumpbox, NI mode) | `Cosmos DB Built-in Data Contributor` | Cosmos database | `assignCosmosDBCosmosDbBuiltInDataContributorTestVm` |
+
+The executor principal is determined automatically by the Bicep template: it falls back to your dev user in Mode 1, and to the jumpbox VM's system-assigned MI in Mode 2 (NI). As long as you re-run `azd provision` whenever you change identities, the post-provision scripts have everything they need.
+
 ---
 
 ## Mode 1 — Basic deployment
@@ -104,19 +130,7 @@ In this mode all data-plane traffic stays inside the VNet:
 - Egress from the jumpbox subnet is forced through Azure Firewall (FQDN-tag allow-list).
 - The Container App ingress is internal — only resolvable from inside the VNet.
 
-> **Authentication: Entra ID only (no keys).** This solution does not use any account / admin / connection-string keys. Every component authenticates via Microsoft Entra ID:
-> - The Container App's system-assigned managed identity calls AI Foundry, Speech, Cosmos DB, AI Search, Key Vault, App Configuration and Storage with `DefaultAzureCredential`.
-> - The AI Search service's system-assigned managed identity is used by indexers/skillsets to read from Storage and call AI Foundry embeddings (datasource connection string uses the `ResourceId=...` form, no `AccountKey`).
-> - `scripts/setup_search_dataplane.{ps1,sh}` and `scripts/seed_cosmos_samples.py` use `az rest --resource https://search.azure.com`, `az storage --auth-mode login` and `DefaultAzureCredential` respectively.
->
-> **Required RBAC for the principal running `postprovision` (jumpbox MI in Mode 2, your dev user in Mode 1):**
-> - Storage account: `Storage Blob Data Contributor`
-> - AI Search: `Search Service Contributor` + `Search Index Data Contributor`
-> - AI Foundry / Speech: `Cognitive Services Contributor` (or `Cognitive Services OpenAI User` + `Cognitive Services User`)
-> - App Configuration: `App Configuration Data Owner`
-> - Key Vault: `Key Vault Secrets Officer` (or `Key Vault Secrets User` for read-only flows)
-> - Cosmos DB: `Cosmos DB Built-in Data Contributor` (data-plane, assigned via `az cosmosdb sql role assignment create`)
-> - Permission to create role assignments on the Storage account and AI Foundry account (so the script can grant the Search MI access to them); if not available, run `az role assignment create` once manually with an Owner-level account.
+See [Authentication model — Entra ID only (no keys)](#authentication-model--entra-id-only-no-keys) above for details on the auth approach used in both modes.
 
 The deployment is split into two phases:
 
@@ -149,15 +163,15 @@ Expected console output:
 
 ```text
 SUCCESS: Your application was provisioned in Azure in <NN> minutes ...
-🔧 Running post-provision hook...
-🔒 Zero Trust / Network Isolation enabled.
-   ❓ Are you running this script from inside the VNet or via VPN? [Y/n]
+[>] Running post-provision hook...
+[>] Zero Trust / Network Isolation enabled.
+   [?] Are you running this script from inside the VNet or via VPN? [Y/n]
 ```
 
 Answer **`n`** (or just leave it for the non-interactive azd hook — the hook auto-skips when stdin is redirected). The hook will report:
 
 ```text
-ℹ️  Network isolation is enabled. Three data-plane steps were skipped:
+[i]  Network isolation is enabled. Three data-plane steps were skipped:
      - App Configuration writes (AZURE_INPUT_TRANSCRIPTION_MODEL)
      - Cosmos sample seed (scenarios/rubrics)
      - Azure AI Search data-plane setup
@@ -230,12 +244,12 @@ pwsh -NoProfile -File .\scripts\postProvision.ps1
 Expected output:
 
 ```text
-✅ AZURE_CONTAINER_REGISTRY_ENDPOINT set to 'cr<token>.azurecr.io'.
-✅ Container App '<...>' bound to ACR via system-assigned identity.
-✅ App Configuration updated (AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech).
-🔎 Running Search data-plane setup hook ... (skillset/index/indexer created)
-🌱 Running Cosmos sample seed hook ... (scenarios + rubrics upserted)
-✅ post-provision hook completed.
+[OK] AZURE_CONTAINER_REGISTRY_ENDPOINT set to 'cr<token>.azurecr.io'.
+[OK] Container App '<...>' bound to ACR via system-assigned identity.
+[OK] App Configuration updated (AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech).
+[>] Running Search data-plane setup hook ... (skillset/index/indexer created)
+[>] Running Cosmos sample seed hook ... (scenarios + rubrics upserted)
+[OK] post-provision hook completed.
 ```
 
 If `Resolve-DnsName appcs-<token>.azconfig.io` does **not** return a `192.168.*` private IP, the private DNS zone link is missing or the resolver cache is stale — restart the VM and retry.
@@ -288,7 +302,7 @@ $rg = azd env get-value AZURE_RESOURCE_GROUP
 az vm deallocate -g $rg -n testvm<token> --no-wait
 ```
 
-> ⚠️ **Don't deallocate the VM mid-`azd provision`.** The Bicep template applies VM extensions (`cse`, `MDE.Windows`, `MicrosoftAntiMalware`) on every provision and Azure rejects extension changes when the VM is stopped (`OperationNotAllowed: Cannot modify extensions in the VM when the VM is not running`). Always **start** the VM before re-running `azd provision`/`azd up`.
+> [!] **Don't deallocate the VM mid-`azd provision`.** The Bicep template applies VM extensions (`cse`, `MDE.Windows`, `MicrosoftAntiMalware`) on every provision and Azure rejects extension changes when the VM is stopped (`OperationNotAllowed: Cannot modify extensions in the VM when the VM is not running`). Always **start** the VM before re-running `azd provision`/`azd up`.
 
 ---
 
@@ -333,5 +347,5 @@ azd down --force
 - Architecture: [docs/how-it-works.md](how-it-works.md)
 - AI Search dataplane: [docs/ai-search-indexing-runbook.md](ai-search-indexing-runbook.md)
 - NI quick reference (subnets, FQDNs, firewall rules): [docs/network-isolation-jumpbox-runbook.md](network-isolation-jumpbox-runbook.md)
-- Scripts: [scripts/postProvision.ps1](../scripts/postProvision.ps1) · [scripts/setup_search_dataplane.ps1](../scripts/setup_search_dataplane.ps1) · [scripts/seed_cosmos_samples.py](../scripts/seed_cosmos_samples.py) · [scripts/add-jumpbox-fw-rules.ps1](../scripts/add-jumpbox-fw-rules.ps1)
+- Scripts: [scripts/postProvision.ps1](../scripts/postProvision.ps1) · [scripts/setup_search_dataplane.ps1](../scripts/setup_search_dataplane.ps1) · [scripts/seed_cosmos_samples.py](../scripts/seed_cosmos_samples.py)
 - AILZ submodule: [`infra/`](../infra/) (pin: `v1.1.4` — first-class Speech support, Bicep CLI bootstrap FQDN)
