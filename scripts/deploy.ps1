@@ -135,10 +135,21 @@ Write-Host ""
 #region Decide agent pool
 $agentPoolArgs = @()
 if ($niFlag -eq 'true') {
+    # Local azd env / process env may not have ACR_TASK_AGENT_POOL when this
+    # script is invoked from a machine where azd was not the original
+    # provisioner (e.g. the jumpbox after `azd provision` ran on a dev box).
+    # Fall back to querying Azure directly: the AILZ landing zone deploys
+    # a single agent pool on the registry under NI.
     if (-not $agentPool) {
-        Write-ErrorColored "NETWORK_ISOLATION=true but ACR_TASK_AGENT_POOL is empty."
-        Write-Host "    The landing zone should expose it as an azd output (v1.1.0+)."
-        Write-Host "    Run 'azd provision' to refresh outputs, then retry."
+        Write-Blue "ACR_TASK_AGENT_POOL not found in env; querying Azure (az acr agentpool list)..."
+        $agentPool = az acr agentpool list -r $acrName -g $rg --query "[0].name" -o tsv 2>$null
+        if ($agentPool) { $agentPool = $agentPool.Trim() }
+    }
+    if (-not $agentPool) {
+        Write-ErrorColored "NETWORK_ISOLATION=true but no ACR Task agent pool was found."
+        Write-Host "    Tried: env var, azd env, az acr agentpool list -r $acrName -g $rg"
+        Write-Host "    Re-run 'azd provision' to ensure the landing zone v1.1.0+ deployed the agent pool,"
+        Write-Host "    or run 'azd env refresh' on this machine to sync outputs."
         exit 1
     }
     Write-Green "Using ACR Tasks agent pool: $agentPool (VNet-attached)"
