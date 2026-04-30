@@ -191,27 +191,60 @@ cd live-voice-practice
 git submodule update --init --recursive
 ```
 
-#### B.3. Sign in and select the same azd environment
+#### B.3. Sign in (managed identity) and refresh the azd environment
+
+The jumpbox is provisioned with a **system-assigned managed identity** that already has
+the right RBAC on the resource group. Use it for both `az` and `azd` so you don't have to
+authenticate as your own user inside the VNet.
 
 ```powershell
-az login --tenant <AZURE_TENANT_ID> --use-device-code
+# 1. Sign in az CLI with the VM's system-assigned managed identity
+az login --identity
 az account set --subscription <AZURE_SUBSCRIPTION_ID>
 
-azd auth login --tenant-id <AZURE_TENANT_ID>
+# 2. Sign in azd with the same managed identity
+azd auth login --managed-identity
 
-# The AILZ bootstrap pre-provisions the local azd env (the .azure/<env>/ folder
-# is brought over during the jumpbox install) and marks it as the default, so
-# you can refresh it directly without selecting:
-azd env refresh                  # pulls outputs from the existing deployment
+# 3. Pre-populate principal id/type so azd does NOT try to call Microsoft Graph
+#    (the jumpbox MI typically has no Graph permissions, which makes
+#     `azd env refresh` fail with "fetching current principal type ... not logged in").
+#    We get the MI object id by decoding the `oid` claim from an IMDS token —
+#    this works without Graph access.
+$tokenResp = Invoke-RestMethod -Headers @{Metadata='true'} `
+    -Uri 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/'
+$payload = $tokenResp.access_token.Split('.')[1]
+switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } }
+$json = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String($payload.Replace('-','+').Replace('_','/')))
+$miPrincipalId = ($json | ConvertFrom-Json).oid
+Write-Host "MI principalId = $miPrincipalId"
 
-# (Fallback) If `azd env list` shows nothing or the wrong default, create/select:
-# azd env list
-# azd env select <env-name>      # or: azd env new <env-name>
-# azd env set AZURE_LOCATION        <region>
-# azd env set AZURE_SUBSCRIPTION_ID <subscription-guid>
-# azd env set NETWORK_ISOLATION     true
-# azd env refresh
+azd env set AZURE_PRINCIPAL_ID   $miPrincipalId
+azd env set AZURE_PRINCIPAL_TYPE ServicePrincipal
+
+# 4. Refresh — pulls the Bicep outputs (App Config, ACR, Speech, Cosmos, etc.) into the local .env
+azd env refresh
 ```
+
+> **Note (user-account fallback):** if for some reason the MI path is blocked,
+> you can still authenticate as a user from the jumpbox:
+>
+> ```powershell
+> az login --tenant <AZURE_TENANT_ID> --use-device-code
+> az account set --subscription <AZURE_SUBSCRIPTION_ID>
+> azd auth login --tenant-id <AZURE_TENANT_ID>
+> azd env refresh
+> ```
+
+> **Fallback:** if `azd env list` shows nothing or the wrong default, run:
+> ```powershell
+> azd env list
+> azd env select <env-name>      # or: azd env new <env-name>
+> azd env set AZURE_LOCATION        <region>
+> azd env set AZURE_SUBSCRIPTION_ID <subscription-guid>
+> azd env set NETWORK_ISOLATION     true
+> azd env refresh
+> ```
 
 `azd env refresh` populates the Bicep outputs (App Config endpoint, Container App name, ACR endpoint, Speech endpoint/region, Cosmos account, etc.) into the local env file by reading the existing deployment in the resource group.
 
