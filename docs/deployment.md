@@ -186,7 +186,7 @@ If the repo is **not** already at `C:\github\live-voice-practice` (e.g. you boot
 
 ```powershell
 cd C:\github
-git clone https://github.com/<your-org>/live-voice-practice.git
+git clone https://github.com/Azure/live-voice-practice.git
 cd live-voice-practice
 git submodule update --init --recursive
 ```
