@@ -46,17 +46,13 @@ class ScenarioManager:
         self.scenarios = self._load_scenarios()
 
     def _initialize_cosmos_client(self) -> Optional[CosmosClient]:
-        """Initialize Cosmos client using key or managed identity credentials."""
+        """Initialize Cosmos client using Entra ID (DefaultAzureCredential)."""
         endpoint = config.get("cosmos_endpoint", "")
         if not endpoint:
             logger.warning("COSMOS endpoint is not configured; scenario list will be empty")
             return None
 
-        cosmos_key = config.get("cosmos_key", "")
-
         try:
-            if cosmos_key:
-                return CosmosClient(endpoint, credential=cosmos_key)
             return CosmosClient(endpoint, credential=DefaultAzureCredential())
         except Exception as error:
             logger.error("Failed to initialize Cosmos client: %s", error)

@@ -6,6 +6,10 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 ## [Unreleased]
 
 ### Changed
+- **Authentication is now Entra ID only across the entire solution; no account / admin / connection-string keys are read or generated anywhere.**
+  - Backend (`SupportMaterialsSearchService`, `ConversationManager`, `ScenarioManager`) always uses `DefaultAzureCredential`. The optional `AZURE_SEARCH_API_KEY` and `COSMOS_KEY` config entries were removed.
+  - `scripts/setup_search_dataplane.ps1` / `.sh` now upload sample blobs with `az storage --auth-mode login`, drive the Search REST APIs with `az rest --resource https://search.azure.com` (AAD bearer), and configure indexer datasources with `ResourceId=...` connection strings backed by the Search service's system-assigned managed identity. The script also grants the Search MI `Storage Blob Data Reader` on the Storage account.
+  - `scripts/seed_cosmos_samples.py` switched from `COSMOS_KEY` to `DefaultAzureCredential` (requires `Cosmos DB Built-in Data Contributor` on the Cosmos account).
 - Infra submodule bumped to `bicep-ptn-aiml-landing-zone` **v1.1.0** (ACR Task agent pool + complete jumpbox firewall allow-list). `.gitmodules` and `manifest.json` updated accordingly.
 - `scripts/deploy.ps1` and `scripts/deploy.sh` now build and push with `az acr build` instead of `docker buildx`. Under `NETWORK_ISOLATION=true` they use the VNet-attached ACR Tasks agent pool (`ACR_TASK_AGENT_POOL` azd output from v1.1.0); otherwise they use the shared Microsoft-managed pool. **No Docker is required on the workstation or jumpbox anymore.**
 - `scripts/postProvision.ps1` and `scripts/postProvision.sh` no longer invoke `add-jumpbox-fw-rules.ps1`. v1.1.0 ships the complete jumpbox bootstrap FQDN allow-list by default via the landing zone's `extendFirewallForJumpboxBootstrap` parameter.

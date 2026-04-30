@@ -112,27 +112,31 @@ if (-not $hasEmbeddingDeployment) {
   az cognitiveservices account deployment create -g $resourceGroup -n $aiServicesName --deployment-name $embeddingDeploymentName --model-name $embeddingDeploymentName --model-version 1 --model-format OpenAI --sku-name Standard --sku-capacity 10 | Out-Null
 }
 
-Write-Host "[>] Ensuring Search managed identity and OpenAI role assignment..."
+Write-Host "[>] Ensuring Search managed identity and downstream role assignments..."
 az search service update -g $resourceGroup -n $searchServiceName --identity-type SystemAssigned | Out-Null
 $searchPrincipalId = az search service show -g $resourceGroup -n $searchServiceName --query identity.principalId -o tsv
 $aiServicesId = az cognitiveservices account show -g $resourceGroup -n $aiServicesName --query id -o tsv
 $aiServicesEndpoint = az cognitiveservices account show -g $resourceGroup -n $aiServicesName --query properties.endpoint -o tsv
+$subscriptionId = az account show --query id -o tsv
+$storageAccountId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.Storage/storageAccounts/$storageAccountName"
+
+# Search MI -> AI Services (for embedding skill)
 az role assignment create --assignee-object-id $searchPrincipalId --assignee-principal-type ServicePrincipal --role "Cognitive Services OpenAI User" --scope $aiServicesId 2>$null | Out-Null
+# Search MI -> Storage (for indexer datasource MI auth)
+az role assignment create --assignee-object-id $searchPrincipalId --assignee-principal-type ServicePrincipal --role "Storage Blob Data Reader" --scope $storageAccountId 2>$null | Out-Null
 
-$searchKey = az search admin-key show -g $resourceGroup --service-name $searchServiceName --query primaryKey -o tsv
-$storageKey = az storage account keys list -g $resourceGroup -n $storageAccountName --query "[0].value" -o tsv
-
-Write-Host "[>] Ensuring source containers and uploading sample files..."
-az storage container create --name support-materials-src --account-name $storageAccountName --account-key $storageKey | Out-Null
-az storage container create --name transcripts-src --account-name $storageAccountName --account-key $storageKey | Out-Null
+Write-Host "[>] Ensuring source containers and uploading sample files (Entra ID auth)..."
+az storage container create --name support-materials-src --account-name $storageAccountName --auth-mode login | Out-Null
+az storage container create --name transcripts-src --account-name $storageAccountName --auth-mode login | Out-Null
 if (Test-Path "samples/materials") {
-  az storage blob upload-batch --account-name $storageAccountName --account-key $storageKey --destination support-materials-src --source samples/materials --pattern "*.pdf" | Out-Null
+  az storage blob upload-batch --account-name $storageAccountName --auth-mode login --destination support-materials-src --source samples/materials --pattern "*.pdf" --overwrite | Out-Null
 }
 if (Test-Path "samples/transcripts") {
-  az storage blob upload-batch --account-name $storageAccountName --account-key $storageKey --destination transcripts-src --source samples/transcripts --pattern "*.txt" | Out-Null
+  az storage blob upload-batch --account-name $storageAccountName --auth-mode login --destination transcripts-src --source samples/transcripts --pattern "*.txt" --overwrite | Out-Null
 }
 
-$conn = "DefaultEndpointsProtocol=https;AccountName=$storageAccountName;AccountKey=$storageKey;EndpointSuffix=core.windows.net"
+# Datasource connection uses ResourceId form so Search authenticates to Storage via its system-assigned MI (no keys)
+$conn = "ResourceId=$storageAccountId;"
 $tmpDir = Join-Path $PSScriptRoot '.tmp-search'
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
 
@@ -304,20 +308,22 @@ $transcriptsSkillsetBody = '@' + (Join-Path $tmpDir 'transcripts-skillset.json')
 $supportIndexerBody = '@' + (Join-Path $tmpDir 'support-indexer.json')
 $transcriptsIndexerBody = '@' + (Join-Path $tmpDir 'transcripts-indexer.json')
 
-az rest --skip-authorization-header --method put --url "$searchEndpoint/indexes/support-materials?api-version=$apiVersion" --headers 'Content-Type=application/json' "api-key=$searchKey" --body $supportIndexBody | Out-Null
-az rest --skip-authorization-header --method put --url "$searchEndpoint/indexes/transcripts?api-version=$apiVersion" --headers 'Content-Type=application/json' "api-key=$searchKey" --body $transcriptsIndexBody | Out-Null
-az rest --skip-authorization-header --method put --url "$searchEndpoint/datasources/datasource-support-materials?api-version=$apiVersion" --headers 'Content-Type=application/json' "api-key=$searchKey" --body $supportDsBody | Out-Null
-az rest --skip-authorization-header --method put --url "$searchEndpoint/datasources/datasource-transcripts?api-version=$apiVersion" --headers 'Content-Type=application/json' "api-key=$searchKey" --body $transcriptsDsBody | Out-Null
-az rest --skip-authorization-header --method put --url "$searchEndpoint/skillsets/skillset-support-materials?api-version=$apiVersion" --headers 'Content-Type=application/json' "api-key=$searchKey" --body $supportSkillsetBody | Out-Null
-az rest --skip-authorization-header --method put --url "$searchEndpoint/skillsets/skillset-transcripts?api-version=$apiVersion" --headers 'Content-Type=application/json' "api-key=$searchKey" --body $transcriptsSkillsetBody | Out-Null
-az rest --skip-authorization-header --method put --url "$searchEndpoint/indexers/support-materials-indexer?api-version=$apiVersion" --headers 'Content-Type=application/json' "api-key=$searchKey" --body $supportIndexerBody | Out-Null
-az rest --skip-authorization-header --method put --url "$searchEndpoint/indexers/transcripts-indexer?api-version=$apiVersion" --headers 'Content-Type=application/json' "api-key=$searchKey" --body $transcriptsIndexerBody | Out-Null
+# All Search REST calls use AAD; az rest will inject the bearer token for the search.azure.com audience
+$searchResource = 'https://search.azure.com'
+az rest --resource $searchResource --method put --url "$searchEndpoint/indexes/support-materials?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $supportIndexBody | Out-Null
+az rest --resource $searchResource --method put --url "$searchEndpoint/indexes/transcripts?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $transcriptsIndexBody | Out-Null
+az rest --resource $searchResource --method put --url "$searchEndpoint/datasources/datasource-support-materials?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $supportDsBody | Out-Null
+az rest --resource $searchResource --method put --url "$searchEndpoint/datasources/datasource-transcripts?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $transcriptsDsBody | Out-Null
+az rest --resource $searchResource --method put --url "$searchEndpoint/skillsets/skillset-support-materials?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $supportSkillsetBody | Out-Null
+az rest --resource $searchResource --method put --url "$searchEndpoint/skillsets/skillset-transcripts?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $transcriptsSkillsetBody | Out-Null
+az rest --resource $searchResource --method put --url "$searchEndpoint/indexers/support-materials-indexer?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $supportIndexerBody | Out-Null
+az rest --resource $searchResource --method put --url "$searchEndpoint/indexers/transcripts-indexer?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $transcriptsIndexerBody | Out-Null
 
 try {
-  & az rest --skip-authorization-header --method post --url "$searchEndpoint/indexers/support-materials-indexer/run?api-version=$apiVersion" --headers "api-key=$searchKey" | Out-Null
+  & az rest --resource $searchResource --method post --url "$searchEndpoint/indexers/support-materials-indexer/run?api-version=$apiVersion" | Out-Null
 } catch { }
 try {
-  & az rest --skip-authorization-header --method post --url "$searchEndpoint/indexers/transcripts-indexer/run?api-version=$apiVersion" --headers "api-key=$searchKey" | Out-Null
+  & az rest --resource $searchResource --method post --url "$searchEndpoint/indexers/transcripts-indexer/run?api-version=$apiVersion" | Out-Null
 } catch { }
 
 Write-Host "[OK] Search data-plane setup completed."

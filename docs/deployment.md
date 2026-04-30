@@ -104,6 +104,20 @@ In this mode all data-plane traffic stays inside the VNet:
 - Egress from the jumpbox subnet is forced through Azure Firewall (FQDN-tag allow-list).
 - The Container App ingress is internal — only resolvable from inside the VNet.
 
+> **Authentication: Entra ID only (no keys).** This solution does not use any account / admin / connection-string keys. Every component authenticates via Microsoft Entra ID:
+> - The Container App's system-assigned managed identity calls AI Foundry, Speech, Cosmos DB, AI Search, Key Vault, App Configuration and Storage with `DefaultAzureCredential`.
+> - The AI Search service's system-assigned managed identity is used by indexers/skillsets to read from Storage and call AI Foundry embeddings (datasource connection string uses the `ResourceId=...` form, no `AccountKey`).
+> - `scripts/setup_search_dataplane.{ps1,sh}` and `scripts/seed_cosmos_samples.py` use `az rest --resource https://search.azure.com`, `az storage --auth-mode login` and `DefaultAzureCredential` respectively.
+>
+> **Required RBAC for the principal running `postprovision` (jumpbox MI in Mode 2, your dev user in Mode 1):**
+> - Storage account: `Storage Blob Data Contributor`
+> - AI Search: `Search Service Contributor` + `Search Index Data Contributor`
+> - AI Foundry / Speech: `Cognitive Services Contributor` (or `Cognitive Services OpenAI User` + `Cognitive Services User`)
+> - App Configuration: `App Configuration Data Owner`
+> - Key Vault: `Key Vault Secrets Officer` (or `Key Vault Secrets User` for read-only flows)
+> - Cosmos DB: `Cosmos DB Built-in Data Contributor` (data-plane, assigned via `az cosmosdb sql role assignment create`)
+> - Permission to create role assignments on the Storage account and AI Foundry account (so the script can grant the Search MI access to them); if not available, run `az role assignment create` once manually with an Owner-level account.
+
 The deployment is split into two phases:
 
 - **Phase A — workstation:** `azd provision` creates infra. The `postprovision` hook runs but **skips** all data-plane steps because they cannot reach private endpoints from your laptop.

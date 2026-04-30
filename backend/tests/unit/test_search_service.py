@@ -20,7 +20,6 @@ class TestSupportMaterialsSearchService:
                 index_name="support-materials",
                 openai_client=mock_openai or Mock(),
                 embedding_deployment="text-embedding-3-small",
-                search_api_key="test-key",
             )
         return service
 

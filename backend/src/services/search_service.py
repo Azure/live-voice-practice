@@ -9,7 +9,6 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 
-from azure.core.credentials import AzureKeyCredential
 from azure.identity import DefaultAzureCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.models import VectorizedQuery
@@ -32,7 +31,6 @@ class SupportMaterialsSearchService:
         index_name: str,
         openai_client: AzureOpenAI,
         embedding_deployment: str,
-        search_api_key: str = "",
     ):
         """
         Initialize the search service.
@@ -42,21 +40,14 @@ class SupportMaterialsSearchService:
             index_name: Name of the search index (e.g. 'support-materials')
             openai_client: AzureOpenAI client for generating query embeddings
             embedding_deployment: Deployment name for the embedding model (e.g. 'text-embedding-3-small')
-            search_api_key: Optional API key for search service, falls back to managed identity
         """
         self._openai_client = openai_client
         self._embedding_deployment = embedding_deployment
 
-        credential: Any
-        if search_api_key:
-            credential = AzureKeyCredential(search_api_key)
-        else:
-            credential = DefaultAzureCredential()
-
         self._search_client = SearchClient(
             endpoint=search_endpoint,
             index_name=index_name,
-            credential=credential,
+            credential=DefaultAzureCredential(),
         )
         logger.info(
             "SupportMaterialsSearchService initialized — endpoint: %s, index: %s",

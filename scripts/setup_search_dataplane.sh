@@ -67,27 +67,31 @@ if ! az cognitiveservices account deployment show -g "$RESOURCE_GROUP" -n "$AI_S
     --sku-capacity 10 >/dev/null
 fi
 
-echo "[>] Ensuring Search managed identity and OpenAI role assignment..."
+echo "[>] Ensuring Search managed identity and downstream role assignments..."
 az search service update -g "$RESOURCE_GROUP" -n "$SEARCH_SERVICE_NAME" --identity-type SystemAssigned >/dev/null
 SEARCH_PRINCIPAL_ID="$(az search service show -g "$RESOURCE_GROUP" -n "$SEARCH_SERVICE_NAME" --query identity.principalId -o tsv)"
 AI_SERVICES_ID="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$AI_SERVICES_NAME" --query id -o tsv)"
 AI_SERVICES_ENDPOINT="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$AI_SERVICES_NAME" --query properties.endpoint -o tsv)"
+SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+STORAGE_ACCOUNT_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${STORAGE_ACCOUNT_NAME}"
+
+# Search MI -> AI Services (for embedding skill)
 az role assignment create --assignee-object-id "$SEARCH_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal --role "Cognitive Services OpenAI User" --scope "$AI_SERVICES_ID" >/dev/null 2>&1 || true
+# Search MI -> Storage (for indexer datasource MI auth)
+az role assignment create --assignee-object-id "$SEARCH_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal --role "Storage Blob Data Reader" --scope "$STORAGE_ACCOUNT_ID" >/dev/null 2>&1 || true
 
-SEARCH_KEY="$(az search admin-key show -g "$RESOURCE_GROUP" --service-name "$SEARCH_SERVICE_NAME" --query primaryKey -o tsv)"
-STORAGE_KEY="$(az storage account keys list -g "$RESOURCE_GROUP" -n "$STORAGE_ACCOUNT_NAME" --query "[0].value" -o tsv)"
-
-echo "[>] Ensuring source containers and uploading sample files..."
-az storage container create --name support-materials-src --account-name "$STORAGE_ACCOUNT_NAME" --account-key "$STORAGE_KEY" >/dev/null
-az storage container create --name transcripts-src --account-name "$STORAGE_ACCOUNT_NAME" --account-key "$STORAGE_KEY" >/dev/null
+echo "[>] Ensuring source containers and uploading sample files (Entra ID auth)..."
+az storage container create --name support-materials-src --account-name "$STORAGE_ACCOUNT_NAME" --auth-mode login >/dev/null
+az storage container create --name transcripts-src --account-name "$STORAGE_ACCOUNT_NAME" --auth-mode login >/dev/null
 if [[ -d "samples/materials" ]]; then
-  az storage blob upload-batch --account-name "$STORAGE_ACCOUNT_NAME" --account-key "$STORAGE_KEY" --destination support-materials-src --source samples/materials --pattern "*.pdf" >/dev/null
+  az storage blob upload-batch --account-name "$STORAGE_ACCOUNT_NAME" --auth-mode login --destination support-materials-src --source samples/materials --pattern "*.pdf" --overwrite >/dev/null
 fi
 if [[ -d "samples/transcripts" ]]; then
-  az storage blob upload-batch --account-name "$STORAGE_ACCOUNT_NAME" --account-key "$STORAGE_KEY" --destination transcripts-src --source samples/transcripts --pattern "*.txt" >/dev/null
+  az storage blob upload-batch --account-name "$STORAGE_ACCOUNT_NAME" --auth-mode login --destination transcripts-src --source samples/transcripts --pattern "*.txt" --overwrite >/dev/null
 fi
 
-CONN="DefaultEndpointsProtocol=https;AccountName=${STORAGE_ACCOUNT_NAME};AccountKey=${STORAGE_KEY};EndpointSuffix=core.windows.net"
+# Datasource connection uses ResourceId form so Search authenticates to Storage via its system-assigned MI (no keys)
+CONN="ResourceId=${STORAGE_ACCOUNT_ID};"
 TMP_DIR="${TMPDIR:-/tmp}/search-dataplane-setup"
 mkdir -p "$TMP_DIR"
 
@@ -255,9 +259,9 @@ search_rest() {
   local url="$2"
   local body_file="${3:-}"
   if [[ -n "$body_file" ]]; then
-    az rest --skip-authorization-header --method "$method" --url "$url" --headers "Content-Type=application/json" "api-key=$SEARCH_KEY" --body "@$body_file" >/dev/null
+    az rest --resource https://search.azure.com --method "$method" --url "$url" --headers "Content-Type=application/json" --body "@$body_file" >/dev/null
   else
-    az rest --skip-authorization-header --method "$method" --url "$url" --headers "Content-Type=application/json" "api-key=$SEARCH_KEY" >/dev/null
+    az rest --resource https://search.azure.com --method "$method" --url "$url" --headers "Content-Type=application/json" >/dev/null
   fi
 }
 

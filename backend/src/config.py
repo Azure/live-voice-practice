@@ -222,12 +222,6 @@ class Config:
                 app_config_key="COSMOS_DB_ENDPOINT",
                 default="",
             ),
-            "cosmos_key": self._get_setting(
-                env_var="COSMOS_KEY",
-                app_config=app_config_values,
-                app_config_key="COSMOS_DB_KEY",
-                default="",
-            ),
             "cosmos_database_name": self._get_setting(
                 env_var="COSMOS_DATABASE_NAME",
                 app_config=app_config_values,
@@ -275,12 +269,6 @@ class Config:
                 app_config=app_config_values,
                 app_config_key="AZURE_SEARCH_INDEX",
                 default="support-materials",
-            ),
-            "azure_search_api_key": self._get_setting(
-                env_var="AZURE_SEARCH_API_KEY",
-                app_config=app_config_values,
-                app_config_key="AZURE_SEARCH_API_KEY",
-                default="",
             ),
             "azure_search_embedding_deployment": self._get_setting(
                 env_var="AZURE_SEARCH_EMBEDDING_DEPLOYMENT",

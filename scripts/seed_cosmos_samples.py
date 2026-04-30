@@ -1,10 +1,14 @@
 """Seed Cosmos DB scenarios and rubrics containers from local sample JSON files.
 
+Authentication uses Microsoft Entra ID (DefaultAzureCredential): no keys.
+Make sure the calling identity has the 'Cosmos DB Built-in Data Contributor'
+data-plane role on the account (assigned via
+  az cosmosdb sql role assignment create ...).
+
 Usage example (PowerShell):
   $env:COSMOS_ENDPOINT = "https://<account>.documents.azure.com:443/"
-  $env:COSMOS_KEY = "<key>"
   $env:COSMOS_DATABASE_NAME = "<database>"
-  c:/Users/paulolacerda/workspace/live-voice-practice/.venv/Scripts/python.exe scripts/seed_cosmos_samples.py --mode upsert
+  python scripts/seed_cosmos_samples.py --mode upsert
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from azure.cosmos import CosmosClient, exceptions
+from azure.identity import DefaultAzureCredential
 
 
 @dataclass
@@ -121,7 +126,7 @@ def main() -> int:
     args = parse_args()
 
     endpoint = _get_required_env("COSMOS_ENDPOINT")
-    key = _get_required_env("COSMOS_KEY")
+    credential = DefaultAzureCredential()
 
     database_name = (args.database or "").strip()
     if not database_name:
@@ -134,7 +139,7 @@ def main() -> int:
     if not scenarios_docs and not rubrics_docs:
         raise ValueError(f"No sample JSON files found under {root}")
 
-    client = CosmosClient(endpoint, credential=key)
+    client = CosmosClient(endpoint, credential=credential)
     database = client.get_database_client(database_name)
 
     scenarios_container = database.get_container_client(args.scenarios_container)

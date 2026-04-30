@@ -31,16 +31,13 @@ class ConversationManager:
         self._load_rubrics()
 
     def _initialize_cosmos_client(self) -> Optional[CosmosClient]:
-        """Initialize Cosmos client using key or managed identity credentials."""
+        """Initialize Cosmos client using Entra ID (DefaultAzureCredential)."""
         endpoint = config.get("cosmos_endpoint", "")
         if not endpoint:
             logger.warning("COSMOS endpoint not configured; conversation persistence disabled")
             return None
 
-        cosmos_key = config.get("cosmos_key", "")
         try:
-            if cosmos_key:
-                return CosmosClient(endpoint, credential=cosmos_key)
             return CosmosClient(endpoint, credential=DefaultAzureCredential())
         except Exception as error:
             logger.error("Failed to initialize Cosmos client for conversations: %s", error)

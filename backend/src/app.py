@@ -109,7 +109,6 @@ def _initialize_search_service():
             index_name=config.get("azure_search_index", "support-materials"),
             openai_client=openai_client,
             embedding_deployment=config.get("azure_search_embedding_deployment", "text-embedding-3-small"),
-            search_api_key=config.get("azure_search_api_key", ""),
         )
     except Exception as e:
         logger.warning("Failed to initialize search service (non-blocking): %s", e)
