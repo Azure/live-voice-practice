@@ -363,12 +363,26 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
     # PATH for non-interactive sessions; try the `py` launcher and `python3`
     # before giving up.
     $pythonExe = $null
-    foreach ($candidate in @('python', 'py', 'python3')) {
+    # Probe well-known install locations first (jumpbox bootstrap installs to
+    # Program Files), then fall back to PATH lookups. Validate each candidate
+    # by running `--version`; the `py` launcher resolves but errors with "No
+    # installed Python found!" when no interpreter is registered.
+    $candidates = @()
+    $candidates += Get-ChildItem 'C:\Program Files\Python*\python.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+    $candidates += Get-ChildItem 'C:\Python*\python.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+    $candidates += @('python', 'python3', 'py')
+    foreach ($candidate in $candidates) {
       $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-      if ($cmd) { $pythonExe = $cmd.Source; break }
+      if (-not $cmd) { continue }
+      $resolved = $cmd.Source
+      $verOutput = & $resolved --version 2>&1
+      if ($LASTEXITCODE -eq 0 -and $verOutput -match 'Python\s+\d') {
+        $pythonExe = $resolved
+        break
+      }
     }
     if (-not $pythonExe) {
-      Write-Host "[!] Python executable not found (tried: python, py, python3). Skipping Cosmos sample seed."
+      Write-Host "[!] Python executable not found (tried Program Files, python, python3, py). Skipping Cosmos sample seed."
     } else {
       Write-Host "[>] Using Python: $pythonExe"
       # Resource names were resolved at startup from App Configuration (the
