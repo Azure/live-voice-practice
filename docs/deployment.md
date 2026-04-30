@@ -206,17 +206,11 @@ az account set --subscription <AZURE_SUBSCRIPTION_ID>
 azd auth login --managed-identity
 
 # 3. Pre-populate principal id/type so azd does NOT try to call Microsoft Graph
-#    (the jumpbox MI typically has no Graph permissions, which makes
+#    (the jumpbox MI usually has no Graph permissions, which makes
 #     `azd env refresh` fail with "fetching current principal type ... not logged in").
-#    We get the MI object id by decoding the `oid` claim from an IMDS token —
-#    this works without Graph access.
-$tokenResp = Invoke-RestMethod -Headers @{Metadata='true'} `
-    -Uri 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/'
-$payload = $tokenResp.access_token.Split('.')[1]
-switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } }
-$json = [Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String($payload.Replace('-','+').Replace('_','/')))
-$miPrincipalId = ($json | ConvertFrom-Json).oid
+#    Read the MI object id straight from the VM resource:
+$miPrincipalId = az vm show -g <AZURE_RESOURCE_GROUP> -n $env:COMPUTERNAME `
+    --query identity.principalId -o tsv
 Write-Host "MI principalId = $miPrincipalId"
 
 azd env set AZURE_PRINCIPAL_ID   $miPrincipalId
