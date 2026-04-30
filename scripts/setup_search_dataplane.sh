@@ -23,30 +23,48 @@ if [[ -z "$RESOURCE_GROUP" ]]; then
   exit 1
 fi
 
+# App Configuration is the source of truth: Bicep writes resource names there
+# at provision time. Read from it directly instead of calling ARM list (which
+# fails when the executing identity lacks Reader on the RG -- typical for the
+# AILZ jumpbox MI).
+APP_CONFIG_LABEL="${APP_CONFIG_LABEL:-live-voice-practice}"
+APP_CONFIG_FALLBACK_LABEL="ai-lz"
+
+get_appconfig_value() {
+  local key="$1"
+  local val
+  if [[ -z "${APP_CONFIG_ENDPOINT:-}" ]]; then return 1; fi
+  for lbl in "$APP_CONFIG_LABEL" "$APP_CONFIG_FALLBACK_LABEL"; do
+    val="$(az appconfig kv show --endpoint "$APP_CONFIG_ENDPOINT" --key "$key" --label "$lbl" --auth-mode login --query value -o tsv 2>/dev/null)"
+    if [[ -n "$val" ]]; then echo "$val"; return 0; fi
+  done
+  return 1
+}
+
 SEARCH_SERVICE_NAME="${SEARCH_SERVICE_NAME:-}"
 if [[ -z "$SEARCH_SERVICE_NAME" ]]; then
-  SEARCH_SERVICE_NAME="$(az search service list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)"
+  SEARCH_SERVICE_NAME="$(get_appconfig_value SEARCH_SERVICE_NAME || true)"
 fi
 if [[ -z "$SEARCH_SERVICE_NAME" ]]; then
-  echo "[X] Could not resolve Search service name"
+  echo "[X] Could not resolve SEARCH_SERVICE_NAME from env or App Configuration"
   exit 1
 fi
 
 STORAGE_ACCOUNT_NAME="${STORAGE_ACCOUNT_NAME:-}"
 if [[ -z "$STORAGE_ACCOUNT_NAME" ]]; then
-  STORAGE_ACCOUNT_NAME="$(az storage account list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)"
+  STORAGE_ACCOUNT_NAME="$(get_appconfig_value STORAGE_ACCOUNT_NAME || true)"
 fi
 if [[ -z "$STORAGE_ACCOUNT_NAME" ]]; then
-  echo "[X] Could not resolve Storage account name"
+  echo "[X] Could not resolve STORAGE_ACCOUNT_NAME from env or App Configuration"
   exit 1
 fi
 
 AI_SERVICES_NAME="${AI_FOUNDRY_ACCOUNT_NAME:-}"
 if [[ -z "$AI_SERVICES_NAME" ]]; then
-  AI_SERVICES_NAME="$(az cognitiveservices account list -g "$RESOURCE_GROUP" --query "[?kind=='AIServices']|[0].name" -o tsv)"
+  AI_SERVICES_NAME="$(get_appconfig_value AI_FOUNDRY_ACCOUNT_NAME || true)"
 fi
 if [[ -z "$AI_SERVICES_NAME" ]]; then
-  echo "[X] Could not resolve AI Services account name"
+  echo "[X] Could not resolve AI_FOUNDRY_ACCOUNT_NAME from env or App Configuration"
   exit 1
 fi
 
@@ -54,18 +72,11 @@ EMBEDDING_DEPLOYMENT_NAME="${EMBEDDING_DEPLOYMENT_NAME:-text-embedding-3-small}"
 SEARCH_ENDPOINT="https://${SEARCH_SERVICE_NAME}.search.windows.net"
 API_VERSION="2024-07-01"
 
-echo "[>] Ensuring embedding deployment '${EMBEDDING_DEPLOYMENT_NAME}'..."
-if ! az cognitiveservices account deployment show -g "$RESOURCE_GROUP" -n "$AI_SERVICES_NAME" --deployment-name "$EMBEDDING_DEPLOYMENT_NAME" >/dev/null 2>&1; then
-  az cognitiveservices account deployment create \
-    -g "$RESOURCE_GROUP" \
-    -n "$AI_SERVICES_NAME" \
-    --deployment-name "$EMBEDDING_DEPLOYMENT_NAME" \
-    --model-name "$EMBEDDING_DEPLOYMENT_NAME" \
-    --model-version 1 \
-    --model-format OpenAI \
-    --sku-name Standard \
-    --sku-capacity 10 >/dev/null
-fi
+# The embedding deployment is created by Bicep via the modelDeploymentList parameter
+# in main.parameters.json. Do not (re)create it here — doing so masks parameter
+# drift and burns quota on a duplicate deployment if the param file ever diverges.
+# If the deployment is missing, the skillset PUT below will fail with a clear
+# 'deployment not found' error from Azure AI Search.
 
 echo "[>] Resolving endpoints (RBAC + Search MI provisioned by Bicep)..."
 AI_SERVICES_ENDPOINT="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$AI_SERVICES_NAME" --query properties.endpoint -o tsv)"

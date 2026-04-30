@@ -31,6 +31,7 @@ Write-Host "[>] Running post-provision hook..."
 $resourceGroup = $env:AZURE_RESOURCE_GROUP
 $appConfigEndpoint = $env:APP_CONFIG_ENDPOINT
 $appConfigLabel = if ($env:APP_CONFIG_LABEL) { $env:APP_CONFIG_LABEL } else { 'live-voice-practice' }
+$appConfigFallbackLabel = 'ai-lz'
 $networkIsolationValue = if ($env:NETWORK_ISOLATION) { $env:NETWORK_ISOLATION } else { $env:AZURE_NETWORK_ISOLATION }
 $networkIsolationEnabled = $networkIsolationValue -match '^(true|True|1|yes|YES)$'
 
@@ -52,6 +53,30 @@ if (-not $resourceToken) {
     }
   }
 }
+
+# Helper: read a key from App Configuration (the source of truth populated by
+# Bicep at provision time). Returns $null on miss/error so callers can fall
+# back to env vars or token-derived names.
+function Get-AppConfigValue {
+  param([string]$key)
+  if (-not $appConfigEndpoint) { return $null }
+  foreach ($lbl in @($appConfigLabel, $appConfigFallbackLabel) | Select-Object -Unique) {
+    $val = az appconfig kv show --endpoint $appConfigEndpoint --key $key --label $lbl --auth-mode login --query value -o tsv 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($val)) { return $val.Trim() }
+  }
+  return $null
+}
+
+# Resolve resource names from App Configuration first (canonical source of
+# truth: Bicep writes them with label '$appConfigLabel'), then env vars, then
+# token derivation as a last resort. Export to env so downstream hooks
+# (setup_search_dataplane, seed_cosmos_samples) inherit the same values.
+if (-not $env:DATABASE_ACCOUNT_NAME)    { $env:DATABASE_ACCOUNT_NAME    = Get-AppConfigValue 'DATABASE_ACCOUNT_NAME' }
+if (-not $env:DATABASE_NAME)            { $env:DATABASE_NAME            = Get-AppConfigValue 'DATABASE_NAME' }
+if (-not $env:COSMOS_DB_ENDPOINT)       { $env:COSMOS_DB_ENDPOINT       = Get-AppConfigValue 'COSMOS_DB_ENDPOINT' }
+if (-not $env:SEARCH_SERVICE_NAME)      { $env:SEARCH_SERVICE_NAME      = Get-AppConfigValue 'SEARCH_SERVICE_NAME' }
+if (-not $env:STORAGE_ACCOUNT_NAME)     { $env:STORAGE_ACCOUNT_NAME     = Get-AppConfigValue 'STORAGE_ACCOUNT_NAME' }
+if (-not $env:AI_FOUNDRY_ACCOUNT_NAME)  { $env:AI_FOUNDRY_ACCOUNT_NAME  = Get-AppConfigValue 'AI_FOUNDRY_ACCOUNT_NAME' }
 
 # When NETWORK_ISOLATION=true, data-plane operations (Cosmos seed, Search index
 # setup, App Configuration writes) require connectivity to private endpoints,
@@ -166,35 +191,20 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
       Write-Host "[!] Python executable not found (tried: python, py, python3). Skipping Cosmos sample seed."
     } else {
       Write-Host "[>] Using Python: $pythonExe"
-      # Resolve Cosmos account name. Prefer env vars (AILZ bootstrap pre-populates
-      # them from App Configuration); fall back to ARM list (needs Reader on RG)
-      # and finally to deriving the name from the resource token.
+      # Resource names were resolved at startup from App Configuration (the
+      # source of truth populated by Bicep). Use them directly; only derive
+      # endpoint as the very last fallback.
       $databaseAccountName = $env:DATABASE_ACCOUNT_NAME
-      if (-not $databaseAccountName) {
-        $databaseAccountName = az cosmosdb list -g $resourceGroup --query "[0].name" -o tsv 2>$null
-      }
-      if (-not $databaseAccountName -and $resourceToken) {
-        $databaseAccountName = "cosmos-$resourceToken"
-        Write-Host "[>] Derived Cosmos account name from token: $databaseAccountName"
-      }
-
-      $databaseName = $env:DATABASE_NAME
-      if (-not $databaseName -and $databaseAccountName) {
-        $databaseName = az cosmosdb sql database list -g $resourceGroup -a $databaseAccountName --query "[0].name" -o tsv 2>$null
-      }
-
-      $cosmosEndpoint = $env:COSMOS_DB_ENDPOINT
-      if (-not $cosmosEndpoint -and $databaseAccountName) {
-        $cosmosEndpoint = az cosmosdb show -g $resourceGroup -n $databaseAccountName --query documentEndpoint -o tsv 2>$null
-      }
+      $databaseName        = $env:DATABASE_NAME
+      $cosmosEndpoint      = $env:COSMOS_DB_ENDPOINT
       if (-not $cosmosEndpoint -and $databaseAccountName) {
         $cosmosEndpoint = "https://$databaseAccountName.documents.azure.com:443/"
       }
 
       if (-not $databaseAccountName) {
-        Write-Host "[!] Cosmos account name could not be resolved. Skipping Cosmos sample seed."
+        Write-Host "[!] Cosmos account name could not be resolved from App Configuration. Skipping Cosmos sample seed."
       } elseif (-not $databaseName) {
-        Write-Host "[!] Cosmos database name could not be resolved. Skipping Cosmos sample seed."
+        Write-Host "[!] Cosmos database name could not be resolved from App Configuration. Skipping Cosmos sample seed."
       } elseif (-not $cosmosEndpoint) {
         Write-Host "[!] Cosmos endpoint could not be resolved. Skipping Cosmos sample seed."
       } else {

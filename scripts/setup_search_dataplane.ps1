@@ -23,119 +23,53 @@ if (-not $resourceGroup) {
   throw "AZURE_RESOURCE_GROUP is required"
 }
 
-# Extract resource token from a known endpoint env var (works without ARM list permissions).
-# AILZ jumpbox MI typically lacks Reader on the RG, so list calls return [] -- we derive names instead.
-$resourceToken = $null
-foreach ($candidate in @($env:APP_CONFIG_ENDPOINT, $env:AZURE_APP_CONFIG_ENDPOINT, $env:AZURE_KEY_VAULT_ENDPOINT, $env:AZURE_CONTAINER_REGISTRY_ENDPOINT)) {
-  if ($candidate -and $candidate -match '(?:appcs|kv|cr|st|srch)-?([a-z0-9]{8,})') {
-    $resourceToken = $matches[1]
-    break
+# App Configuration is the source of truth: Bicep writes resource names there
+# at provision time. Read directly from it instead of inferring names from
+# token derivation or ARM list calls (which fail when the executing identity
+# lacks Reader on the RG -- typical for the AILZ jumpbox MI).
+$appConfigEndpoint = $env:APP_CONFIG_ENDPOINT
+$appConfigLabel = if ($env:APP_CONFIG_LABEL) { $env:APP_CONFIG_LABEL } else { 'live-voice-practice' }
+$appConfigFallbackLabel = 'ai-lz'
+
+function Get-AppConfigValue {
+  param([string]$key)
+  if (-not $appConfigEndpoint) { return $null }
+  foreach ($lbl in @($appConfigLabel, $appConfigFallbackLabel) | Select-Object -Unique) {
+    $val = az appconfig kv show --endpoint $appConfigEndpoint --key $key --label $lbl --auth-mode login --query value -o tsv 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($val)) { return $val.Trim() }
   }
-}
-if ($resourceToken) {
-  Write-Host "[>] Resource token derived from environment: $resourceToken"
+  return $null
 }
 
 $searchServiceName = $env:SEARCH_SERVICE_NAME
+if (-not $searchServiceName) { $searchServiceName = Get-AppConfigValue 'SEARCH_SERVICE_NAME' }
 if (-not $searchServiceName) {
-  # Prefer the general-purpose Search; AI Foundry provisions a private one named srch-aif-*
-  $searchServiceName = az search service list -g $resourceGroup `
-    --query "[?!(starts_with(name, 'srch-aif'))] | [0].name" -o tsv
-}
-if (-not $searchServiceName) {
-  # Fallback: any Search service in the RG
-  $searchServiceName = az search service list -g $resourceGroup --query "[0].name" -o tsv
-}
-if (-not $searchServiceName -and $resourceToken) {
-  # Last resort: derive from token (MI may lack ARM list perms even when it has data-plane roles)
-  $searchServiceName = "srch-$resourceToken"
-  Write-Host "[>] Derived Search service name from token: $searchServiceName"
-}
-if (-not $searchServiceName) {
-  throw "Could not resolve Search service name in resource group '$resourceGroup'. " +
-        "Set `$env:SEARCH_SERVICE_NAME before re-running this script."
+  throw "Could not resolve SEARCH_SERVICE_NAME from env or App Configuration ('$appConfigEndpoint' label '$appConfigLabel'). Ensure APP_CONFIG_ENDPOINT is set and the current identity has 'App Configuration Data Reader'."
 }
 Write-Host "[>] Using Search service: $searchServiceName"
 
 $storageAccountName = $env:STORAGE_ACCOUNT_NAME
+if (-not $storageAccountName) { $storageAccountName = Get-AppConfigValue 'STORAGE_ACCOUNT_NAME' }
 if (-not $storageAccountName) {
-  # Prefer accounts not used by AI Foundry (those start with "staif")
-  $storageAccountName = az storage account list -g $resourceGroup `
-    --query "[?!(starts_with(name, 'staif'))] | [0].name" -o tsv
-}
-if (-not $storageAccountName) {
-  # Fallback: any storage account in the RG
-  $storageAccountName = az storage account list -g $resourceGroup --query "[0].name" -o tsv
-}
-if (-not $storageAccountName -and $resourceToken) {
-  # Last resort: derive from token (MI may lack ARM list perms even when it has data-plane roles)
-  $storageAccountName = "st$resourceToken"
-  Write-Host "[>] Derived Storage account name from token: $storageAccountName"
-}
-if (-not $storageAccountName) {
-  Write-Host "[!] Storage account lookup returned empty. Diagnostics:"
-  Write-Host "    az account show:"
-  az account show --query "{name:name,id:id,user:user.name,user_type:user.type}" -o tsv 2>&1 | ForEach-Object { Write-Host "      $_" }
-  Write-Host "    az storage account list -g $resourceGroup (raw):"
-  az storage account list -g $resourceGroup -o tsv --query "[].name" 2>&1 | ForEach-Object { Write-Host "      $_" }
-  throw "Could not resolve Storage account name in resource group '$resourceGroup'. " +
-        "Either grant the current identity 'Reader' on the resource group, or set " +
-        "`$env:STORAGE_ACCOUNT_NAME` before re-running this script."
+  throw "Could not resolve STORAGE_ACCOUNT_NAME from env or App Configuration. Ensure APP_CONFIG_ENDPOINT is set and the current identity has 'App Configuration Data Reader'."
 }
 Write-Host "[>] Using Storage account: $storageAccountName"
 
 $aiServicesName = $env:AI_FOUNDRY_ACCOUNT_NAME
+if (-not $aiServicesName) { $aiServicesName = Get-AppConfigValue 'AI_FOUNDRY_ACCOUNT_NAME' }
 if (-not $aiServicesName) {
-  $aiAccountsRaw = az cognitiveservices account list -g $resourceGroup -o json 2>$null
-  if ($LASTEXITCODE -eq 0 -and $aiAccountsRaw) {
-    $aiAccount = ($aiAccountsRaw | ConvertFrom-Json | Where-Object { $_.kind -eq 'AIServices' } | Select-Object -First 1)
-    if ($aiAccount) {
-      $aiServicesName = $aiAccount.name
-    }
-  }
-}
-if (-not $aiServicesName -and $resourceToken) {
-  # Last resort: derive from token. Bicep's `aiFoundryName` is `aif-<token>`.
-  $aiServicesName = "aif-$resourceToken"
-  Write-Host "[>] Derived AI Services account name from token: $aiServicesName"
-}
-if (-not $aiServicesName) {
-  throw "Could not resolve AI Services account name in resource group '$resourceGroup'. Set `$env:AI_FOUNDRY_ACCOUNT_NAME before re-running."
+  throw "Could not resolve AI_FOUNDRY_ACCOUNT_NAME from env or App Configuration."
 }
 
 $embeddingDeploymentName = if ($env:EMBEDDING_DEPLOYMENT_NAME) { $env:EMBEDDING_DEPLOYMENT_NAME } else { 'text-embedding-3-small' }
 $searchEndpoint = "https://$searchServiceName.search.windows.net"
 $apiVersion = '2024-07-01'
 
-Write-Host "[>] Ensuring embedding deployment '$embeddingDeploymentName'..."
-$hasEmbeddingDeployment = $false
-try {
-  $null = az cognitiveservices account deployment show -g $resourceGroup -n $aiServicesName --deployment-name $embeddingDeploymentName 2>$null
-  if ($LASTEXITCODE -eq 0) { $hasEmbeddingDeployment = $true }
-} catch { }
-if (-not $hasEmbeddingDeployment) {
-  # SKU availability for text-embedding-* varies by region. Try GlobalStandard first
-  # (works in Sweden Central / many EU regions where Standard is not offered),
-  # then fall back to Standard for older regions. Continue on failure so the rest
-  # of the data-plane setup can still complete — the embedding may already be
-  # provisioned out-of-band by Bicep under a different deployment name.
-  $embeddingSku = if ($env:EMBEDDING_DEPLOYMENT_SKU) { $env:EMBEDDING_DEPLOYMENT_SKU } else { 'GlobalStandard' }
-  $skusToTry = @($embeddingSku)
-  if ($embeddingSku -ne 'Standard') { $skusToTry += 'Standard' }
-  $createdEmbedding = $false
-  foreach ($sku in $skusToTry) {
-    Write-Host "[>] Creating embedding deployment with sku='$sku' capacity=10..."
-    $createOut = az cognitiveservices account deployment create -g $resourceGroup -n $aiServicesName `
-      --deployment-name $embeddingDeploymentName `
-      --model-name $embeddingDeploymentName --model-version 1 --model-format OpenAI `
-      --sku-name $sku --sku-capacity 10 2>&1
-    if ($LASTEXITCODE -eq 0) { $createdEmbedding = $true; break }
-    Write-Host "[!] sku='$sku' failed: $($createOut | Out-String -Width 4096)".Trim()
-  }
-  if (-not $createdEmbedding) {
-    Write-Host "[!] Could not create embedding deployment '$embeddingDeploymentName'. Continuing; the indexer skillset will fail until an embedding deployment with this name exists. Set `$env:EMBEDDING_DEPLOYMENT_NAME / `$env:EMBEDDING_DEPLOYMENT_SKU and re-run."
-  }
-}
+# The embedding deployment is created by Bicep via the modelDeploymentList parameter
+# in main.parameters.json. Do not (re)create it here — doing so masks parameter
+# drift and burns quota on a duplicate deployment if the param file ever diverges.
+# If the deployment is missing, the skillset PUT below will fail with a clear
+# 'deployment not found' error from Azure AI Search.
 
 Write-Host "[>] Resolving endpoints (RBAC + Search MI provisioned by Bicep)..."
 $aiServicesEndpoint = az cognitiveservices account show -g $resourceGroup -n $aiServicesName --query properties.endpoint -o tsv
