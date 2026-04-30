@@ -191,34 +191,35 @@ cd live-voice-practice
 git submodule update --init --recursive
 ```
 
-#### B.3. Sign in and refresh the azd environment
+#### B.3. Sign in with managed identity and verify the azd env
 
-> **Why device-code instead of MI here:** `azd` 1.24.x has a known limitation —
-> `azd env refresh` (and `provision`) internally calls `getCurrentPrincipalType()`
-> which always tries to read the user/SP profile from Microsoft Graph. The
-> jumpbox MI can't reach Graph, so even with `azd auth login --managed-identity`
-> succeeding, `env refresh` fails with `fetching login details: not logged in`.
-> Use device-code for this single read-only step. (For `azd deploy` later we use
-> ACR Tasks, so MI/Graph is never needed for the actual app deploy.)
+The jumpbox is provisioned with a system-assigned managed identity that already has the
+RBAC needed on the resource group, ACR, App Config, Search, Cosmos, Speech, etc.
+**You do NOT need `azd auth login` or `azd env refresh` on the jumpbox** — the AILZ
+bootstrap copied the `.azure/<env>/.env` file from your workstation, so it already has
+every output from the `azd provision` you ran in Phase A (App Config endpoint, ACR
+endpoint, Container App name, Speech endpoint, Cosmos account, etc.).
+
+> **Why we skip `azd env refresh`:** `azd` 1.24.x calls `getCurrentPrincipalType()`
+> through Microsoft Graph during `env refresh`/`provision`, and the jumpbox MI doesn't
+> have Graph permissions. The refresh is unnecessary anyway — the workstation's `.env`
+> already contains every output we need. `postProvision.ps1` reads from that file via
+> `azd env get-values`, so it'll pick up the values directly.
 
 ```powershell
-# 1. Sign in via device code on the jumpbox (browse to the URL on your laptop)
-az login --tenant <AZURE_TENANT_ID> --use-device-code
+# 1. Sign in az CLI with the VM's managed identity (no Graph dependency)
+az login --identity
 az account set --subscription <AZURE_SUBSCRIPTION_ID>
-azd auth login --tenant-id <AZURE_TENANT_ID> --use-device-code
 
-# 2. Refresh — pulls Bicep outputs (App Config, ACR, Speech, Cosmos, etc.) into the local .env
-azd env refresh
+# 2. Verify the azd env file is present and populated (sanity check)
+azd env get-values | Select-String 'AZURE_CONTAINER_APP_NAME|APP_CONFIG_ENDPOINT|AZURE_SPEECH_ENDPOINT|AZURE_COSMOS|AZURE_RESOURCE_GROUP'
+# You should see all four lines with real values. If anything is empty, your .env
+# wasn't copied correctly — see the fallback below.
 ```
 
-> **Tip — managed identity for downstream `az` commands:** after the refresh, you
-> can switch `az` to the VM's MI for everything else (e.g. `az containerapp ...`,
-> `az search ...`, `az cosmosdb ...` invoked from `postProvision.ps1`):
->
-> ```powershell
-> az login --identity
-> az account set --subscription <AZURE_SUBSCRIPTION_ID>
-> ```
+> **Fallback (only if `azd env get-values` returns empty values):** copy the contents of
+> `.azure/<env>/.env` from your workstation to the same path on the jumpbox (use the
+> portal Cloud Shell or paste through the Bastion clipboard). Do NOT run `azd env refresh`.
 
 > **Fallback:** if `azd env list` shows nothing or the wrong default, run:
 > ```powershell
