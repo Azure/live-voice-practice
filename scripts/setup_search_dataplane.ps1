@@ -114,7 +114,27 @@ try {
   if ($LASTEXITCODE -eq 0) { $hasEmbeddingDeployment = $true }
 } catch { }
 if (-not $hasEmbeddingDeployment) {
-  az cognitiveservices account deployment create -g $resourceGroup -n $aiServicesName --deployment-name $embeddingDeploymentName --model-name $embeddingDeploymentName --model-version 1 --model-format OpenAI --sku-name Standard --sku-capacity 10 | Out-Null
+  # SKU availability for text-embedding-* varies by region. Try GlobalStandard first
+  # (works in Sweden Central / many EU regions where Standard is not offered),
+  # then fall back to Standard for older regions. Continue on failure so the rest
+  # of the data-plane setup can still complete — the embedding may already be
+  # provisioned out-of-band by Bicep under a different deployment name.
+  $embeddingSku = if ($env:EMBEDDING_DEPLOYMENT_SKU) { $env:EMBEDDING_DEPLOYMENT_SKU } else { 'GlobalStandard' }
+  $skusToTry = @($embeddingSku)
+  if ($embeddingSku -ne 'Standard') { $skusToTry += 'Standard' }
+  $createdEmbedding = $false
+  foreach ($sku in $skusToTry) {
+    Write-Host "[>] Creating embedding deployment with sku='$sku' capacity=10..."
+    $createOut = az cognitiveservices account deployment create -g $resourceGroup -n $aiServicesName `
+      --deployment-name $embeddingDeploymentName `
+      --model-name $embeddingDeploymentName --model-version 1 --model-format OpenAI `
+      --sku-name $sku --sku-capacity 10 2>&1
+    if ($LASTEXITCODE -eq 0) { $createdEmbedding = $true; break }
+    Write-Host "[!] sku='$sku' failed: $($createOut | Out-String -Width 4096)".Trim()
+  }
+  if (-not $createdEmbedding) {
+    Write-Host "[!] Could not create embedding deployment '$embeddingDeploymentName'. Continuing; the indexer skillset will fail until an embedding deployment with this name exists. Set `$env:EMBEDDING_DEPLOYMENT_NAME / `$env:EMBEDDING_DEPLOYMENT_SKU and re-run."
+  }
 }
 
 Write-Host "[>] Resolving endpoints (RBAC + Search MI provisioned by Bicep)..."
@@ -316,11 +336,26 @@ az rest --resource $searchResource --method put --url "$searchEndpoint/skillsets
 az rest --resource $searchResource --method put --url "$searchEndpoint/indexers/support-materials-indexer?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $supportIndexerBody | Out-Null
 az rest --resource $searchResource --method put --url "$searchEndpoint/indexers/transcripts-indexer?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $transcriptsIndexerBody | Out-Null
 
-try {
-  & az rest --resource $searchResource --method post --url "$searchEndpoint/indexers/support-materials-indexer/run?api-version=$apiVersion" | Out-Null
-} catch { }
-try {
-  & az rest --resource $searchResource --method post --url "$searchEndpoint/indexers/transcripts-indexer/run?api-version=$apiVersion" | Out-Null
-} catch { }
+# Helper: trigger an indexer run, treating 409 ('Another indexer invocation is
+# currently in progress') as benign — the previous run already covers fresh
+# blobs. Anything else is logged but doesn't fail the script.
+function Invoke-IndexerRun {
+  param([string]$indexerName)
+  $url = "$searchEndpoint/indexers/$indexerName/run?api-version=$apiVersion"
+  $output = & az rest --resource $searchResource --method post --url $url 2>&1
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "[OK] Triggered indexer run: $indexerName"
+    return
+  }
+  $msg = ($output | Out-String)
+  if ($msg -match 'Another indexer invocation is currently in progress' -or $msg -match 'Conflict') {
+    Write-Host "[i] Indexer '$indexerName' is already running; skipping new invocation."
+  } else {
+    Write-Host "[!] Failed to trigger indexer '$indexerName': $($msg.Trim())"
+  }
+}
+
+Invoke-IndexerRun 'support-materials-indexer'
+Invoke-IndexerRun 'transcripts-indexer'
 
 Write-Host "[OK] Search data-plane setup completed."

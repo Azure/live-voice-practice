@@ -154,9 +154,18 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
     Write-Host "   Re-run scripts/postProvision.ps1 from the jumpbox/Bastion to apply it."
   } else {
     Write-Host "[>] Running Cosmos sample seed hook..."
-    if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-      Write-Host "[!] Python executable not found. Skipping Cosmos sample seed."
+    # The jumpbox bootstrap installs Python 3.11 but `python` is not always on
+    # PATH for non-interactive sessions; try the `py` launcher and `python3`
+    # before giving up.
+    $pythonExe = $null
+    foreach ($candidate in @('python', 'py', 'python3')) {
+      $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+      if ($cmd) { $pythonExe = $cmd.Source; break }
+    }
+    if (-not $pythonExe) {
+      Write-Host "[!] Python executable not found (tried: python, py, python3). Skipping Cosmos sample seed."
     } else {
+      Write-Host "[>] Using Python: $pythonExe"
       # Resolve Cosmos account name. Prefer env vars (AILZ bootstrap pre-populates
       # them from App Configuration); fall back to ARM list (needs Reader on RG)
       # and finally to deriving the name from the resource token.
@@ -195,7 +204,7 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
         $env:COSMOS_DATABASE_NAME = $databaseName
         $env:COSMOS_SCENARIOS_CONTAINER = if ($env:SCENARIOS_DATABASE_CONTAINER) { $env:SCENARIOS_DATABASE_CONTAINER } else { 'scenarios' }
         $env:COSMOS_RUBRICS_CONTAINER = if ($env:RUBRICS_DATABASE_CONTAINER) { $env:RUBRICS_DATABASE_CONTAINER } else { 'rubrics' }
-        python scripts/seed_cosmos_samples.py --mode upsert
+        & $pythonExe scripts/seed_cosmos_samples.py --mode upsert
       }
     }
   }
