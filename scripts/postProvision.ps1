@@ -99,7 +99,7 @@ if ($acrName) {
     }
   }
 } else {
-  Write-Host "[!]️ No ACR found in resource group; skipping registry wiring."
+  Write-Host "[!] No ACR found in resource group; skipping registry wiring."
 }
 
 if ($appConfigEndpoint -and (Test-DataplaneShouldRun)) {
@@ -109,9 +109,9 @@ if ($appConfigEndpoint -and (Test-DataplaneShouldRun)) {
   if ($LASTEXITCODE -ne 0) { $appConfigFailed = $true }
   if ($appConfigFailed) {
     if ($networkIsolationEnabled) {
-      Write-Host "[!]️ App Configuration data-plane not reachable from current network (NI mode). Run this step from the jumpbox inside the vnet. Continuing."
+      Write-Host "[!] App Configuration data-plane not reachable from current network (NI mode). Run this step from the jumpbox inside the vnet. Continuing."
     } else {
-      Write-Host "[!]️ App Configuration updates failed. Last output: $kvOut"
+      Write-Host "[!] App Configuration updates failed. Last output: $kvOut"
     }
   } else {
     Write-Host "[OK] App Configuration updated (AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech)."
@@ -119,7 +119,7 @@ if ($appConfigEndpoint -and (Test-DataplaneShouldRun)) {
 } elseif ($appConfigEndpoint) {
   Write-Host "[-] Skipping App Configuration writes (network isolation; not running from VNet)."
 } else {
-  Write-Host "[!]️ APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
+  Write-Host "[!] APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
 }
 
 if (-not ($env:ENABLE_SEARCH_DATAPLANE_SETUP -match '^(false|False|0|no|NO)$')) {
@@ -153,13 +153,13 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
         if (Get-Command python -ErrorAction SilentlyContinue) {
           python scripts/seed_cosmos_samples.py --mode upsert
         } else {
-          Write-Host "[!]️ Python executable not found. Skipping Cosmos sample seed."
+          Write-Host "[!] Python executable not found. Skipping Cosmos sample seed."
         }
       } else {
-        Write-Host "[!]️ Cosmos database name could not be resolved. Skipping Cosmos sample seed."
+        Write-Host "[!] Cosmos database name could not be resolved. Skipping Cosmos sample seed."
       }
     } else {
-      Write-Host "[!]️ Cosmos account name could not be resolved. Skipping Cosmos sample seed."
+      Write-Host "[!] Cosmos account name could not be resolved. Skipping Cosmos sample seed."
     }
   }
 } else {
@@ -168,7 +168,7 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
 
 if ($networkIsolationEnabled -and -not $runFromJumpboxEnabled) {
   Write-Host ""
-  Write-Host "ℹ️  Network isolation is enabled. Three data-plane steps were skipped because they"
+  Write-Host "[i]  Network isolation is enabled. Three data-plane steps were skipped because they"
   Write-Host "   require VNet access (private endpoints):"
   Write-Host "     - App Configuration writes (AZURE_INPUT_TRANSCRIPTION_MODEL)"
   Write-Host "     - Cosmos sample seed (scenarios/rubrics)"

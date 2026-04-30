@@ -102,7 +102,7 @@ if [[ -n "$ACR_NAME" ]]; then
     fi
   fi
 else
-  echo "[!]️ No ACR found in resource group; skipping registry wiring."
+  echo "[!] No ACR found in resource group; skipping registry wiring."
 fi
 
 if [[ -n "$APP_CONFIG_ENDPOINT" ]] && dataplane_should_run; then
@@ -111,9 +111,9 @@ if [[ -n "$APP_CONFIG_ENDPOINT" ]] && dataplane_should_run; then
   az appconfig kv set --endpoint "$APP_CONFIG_ENDPOINT" --key AZURE_INPUT_TRANSCRIPTION_MODEL --value "azure-speech" --label "$APP_CONFIG_LABEL" --auth-mode login --yes >/dev/null 2>&1 || appcfg_failed=1
   if [[ "$appcfg_failed" == 1 ]]; then
     if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
-      echo "[!]️ App Configuration data-plane not reachable from current network (NI mode). Run this step from the jumpbox inside the vnet. Continuing."
+      echo "[!] App Configuration data-plane not reachable from current network (NI mode). Run this step from the jumpbox inside the vnet. Continuing."
     else
-      echo "[!]️ App Configuration updates failed."
+      echo "[!] App Configuration updates failed."
     fi
   else
     echo "[OK] App Configuration updated (AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech)."
@@ -121,7 +121,7 @@ if [[ -n "$APP_CONFIG_ENDPOINT" ]] && dataplane_should_run; then
 elif [[ -n "$APP_CONFIG_ENDPOINT" ]]; then
   echo "[-] Skipping App Configuration writes (network isolation; not running from VNet)."
 else
-  echo "[!]️ APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
+  echo "[!] APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
 fi
 
 if [[ ! "${ENABLE_SEARCH_DATAPLANE_SETUP:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
@@ -165,13 +165,13 @@ if [[ ! "${ENABLE_COSMOS_SAMPLE_SEED:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
         elif command -v python3 >/dev/null 2>&1; then
           python3 scripts/seed_cosmos_samples.py --mode upsert
         else
-          echo "[!]️ Python executable not found. Skipping Cosmos sample seed."
+          echo "[!] Python executable not found. Skipping Cosmos sample seed."
         fi
       else
-        echo "[!]️ Cosmos database name could not be resolved. Skipping Cosmos sample seed."
+        echo "[!] Cosmos database name could not be resolved. Skipping Cosmos sample seed."
       fi
     else
-      echo "[!]️ Cosmos account name could not be resolved. Skipping Cosmos sample seed."
+      echo "[!] Cosmos account name could not be resolved. Skipping Cosmos sample seed."
     fi
   fi
 else
@@ -180,7 +180,7 @@ fi
 
 if [[ "$NETWORK_ISOLATION_ENABLED" == true && "$RUN_FROM_JUMPBOX_ENABLED" != true ]]; then
   echo ""
-  echo "ℹ️  Network isolation is enabled. Three data-plane steps were skipped because they"
+  echo "[i]  Network isolation is enabled. Three data-plane steps were skipped because they"
   echo "   require VNet access (private endpoints):"
   echo "     - App Configuration writes (AZURE_INPUT_TRANSCRIPTION_MODEL)"
   echo "     - Cosmos sample seed (scenarios/rubrics)"
