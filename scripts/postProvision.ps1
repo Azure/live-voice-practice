@@ -359,17 +359,16 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
     Write-Host "   Re-run scripts/postProvision.ps1 from the jumpbox/Bastion to apply it."
   } else {
     Write-Host "[>] Running Cosmos sample seed hook..."
-    # The jumpbox bootstrap installs Python 3.11 but `python` is not always on
-    # PATH for non-interactive sessions; try the `py` launcher and `python3`
-    # before giving up.
+    # The jumpbox bootstrap *attempts* to install Python 3.11 but the result
+    # has been observed to be incomplete (e.g. C:\Python311 with only `Lib`
+    # and `Scripts`, no `python.exe`). Probe well-known locations, validate
+    # via `--version`, and self-heal by downloading the official Python
+    # installer if nothing usable is found.
     $pythonExe = $null
-    # Probe well-known install locations first (jumpbox bootstrap installs to
-    # Program Files), then fall back to PATH lookups. Validate each candidate
-    # by running `--version`; the `py` launcher resolves but errors with "No
-    # installed Python found!" when no interpreter is registered.
     $candidates = @()
     $candidates += Get-ChildItem 'C:\Program Files\Python*\python.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
     $candidates += Get-ChildItem 'C:\Python*\python.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+    $candidates += Get-ChildItem 'C:\Users\*\AppData\Local\Programs\Python\Python*\python.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
     $candidates += @('python', 'python3', 'py')
     foreach ($candidate in $candidates) {
       $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
@@ -382,7 +381,46 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
       }
     }
     if (-not $pythonExe) {
-      Write-Host "[!] Python executable not found (tried Program Files, python, python3, py). Skipping Cosmos sample seed."
+      Write-Host "[!] No working Python interpreter found. Installing Python 3.11.9 from python.org..."
+      try {
+        $pyVersion = '3.11.9'
+        $arch = if ([Environment]::Is64BitOperatingSystem) { 'amd64' } else { 'win32' }
+        $installerUrl = "https://www.python.org/ftp/python/$pyVersion/python-$pyVersion-$arch.exe"
+        $installerPath = Join-Path $env:TEMP "python-$pyVersion-$arch.exe"
+        Write-Host "[>] Downloading $installerUrl..."
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+        Write-Host "[>] Running silent install (PrependPath=1, InstallAllUsers=1)..."
+        $installArgs = @(
+          '/quiet',
+          'InstallAllUsers=1',
+          'PrependPath=1',
+          'Include_test=0',
+          'Include_launcher=1',
+          "TargetDir=C:\Python311"
+        )
+        $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+        if ($proc.ExitCode -ne 0) {
+          Write-Host "[!] Python installer exited with code $($proc.ExitCode)."
+        }
+        # Refresh PATH and re-probe.
+        $env:PATH = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+        foreach ($candidate in @('C:\Python311\python.exe', 'python', 'py')) {
+          $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+          if (-not $cmd) { continue }
+          $resolved = $cmd.Source
+          $verOutput = & $resolved --version 2>&1
+          if ($LASTEXITCODE -eq 0 -and $verOutput -match 'Python\s+\d') {
+            $pythonExe = $resolved
+            break
+          }
+        }
+      } catch {
+        Write-Host "[!] Python installation failed: $_"
+      }
+    }
+    if (-not $pythonExe) {
+      Write-Host "[!] Python still unavailable after install attempt. Skipping Cosmos sample seed."
     } else {
       Write-Host "[>] Using Python: $pythonExe"
       # Resource names were resolved at startup from App Configuration (the
