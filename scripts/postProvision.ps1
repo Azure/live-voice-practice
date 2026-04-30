@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Continue'
 #   - Cosmos sample seed
 # All Azure AI Speech control-plane work has been removed from this script.
 
-Write-Host "🔧 Running post-provision hook..."
+Write-Host "[>] Running post-provision hook..."
 
 & azd env get-values | ForEach-Object {
   if ($_ -match '^([^=]+)=(.*)$') {
@@ -35,7 +35,7 @@ $networkIsolationValue = if ($env:NETWORK_ISOLATION) { $env:NETWORK_ISOLATION } 
 $networkIsolationEnabled = $networkIsolationValue -match '^(true|True|1|yes|YES)$'
 
 if (-not $resourceGroup) {
-  Write-Host "❌ Missing AZURE_RESOURCE_GROUP."
+  Write-Host "[X] Missing AZURE_RESOURCE_GROUP."
   exit 1
 }
 
@@ -46,23 +46,23 @@ if (-not $resourceGroup) {
 # session is non-interactive (e.g. azd hook in CI), skip data-plane steps.
 if ($networkIsolationEnabled) {
   Write-Host ""
-  Write-Host "🔒 Zero Trust / Network Isolation enabled."
+  Write-Host "[>] Zero Trust / Network Isolation enabled."
   Write-Host "   Data-plane steps (Cosmos seed, Search index setup, App Configuration writes)"
   Write-Host "   require connectivity to the VNet private endpoints."
   Write-Host "   Ensure you run scripts/postProvision.ps1 from within the VNet (jumpbox via"
   Write-Host "   Bastion or VPN). Otherwise these steps will be skipped."
   if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
-    $answer = Read-Host "❓ Are you running this script from inside the VNet or via VPN? [Y/n]"
+    $answer = Read-Host "[?] Are you running this script from inside the VNet or via VPN? [Y/n]"
     if ([string]::IsNullOrWhiteSpace($answer) -or $answer -match '^(y|Y|yes|YES|true|True|1)$') {
       $runFromJumpboxEnabled = $true
-      Write-Host "✅ Continuing with data-plane post-provisioning."
+      Write-Host "[OK] Continuing with data-plane post-provisioning."
     } else {
       $runFromJumpboxEnabled = $false
-      Write-Host "⏭️ Data-plane steps will be skipped. Re-run from the jumpbox to apply them."
+      Write-Host "[-] Data-plane steps will be skipped. Re-run from the jumpbox to apply them."
     }
   } else {
     $runFromJumpboxEnabled = $false
-    Write-Host "⏭️ Non-interactive shell detected; data-plane steps will be skipped."
+    Write-Host "[-] Non-interactive shell detected; data-plane steps will be skipped."
     Write-Host "   Re-run interactively from the jumpbox/Bastion to apply them."
   }
 } else {
@@ -75,7 +75,7 @@ function Test-DataplaneShouldRun {
   return $false
 }
 
-Write-Host "📦 Ensuring ACR endpoint is persisted and Container App is bound to ACR via managed identity..."
+Write-Host "[>] Ensuring ACR endpoint is persisted and Container App is bound to ACR via managed identity..."
 $containerAppName = $env:AZURE_CONTAINER_APP_NAME
 if (-not $containerAppName) {
   $containerAppName = az containerapp list -g $resourceGroup --query "[0].name" -o tsv 2>$null
@@ -86,60 +86,60 @@ if ($acrName) {
   if ($acrLoginServer) {
     if (-not $env:AZURE_CONTAINER_REGISTRY_ENDPOINT -or $env:AZURE_CONTAINER_REGISTRY_ENDPOINT -ne $acrLoginServer) {
       azd env set AZURE_CONTAINER_REGISTRY_ENDPOINT $acrLoginServer | Out-Null
-      Write-Host "✅ AZURE_CONTAINER_REGISTRY_ENDPOINT set to '$acrLoginServer'."
+      Write-Host "[OK] AZURE_CONTAINER_REGISTRY_ENDPOINT set to '$acrLoginServer'."
     }
     if ($containerAppName) {
       $currentRegistry = az containerapp show -g $resourceGroup -n $containerAppName --query "properties.configuration.registries[?server=='$acrLoginServer'] | [0].identity" -o tsv 2>$null
       if ($currentRegistry -ne 'system') {
         az containerapp registry set -g $resourceGroup -n $containerAppName --server $acrLoginServer --identity system 2>$null | Out-Null
-        Write-Host "✅ Container App '$containerAppName' bound to ACR '$acrLoginServer' via system-assigned identity."
+        Write-Host "[OK] Container App '$containerAppName' bound to ACR '$acrLoginServer' via system-assigned identity."
       } else {
-        Write-Host "✅ Container App registry binding already in place."
+        Write-Host "[OK] Container App registry binding already in place."
       }
     }
   }
 } else {
-  Write-Host "⚠️ No ACR found in resource group; skipping registry wiring."
+  Write-Host "[!]️ No ACR found in resource group; skipping registry wiring."
 }
 
 if ($appConfigEndpoint -and (Test-DataplaneShouldRun)) {
-  Write-Host "🧩 Writing app-specific settings to App Configuration..."
+  Write-Host "[>] Writing app-specific settings to App Configuration..."
   $appConfigFailed = $false
   $kvOut = az appconfig kv set --endpoint $appConfigEndpoint --key AZURE_INPUT_TRANSCRIPTION_MODEL --value azure-speech --label $appConfigLabel --auth-mode login --yes 2>&1
   if ($LASTEXITCODE -ne 0) { $appConfigFailed = $true }
   if ($appConfigFailed) {
     if ($networkIsolationEnabled) {
-      Write-Host "⚠️ App Configuration data-plane not reachable from current network (NI mode). Run this step from the jumpbox inside the vnet. Continuing."
+      Write-Host "[!]️ App Configuration data-plane not reachable from current network (NI mode). Run this step from the jumpbox inside the vnet. Continuing."
     } else {
-      Write-Host "⚠️ App Configuration updates failed. Last output: $kvOut"
+      Write-Host "[!]️ App Configuration updates failed. Last output: $kvOut"
     }
   } else {
-    Write-Host "✅ App Configuration updated (AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech)."
+    Write-Host "[OK] App Configuration updated (AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech)."
   }
 } elseif ($appConfigEndpoint) {
-  Write-Host "⏭️ Skipping App Configuration writes (network isolation; not running from VNet)."
+  Write-Host "[-] Skipping App Configuration writes (network isolation; not running from VNet)."
 } else {
-  Write-Host "⚠️ APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
+  Write-Host "[!]️ APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
 }
 
 if (-not ($env:ENABLE_SEARCH_DATAPLANE_SETUP -match '^(false|False|0|no|NO)$')) {
   if (Test-DataplaneShouldRun) {
-    Write-Host "🔎 Running Search data-plane setup hook..."
+    Write-Host "[>] Running Search data-plane setup hook..."
     & "$PSScriptRoot\setup_search_dataplane.ps1"
   } else {
-    Write-Host "⏭️ Skipping Search data-plane setup (network isolation; not running from VNet)."
+    Write-Host "[-] Skipping Search data-plane setup (network isolation; not running from VNet)."
     Write-Host "   Re-run scripts/postProvision.ps1 from the jumpbox/Bastion to apply it."
   }
 } else {
-  Write-Host "⏭️ ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
+  Write-Host "[-] ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
 }
 
 if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
   if (-not (Test-DataplaneShouldRun)) {
-    Write-Host "⏭️ Skipping Cosmos sample seed (network isolation; not running from VNet)."
+    Write-Host "[-] Skipping Cosmos sample seed (network isolation; not running from VNet)."
     Write-Host "   Re-run scripts/postProvision.ps1 from the jumpbox/Bastion to apply it."
   } else {
-    Write-Host "🌱 Running Cosmos sample seed hook..."
+    Write-Host "[>] Running Cosmos sample seed hook..."
     $databaseAccountName = if ($env:DATABASE_ACCOUNT_NAME) { $env:DATABASE_ACCOUNT_NAME } else { az cosmosdb list -g $resourceGroup --query "[0].name" -o tsv }
     if ($databaseAccountName) {
       $databaseName = if ($env:DATABASE_NAME) { $env:DATABASE_NAME } else { az cosmosdb sql database list -g $resourceGroup -a $databaseAccountName --query "[0].name" -o tsv }
@@ -153,17 +153,17 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
         if (Get-Command python -ErrorAction SilentlyContinue) {
           python scripts/seed_cosmos_samples.py --mode upsert
         } else {
-          Write-Host "⚠️ Python executable not found. Skipping Cosmos sample seed."
+          Write-Host "[!]️ Python executable not found. Skipping Cosmos sample seed."
         }
       } else {
-        Write-Host "⚠️ Cosmos database name could not be resolved. Skipping Cosmos sample seed."
+        Write-Host "[!]️ Cosmos database name could not be resolved. Skipping Cosmos sample seed."
       }
     } else {
-      Write-Host "⚠️ Cosmos account name could not be resolved. Skipping Cosmos sample seed."
+      Write-Host "[!]️ Cosmos account name could not be resolved. Skipping Cosmos sample seed."
     }
   }
 } else {
-  Write-Host "⏭️ ENABLE_COSMOS_SAMPLE_SEED=false, skipping Cosmos sample seed."
+  Write-Host "[-] ENABLE_COSMOS_SAMPLE_SEED=false, skipping Cosmos sample seed."
 }
 
 if ($networkIsolationEnabled -and -not $runFromJumpboxEnabled) {
@@ -177,4 +177,4 @@ if ($networkIsolationEnabled -and -not $runFromJumpboxEnabled) {
   Write-Host "   then run './scripts/postProvision.ps1' interactively to apply them."
 }
 
-Write-Host "✅ post-provision hook completed."
+Write-Host "[OK] post-provision hook completed."

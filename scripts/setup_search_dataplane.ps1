@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Write-Host "🔎 Running Search data-plane setup..."
+Write-Host "[>] Running Search data-plane setup..."
 
 if (-not $env:AZURE_RESOURCE_GROUP) {
   & azd env get-values | ForEach-Object {
@@ -14,7 +14,7 @@ if (-not $env:AZURE_RESOURCE_GROUP) {
 }
 
 if ($env:ENABLE_SEARCH_DATAPLANE_SETUP -match '^(false|False|0|no|NO)$') {
-  Write-Host "⏭️ ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
+  Write-Host "[-] ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
   exit 0
 }
 
@@ -72,7 +72,7 @@ $embeddingDeploymentName = if ($env:EMBEDDING_DEPLOYMENT_NAME) { $env:EMBEDDING_
 $searchEndpoint = "https://$searchServiceName.search.windows.net"
 $apiVersion = '2024-07-01'
 
-Write-Host "📦 Ensuring embedding deployment '$embeddingDeploymentName'..."
+Write-Host "[>] Ensuring embedding deployment '$embeddingDeploymentName'..."
 $hasEmbeddingDeployment = $false
 try {
   $null = az cognitiveservices account deployment show -g $resourceGroup -n $aiServicesName --deployment-name $embeddingDeploymentName 2>$null
@@ -82,7 +82,7 @@ if (-not $hasEmbeddingDeployment) {
   az cognitiveservices account deployment create -g $resourceGroup -n $aiServicesName --deployment-name $embeddingDeploymentName --model-name $embeddingDeploymentName --model-version 1 --model-format OpenAI --sku-name Standard --sku-capacity 10 | Out-Null
 }
 
-Write-Host "🔐 Ensuring Search managed identity and OpenAI role assignment..."
+Write-Host "[>] Ensuring Search managed identity and OpenAI role assignment..."
 az search service update -g $resourceGroup -n $searchServiceName --identity-type SystemAssigned | Out-Null
 $searchPrincipalId = az search service show -g $resourceGroup -n $searchServiceName --query identity.principalId -o tsv
 $aiServicesId = az cognitiveservices account show -g $resourceGroup -n $aiServicesName --query id -o tsv
@@ -92,7 +92,7 @@ az role assignment create --assignee-object-id $searchPrincipalId --assignee-pri
 $searchKey = az search admin-key show -g $resourceGroup --service-name $searchServiceName --query primaryKey -o tsv
 $storageKey = az storage account keys list -g $resourceGroup -n $storageAccountName --query "[0].value" -o tsv
 
-Write-Host "📁 Ensuring source containers and uploading sample files..."
+Write-Host "[>] Ensuring source containers and uploading sample files..."
 az storage container create --name support-materials-src --account-name $storageAccountName --account-key $storageKey | Out-Null
 az storage container create --name transcripts-src --account-name $storageAccountName --account-key $storageKey | Out-Null
 if (Test-Path "samples/materials") {
@@ -290,4 +290,4 @@ try {
   & az rest --skip-authorization-header --method post --url "$searchEndpoint/indexers/transcripts-indexer/run?api-version=$apiVersion" --headers "api-key=$searchKey" | Out-Null
 } catch { }
 
-Write-Host "✅ Search data-plane setup completed."
+Write-Host "[OK] Search data-plane setup completed."

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "🔎 Running Search data-plane setup..."
+echo "[>] Running Search data-plane setup..."
 
 if [[ -z "${AZURE_RESOURCE_GROUP:-}" ]]; then
   while IFS='=' read -r key value; do
@@ -13,13 +13,13 @@ if [[ -z "${AZURE_RESOURCE_GROUP:-}" ]]; then
 fi
 
 if [[ "${ENABLE_SEARCH_DATAPLANE_SETUP:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
-  echo "⏭️ ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
+  echo "[-] ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
   exit 0
 fi
 
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-}"
 if [[ -z "$RESOURCE_GROUP" ]]; then
-  echo "❌ AZURE_RESOURCE_GROUP is required"
+  echo "[X] AZURE_RESOURCE_GROUP is required"
   exit 1
 fi
 
@@ -28,7 +28,7 @@ if [[ -z "$SEARCH_SERVICE_NAME" ]]; then
   SEARCH_SERVICE_NAME="$(az search service list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)"
 fi
 if [[ -z "$SEARCH_SERVICE_NAME" ]]; then
-  echo "❌ Could not resolve Search service name"
+  echo "[X] Could not resolve Search service name"
   exit 1
 fi
 
@@ -37,7 +37,7 @@ if [[ -z "$STORAGE_ACCOUNT_NAME" ]]; then
   STORAGE_ACCOUNT_NAME="$(az storage account list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)"
 fi
 if [[ -z "$STORAGE_ACCOUNT_NAME" ]]; then
-  echo "❌ Could not resolve Storage account name"
+  echo "[X] Could not resolve Storage account name"
   exit 1
 fi
 
@@ -46,7 +46,7 @@ if [[ -z "$AI_SERVICES_NAME" ]]; then
   AI_SERVICES_NAME="$(az cognitiveservices account list -g "$RESOURCE_GROUP" --query "[?kind=='AIServices']|[0].name" -o tsv)"
 fi
 if [[ -z "$AI_SERVICES_NAME" ]]; then
-  echo "❌ Could not resolve AI Services account name"
+  echo "[X] Could not resolve AI Services account name"
   exit 1
 fi
 
@@ -54,7 +54,7 @@ EMBEDDING_DEPLOYMENT_NAME="${EMBEDDING_DEPLOYMENT_NAME:-text-embedding-3-small}"
 SEARCH_ENDPOINT="https://${SEARCH_SERVICE_NAME}.search.windows.net"
 API_VERSION="2024-07-01"
 
-echo "📦 Ensuring embedding deployment '${EMBEDDING_DEPLOYMENT_NAME}'..."
+echo "[>] Ensuring embedding deployment '${EMBEDDING_DEPLOYMENT_NAME}'..."
 if ! az cognitiveservices account deployment show -g "$RESOURCE_GROUP" -n "$AI_SERVICES_NAME" --deployment-name "$EMBEDDING_DEPLOYMENT_NAME" >/dev/null 2>&1; then
   az cognitiveservices account deployment create \
     -g "$RESOURCE_GROUP" \
@@ -67,7 +67,7 @@ if ! az cognitiveservices account deployment show -g "$RESOURCE_GROUP" -n "$AI_S
     --sku-capacity 10 >/dev/null
 fi
 
-echo "🔐 Ensuring Search managed identity and OpenAI role assignment..."
+echo "[>] Ensuring Search managed identity and OpenAI role assignment..."
 az search service update -g "$RESOURCE_GROUP" -n "$SEARCH_SERVICE_NAME" --identity-type SystemAssigned >/dev/null
 SEARCH_PRINCIPAL_ID="$(az search service show -g "$RESOURCE_GROUP" -n "$SEARCH_SERVICE_NAME" --query identity.principalId -o tsv)"
 AI_SERVICES_ID="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$AI_SERVICES_NAME" --query id -o tsv)"
@@ -77,7 +77,7 @@ az role assignment create --assignee-object-id "$SEARCH_PRINCIPAL_ID" --assignee
 SEARCH_KEY="$(az search admin-key show -g "$RESOURCE_GROUP" --service-name "$SEARCH_SERVICE_NAME" --query primaryKey -o tsv)"
 STORAGE_KEY="$(az storage account keys list -g "$RESOURCE_GROUP" -n "$STORAGE_ACCOUNT_NAME" --query "[0].value" -o tsv)"
 
-echo "📁 Ensuring source containers and uploading sample files..."
+echo "[>] Ensuring source containers and uploading sample files..."
 az storage container create --name support-materials-src --account-name "$STORAGE_ACCOUNT_NAME" --account-key "$STORAGE_KEY" >/dev/null
 az storage container create --name transcripts-src --account-name "$STORAGE_ACCOUNT_NAME" --account-key "$STORAGE_KEY" >/dev/null
 if [[ -d "samples/materials" ]]; then
@@ -273,4 +273,4 @@ search_rest put "$SEARCH_ENDPOINT/indexers/transcripts-indexer?api-version=$API_
 search_rest post "$SEARCH_ENDPOINT/indexers/support-materials-indexer/run?api-version=$API_VERSION" || true
 search_rest post "$SEARCH_ENDPOINT/indexers/transcripts-indexer/run?api-version=$API_VERSION" || true
 
-echo "✅ Search data-plane setup completed."
+echo "[OK] Search data-plane setup completed."

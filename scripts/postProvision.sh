@@ -18,7 +18,7 @@ set -uo pipefail
 #   - Cosmos sample seed
 # All Azure AI Speech control-plane work has been removed from this script.
 
-echo "🔧 Running post-provision hook..."
+echo "[>] Running post-provision hook..."
 
 while IFS='=' read -r key value; do
   [[ -z "${key:-}" ]] && continue
@@ -37,7 +37,7 @@ if [[ "$NETWORK_ISOLATION_VALUE" =~ ^(true|True|1|yes|YES)$ ]]; then
 fi
 
 if [[ -z "$RESOURCE_GROUP" ]]; then
-  echo "❌ Missing AZURE_RESOURCE_GROUP."
+  echo "[X] Missing AZURE_RESOURCE_GROUP."
   exit 1
 fi
 
@@ -49,21 +49,21 @@ fi
 RUN_FROM_JUMPBOX_ENABLED=false
 if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
   echo ""
-  echo "🔒 Zero Trust / Network Isolation enabled."
+  echo "[>] Zero Trust / Network Isolation enabled."
   echo "   Data-plane steps (Cosmos seed, Search index setup, App Configuration writes)"
   echo "   require connectivity to the VNet private endpoints."
   echo "   Ensure you run scripts/postProvision.sh from within the VNet (jumpbox via"
   echo "   Bastion or VPN). Otherwise these steps will be skipped."
   if [[ -t 0 ]]; then
-    read -r -p "❓ Are you running this script from inside the VNet or via VPN? [Y/n]: " _ni_answer
+    read -r -p "[?] Are you running this script from inside the VNet or via VPN? [Y/n]: " _ni_answer
     if [[ -z "${_ni_answer:-}" || "${_ni_answer:-}" =~ ^(y|Y|yes|YES|true|True|1)$ ]]; then
       RUN_FROM_JUMPBOX_ENABLED=true
-      echo "✅ Continuing with data-plane post-provisioning."
+      echo "[OK] Continuing with data-plane post-provisioning."
     else
-      echo "⏭️ Data-plane steps will be skipped. Re-run from the jumpbox to apply them."
+      echo "[-] Data-plane steps will be skipped. Re-run from the jumpbox to apply them."
     fi
   else
-    echo "⏭️ Non-interactive shell detected; data-plane steps will be skipped."
+    echo "[-] Non-interactive shell detected; data-plane steps will be skipped."
     echo "   Re-run interactively from the jumpbox/Bastion to apply them."
   fi
 fi
@@ -78,7 +78,7 @@ dataplane_should_run() {
   return 1
 }
 
-echo "📦 Ensuring ACR endpoint is persisted and Container App is bound to ACR via managed identity..."
+echo "[>] Ensuring ACR endpoint is persisted and Container App is bound to ACR via managed identity..."
 CONTAINER_APP_NAME="${AZURE_CONTAINER_APP_NAME:-}"
 if [[ -z "$CONTAINER_APP_NAME" ]]; then
   CONTAINER_APP_NAME="$(az containerapp list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null || true)"
@@ -89,59 +89,59 @@ if [[ -n "$ACR_NAME" ]]; then
   if [[ -n "$ACR_LOGIN_SERVER" ]]; then
     if [[ "${AZURE_CONTAINER_REGISTRY_ENDPOINT:-}" != "$ACR_LOGIN_SERVER" ]]; then
       azd env set AZURE_CONTAINER_REGISTRY_ENDPOINT "$ACR_LOGIN_SERVER" >/dev/null
-      echo "✅ AZURE_CONTAINER_REGISTRY_ENDPOINT set to '$ACR_LOGIN_SERVER'."
+      echo "[OK] AZURE_CONTAINER_REGISTRY_ENDPOINT set to '$ACR_LOGIN_SERVER'."
     fi
     if [[ -n "${CONTAINER_APP_NAME:-}" ]]; then
       CURRENT_IDENTITY="$(az containerapp show -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --query "properties.configuration.registries[?server=='$ACR_LOGIN_SERVER'] | [0].identity" -o tsv 2>/dev/null || true)"
       if [[ "$CURRENT_IDENTITY" != "system" ]]; then
         az containerapp registry set -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --server "$ACR_LOGIN_SERVER" --identity system >/dev/null 2>&1 || true
-        echo "✅ Container App '$CONTAINER_APP_NAME' bound to ACR '$ACR_LOGIN_SERVER' via system-assigned identity."
+        echo "[OK] Container App '$CONTAINER_APP_NAME' bound to ACR '$ACR_LOGIN_SERVER' via system-assigned identity."
       else
-        echo "✅ Container App registry binding already in place."
+        echo "[OK] Container App registry binding already in place."
       fi
     fi
   fi
 else
-  echo "⚠️ No ACR found in resource group; skipping registry wiring."
+  echo "[!]️ No ACR found in resource group; skipping registry wiring."
 fi
 
 if [[ -n "$APP_CONFIG_ENDPOINT" ]] && dataplane_should_run; then
-  echo "🧩 Writing app-specific settings to App Configuration..."
+  echo "[>] Writing app-specific settings to App Configuration..."
   appcfg_failed=0
   az appconfig kv set --endpoint "$APP_CONFIG_ENDPOINT" --key AZURE_INPUT_TRANSCRIPTION_MODEL --value "azure-speech" --label "$APP_CONFIG_LABEL" --auth-mode login --yes >/dev/null 2>&1 || appcfg_failed=1
   if [[ "$appcfg_failed" == 1 ]]; then
     if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
-      echo "⚠️ App Configuration data-plane not reachable from current network (NI mode). Run this step from the jumpbox inside the vnet. Continuing."
+      echo "[!]️ App Configuration data-plane not reachable from current network (NI mode). Run this step from the jumpbox inside the vnet. Continuing."
     else
-      echo "⚠️ App Configuration updates failed."
+      echo "[!]️ App Configuration updates failed."
     fi
   else
-    echo "✅ App Configuration updated (AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech)."
+    echo "[OK] App Configuration updated (AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech)."
   fi
 elif [[ -n "$APP_CONFIG_ENDPOINT" ]]; then
-  echo "⏭️ Skipping App Configuration writes (network isolation; not running from VNet)."
+  echo "[-] Skipping App Configuration writes (network isolation; not running from VNet)."
 else
-  echo "⚠️ APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
+  echo "[!]️ APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
 fi
 
 if [[ ! "${ENABLE_SEARCH_DATAPLANE_SETUP:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
   if dataplane_should_run; then
-    echo "🔎 Running Search data-plane setup hook..."
+    echo "[>] Running Search data-plane setup hook..."
     bash "$(dirname "$0")/setup_search_dataplane.sh"
   else
-    echo "⏭️ Skipping Search data-plane setup (network isolation; not running from VNet)."
+    echo "[-] Skipping Search data-plane setup (network isolation; not running from VNet)."
     echo "   Re-run scripts/postProvision.sh from the jumpbox/Bastion to apply it."
   fi
 else
-  echo "⏭️ ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
+  echo "[-] ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
 fi
 
 if [[ ! "${ENABLE_COSMOS_SAMPLE_SEED:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
   if ! dataplane_should_run; then
-    echo "⏭️ Skipping Cosmos sample seed (network isolation; not running from VNet)."
+    echo "[-] Skipping Cosmos sample seed (network isolation; not running from VNet)."
     echo "   Re-run scripts/postProvision.sh from the jumpbox/Bastion to apply it."
   else
-    echo "🌱 Running Cosmos sample seed hook..."
+    echo "[>] Running Cosmos sample seed hook..."
     DATABASE_ACCOUNT_NAME="${DATABASE_ACCOUNT_NAME:-}"
     if [[ -z "$DATABASE_ACCOUNT_NAME" ]]; then
       DATABASE_ACCOUNT_NAME="$(az cosmosdb list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null || true)"
@@ -165,17 +165,17 @@ if [[ ! "${ENABLE_COSMOS_SAMPLE_SEED:-true}" =~ ^(false|False|0|no|NO)$ ]]; then
         elif command -v python3 >/dev/null 2>&1; then
           python3 scripts/seed_cosmos_samples.py --mode upsert
         else
-          echo "⚠️ Python executable not found. Skipping Cosmos sample seed."
+          echo "[!]️ Python executable not found. Skipping Cosmos sample seed."
         fi
       else
-        echo "⚠️ Cosmos database name could not be resolved. Skipping Cosmos sample seed."
+        echo "[!]️ Cosmos database name could not be resolved. Skipping Cosmos sample seed."
       fi
     else
-      echo "⚠️ Cosmos account name could not be resolved. Skipping Cosmos sample seed."
+      echo "[!]️ Cosmos account name could not be resolved. Skipping Cosmos sample seed."
     fi
   fi
 else
-  echo "⏭️ ENABLE_COSMOS_SAMPLE_SEED=false, skipping Cosmos sample seed."
+  echo "[-] ENABLE_COSMOS_SAMPLE_SEED=false, skipping Cosmos sample seed."
 fi
 
 if [[ "$NETWORK_ISOLATION_ENABLED" == true && "$RUN_FROM_JUMPBOX_ENABLED" != true ]]; then
@@ -189,4 +189,4 @@ if [[ "$NETWORK_ISOLATION_ENABLED" == true && "$RUN_FROM_JUMPBOX_ENABLED" != tru
   echo "   then run './scripts/postProvision.sh' interactively to apply them."
 fi
 
-echo "✅ post-provision hook completed."
+echo "[OK] post-provision hook completed."

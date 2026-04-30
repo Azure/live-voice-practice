@@ -4,7 +4,7 @@
 
 set -e
 
-echo "🧪 Running Python tests..."
+echo "[>] Running Python tests..."
 
 # Navigate to backend directory
 cd backend
@@ -16,4 +16,4 @@ export PYTHONPATH="src:src/services:$PYTHONPATH"
 echo "Running pytest with PYTHONPATH: $PYTHONPATH"
 python -m pytest -v
 
-echo "✅ All tests passed!"
+echo "[OK] All tests passed!"
