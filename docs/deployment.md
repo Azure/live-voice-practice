@@ -198,27 +198,21 @@ the right RBAC on the resource group. Use it for both `az` and `azd` so you don'
 authenticate as your own user inside the VNet.
 
 ```powershell
-# 1. Sign in az CLI with the VM's system-assigned managed identity
+# 1. Sign in az CLI + azd with the VM's system-assigned managed identity
 az login --identity
-az account set --subscription <AZURE_SUBSCRIPTION_ID>
-
-# 2. Sign in azd with the same managed identity
 azd auth login --managed-identity
 
-# 3. Pre-populate principal id/type so azd does NOT try to call Microsoft Graph
+# 2. Get the MI Object (principal) ID from the Azure portal:
+#    Portal → Virtual machine → testvm<token> → Security → Identity → System assigned
+#    Copy the "Object (principal) ID" value (a GUID like ca8e2735-36a9-44a7-...).
+#
+#    Then pre-populate it into the azd env so azd does NOT call Microsoft Graph
 #    (the jumpbox MI usually has no Graph permissions, which makes
-#     `azd env refresh` fail with "fetching current principal type ... not logged in").
-#    Auto-discover this VM's RG/name from IMDS, then read the MI principalId:
-$vm = (Invoke-RestMethod -Headers @{Metadata='true'} `
-    -Uri 'http://169.254.169.254/metadata/instance?api-version=2021-02-01').compute
-$miPrincipalId = az vm identity show -g $vm.resourceGroupName -n $vm.name `
-    --query principalId -o tsv
-Write-Host "MI principalId = $miPrincipalId"
-
-azd env set AZURE_PRINCIPAL_ID   $miPrincipalId
+#     `azd env refresh` fail with "fetching current principal type ... not logged in"):
+azd env set AZURE_PRINCIPAL_ID   <paste-Object-principal-ID-from-portal>
 azd env set AZURE_PRINCIPAL_TYPE ServicePrincipal
 
-# 4. Refresh — pulls the Bicep outputs (App Config, ACR, Speech, Cosmos, etc.) into the local .env
+# 3. Refresh — pulls Bicep outputs (App Config, ACR, Speech, Cosmos, etc.) into the local .env
 azd env refresh
 ```
 
