@@ -180,8 +180,10 @@ if [[ -n "$APP_CONFIG_ENDPOINT" ]] && dataplane_should_run; then
       # be derived. Try azd env first; fall back to a single ARM call.
       appins_conn="${APPLICATIONINSIGHTS_CONNECTION_STRING:-}"
       if [[ -z "$appins_conn" ]]; then
-        echo "[>] Fetching App Insights connection string..."
-        appins_conn="$(az monitor app-insights component show -g "$RESOURCE_GROUP" -a "$appins_name" --query connectionString -o tsv 2>/dev/null || true)"
+        echo "[>] Fetching App Insights connection string (az resource show, no extension)..."
+        # Use plain `az resource show` to avoid triggering an interactive
+        # extension-install prompt for `application-insights` on first run.
+        appins_conn="$(az resource show --ids "$appins_id" --query 'properties.ConnectionString' -o tsv 2>/dev/null || true)"
       fi
 
       tmp_file="$(mktemp -t appconfig-populate-XXXXXX.json)"

@@ -237,8 +237,10 @@ if ($appConfigEndpoint -and (Test-DataplaneShouldRun)) {
       # first (free); fall back to a single ARM call.
       $appInsightsConnStr = $env:APPLICATIONINSIGHTS_CONNECTION_STRING
       if (-not $appInsightsConnStr) {
-        Write-Host "[>] Fetching App Insights connection string..."
-        $appInsightsConnStr = az monitor app-insights component show -g $resourceGroup -a $appInsightsName --query connectionString -o tsv 2>$null
+        Write-Host "[>] Fetching App Insights connection string (az resource show, no extension)..."
+        # Use plain `az resource show` to avoid triggering an interactive
+        # extension-install prompt for `application-insights` on first run.
+        $appInsightsConnStr = az resource show --ids $appInsightsId --query 'properties.ConnectionString' -o tsv 2>$null
         if ($LASTEXITCODE -ne 0 -or -not $appInsightsConnStr) {
           Write-Host "[!] Could not fetch App Insights connection string; writing empty value."
           $appInsightsConnStr = ''
