@@ -34,10 +34,12 @@ get_appconfig_value() {
   local key="$1"
   local val
   if [[ -z "${APP_CONFIG_ENDPOINT:-}" ]]; then return 1; fi
-  for lbl in "$APP_CONFIG_LABEL" "$APP_CONFIG_FALLBACK_LABEL"; do
-    val="$(az appconfig kv show --endpoint "$APP_CONFIG_ENDPOINT" --key "$key" --label "$lbl" --auth-mode login --query value -o tsv 2>/dev/null)"
-    if [[ -n "$val" ]]; then echo "$val"; return 0; fi
-  done
+  # Fast path: configured label.
+  val="$(az appconfig kv show --endpoint "$APP_CONFIG_ENDPOINT" --key "$key" --label "$APP_CONFIG_LABEL" --auth-mode login --query value -o tsv 2>/dev/null)"
+  if [[ -n "$val" ]]; then echo "$val"; return 0; fi
+  # Fallback: any label that has this key.
+  val="$(az appconfig kv list --endpoint "$APP_CONFIG_ENDPOINT" --key "$key" --label '*' --auth-mode login --query "[?value!=null && value!=''] | [0].value" -o tsv 2>/dev/null)"
+  if [[ -n "$val" ]]; then echo "$val"; return 0; fi
   return 1
 }
 

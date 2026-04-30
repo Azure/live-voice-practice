@@ -60,10 +60,20 @@ if (-not $resourceToken) {
 function Get-AppConfigValue {
   param([string]$key)
   if (-not $appConfigEndpoint) { return $null }
-  foreach ($lbl in @($appConfigLabel, $appConfigFallbackLabel) | Select-Object -Unique) {
-    $val = az appconfig kv show --endpoint $appConfigEndpoint --key $key --label $lbl --auth-mode login --query value -o tsv 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($val)) { return $val.Trim() }
-  }
+  # Try the configured label first (fast path), then fall back to listing all
+  # labels for the key. Bicep's `param appConfigLabel string = 'ai-lz'` is
+  # the actual default, but downstream pipelines may override it. Querying
+  # with `--label '*'` covers every case without us guessing.
+  $val = az appconfig kv show --endpoint $appConfigEndpoint --key $key --label $appConfigLabel --auth-mode login --query value -o tsv 2>$null
+  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($val)) { return $val.Trim() }
+  $listJson = az appconfig kv list --endpoint $appConfigEndpoint --key $key --label '*' --auth-mode login -o json 2>$null
+  if ($LASTEXITCODE -ne 0 -or -not $listJson) { return $null }
+  try {
+    $items = $listJson | ConvertFrom-Json
+    foreach ($item in @($items)) {
+      if ($item -and -not [string]::IsNullOrWhiteSpace($item.value)) { return $item.value.Trim() }
+    }
+  } catch { }
   return $null
 }
 
