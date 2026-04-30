@@ -67,18 +67,10 @@ if ! az cognitiveservices account deployment show -g "$RESOURCE_GROUP" -n "$AI_S
     --sku-capacity 10 >/dev/null
 fi
 
-echo "[>] Ensuring Search managed identity and downstream role assignments..."
-az search service update -g "$RESOURCE_GROUP" -n "$SEARCH_SERVICE_NAME" --identity-type SystemAssigned >/dev/null
-SEARCH_PRINCIPAL_ID="$(az search service show -g "$RESOURCE_GROUP" -n "$SEARCH_SERVICE_NAME" --query identity.principalId -o tsv)"
-AI_SERVICES_ID="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$AI_SERVICES_NAME" --query id -o tsv)"
+echo "[>] Resolving endpoints (RBAC + Search MI provisioned by Bicep)..."
 AI_SERVICES_ENDPOINT="$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$AI_SERVICES_NAME" --query properties.endpoint -o tsv)"
 SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
 STORAGE_ACCOUNT_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${STORAGE_ACCOUNT_NAME}"
-
-# Search MI -> AI Services (for embedding skill)
-az role assignment create --assignee-object-id "$SEARCH_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal --role "Cognitive Services OpenAI User" --scope "$AI_SERVICES_ID" >/dev/null 2>&1 || true
-# Search MI -> Storage (for indexer datasource MI auth)
-az role assignment create --assignee-object-id "$SEARCH_PRINCIPAL_ID" --assignee-principal-type ServicePrincipal --role "Storage Blob Data Reader" --scope "$STORAGE_ACCOUNT_ID" >/dev/null 2>&1 || true
 
 echo "[>] Ensuring source containers and uploading sample files (Entra ID auth)..."
 az storage container create --name support-materials-src --account-name "$STORAGE_ACCOUNT_NAME" --auth-mode login >/dev/null

@@ -112,18 +112,10 @@ if (-not $hasEmbeddingDeployment) {
   az cognitiveservices account deployment create -g $resourceGroup -n $aiServicesName --deployment-name $embeddingDeploymentName --model-name $embeddingDeploymentName --model-version 1 --model-format OpenAI --sku-name Standard --sku-capacity 10 | Out-Null
 }
 
-Write-Host "[>] Ensuring Search managed identity and downstream role assignments..."
-az search service update -g $resourceGroup -n $searchServiceName --identity-type SystemAssigned | Out-Null
-$searchPrincipalId = az search service show -g $resourceGroup -n $searchServiceName --query identity.principalId -o tsv
-$aiServicesId = az cognitiveservices account show -g $resourceGroup -n $aiServicesName --query id -o tsv
+Write-Host "[>] Resolving endpoints (RBAC + Search MI provisioned by Bicep)..."
 $aiServicesEndpoint = az cognitiveservices account show -g $resourceGroup -n $aiServicesName --query properties.endpoint -o tsv
 $subscriptionId = az account show --query id -o tsv
 $storageAccountId = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.Storage/storageAccounts/$storageAccountName"
-
-# Search MI -> AI Services (for embedding skill)
-az role assignment create --assignee-object-id $searchPrincipalId --assignee-principal-type ServicePrincipal --role "Cognitive Services OpenAI User" --scope $aiServicesId 2>$null | Out-Null
-# Search MI -> Storage (for indexer datasource MI auth)
-az role assignment create --assignee-object-id $searchPrincipalId --assignee-principal-type ServicePrincipal --role "Storage Blob Data Reader" --scope $storageAccountId 2>$null | Out-Null
 
 Write-Host "[>] Ensuring source containers and uploading sample files (Entra ID auth)..."
 az storage container create --name support-materials-src --account-name $storageAccountName --auth-mode login | Out-Null
