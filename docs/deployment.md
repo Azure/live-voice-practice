@@ -31,7 +31,8 @@ Install on the machine that will run `azd`:
 | [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd) | 1.24+ | `azd` |
 | [PowerShell 7+](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) | 7.4+ | required by `postProvision.ps1` |
 | Python | 3.11+ | required by the Cosmos sample seed |
-| Docker (basic mode only) | recent | required for `azd deploy` to build & push the container image from your workstation. **Not required in NI mode** — the Bicep template provisions an ACR Tasks agent pool inside the VNet that builds the image. |
+
+> **Docker is NOT a prerequisite in either mode.** `scripts/deploy.ps1` (the `predeploy` hook invoked by `azd deploy`) builds and pushes the container image with `az acr build`. The build runs inside Azure Container Registry Tasks — on the Microsoft-managed shared agent pool in basic mode, and on the VNet-attached `build-pool` agent pool in NI mode. Your workstation (and the jumpbox) only ship the build context to ACR; they never run `docker build` locally.
 
 Sign in:
 
@@ -70,7 +71,7 @@ This will:
     - writes `AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech` to App Configuration;
     - configures the AI Search data-plane (skillset, index, indexer) via [scripts/setup_search_dataplane.ps1](../scripts/setup_search_dataplane.ps1);
     - seeds Cosmos DB with the sample scenarios/rubrics via [scripts/seed_cosmos_samples.py](../scripts/seed_cosmos_samples.py).
-3. Build the container image locally (Docker), push it to ACR, and roll a new revision of the `voicelab` Container App.
+3. Build the container image with `az acr build` running on the **shared Microsoft-managed ACR Tasks agent pool** (no Docker on your workstation), push it to ACR, and roll a new revision of the `voicelab` Container App.
 
 ### 3. Iterate
 
