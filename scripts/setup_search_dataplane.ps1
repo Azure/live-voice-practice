@@ -37,6 +37,7 @@ if (-not $searchServiceName) {
   throw "Could not resolve Search service name in resource group '$resourceGroup'. " +
         "Set `$env:SEARCH_SERVICE_NAME before re-running this script."
 }
+Write-Host "[>] Using Search service: $searchServiceName"
 
 $storageAccountName = $env:STORAGE_ACCOUNT_NAME
 if (-not $storageAccountName) {
@@ -49,10 +50,16 @@ if (-not $storageAccountName) {
   $storageAccountName = az storage account list -g $resourceGroup --query "[0].name" -o tsv
 }
 if (-not $storageAccountName) {
+  Write-Host "[!] Storage account lookup returned empty. Diagnostics:"
+  Write-Host "    az account show:"
+  az account show --query "{name:name,id:id,user:user.name,user_type:user.type}" -o tsv 2>&1 | ForEach-Object { Write-Host "      $_" }
+  Write-Host "    az storage account list -g $resourceGroup (raw):"
+  az storage account list -g $resourceGroup -o tsv --query "[].name" 2>&1 | ForEach-Object { Write-Host "      $_" }
   throw "Could not resolve Storage account name in resource group '$resourceGroup'. " +
         "Either grant the current identity 'Reader' on the resource group, or set " +
         "`$env:STORAGE_ACCOUNT_NAME` before re-running this script."
 }
+Write-Host "[>] Using Storage account: $storageAccountName"
 
 $aiServicesName = $env:AI_FOUNDRY_ACCOUNT_NAME
 if (-not $aiServicesName) {
