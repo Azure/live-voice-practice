@@ -199,12 +199,21 @@ az account set --subscription <AZURE_SUBSCRIPTION_ID>
 
 azd auth login --tenant-id <AZURE_TENANT_ID>
 
-# Re-create the local azd env with the same name as on your workstation
-azd env new <env-name>
-azd env set AZURE_LOCATION       <region>
-azd env set AZURE_SUBSCRIPTION_ID <subscription-guid>
-azd env set NETWORK_ISOLATION    true
-azd env refresh                  # pulls all outputs from the existing deployment
+# The AILZ bootstrap may have already provisioned a local azd env with the same
+# name as your workstation env (the .azure/<env>/ folder is committed-in-place
+# during the jumpbox install). Pick the right path:
+
+# (a) If `azd env list` already shows your env, just select it and refresh:
+azd env list
+azd env select <env-name>
+azd env refresh                  # pulls outputs from the existing deployment
+
+# (b) If the env is NOT present, create it and re-set the inputs:
+# azd env new <env-name>
+# azd env set AZURE_LOCATION        <region>
+# azd env set AZURE_SUBSCRIPTION_ID <subscription-guid>
+# azd env set NETWORK_ISOLATION     true
+# azd env refresh
 ```
 
 `azd env refresh` populates the Bicep outputs (App Config endpoint, Container App name, ACR endpoint, Speech endpoint/region, Cosmos account, etc.) into the local env file by reading the existing deployment in the resource group.
