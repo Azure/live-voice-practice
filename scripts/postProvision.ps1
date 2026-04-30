@@ -423,6 +423,18 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
       Write-Host "[!] Python still unavailable after install attempt. Skipping Cosmos sample seed."
     } else {
       Write-Host "[>] Using Python: $pythonExe"
+      # Ensure the seed script's runtime dependencies are present. Idempotent:
+      # pip is a no-op when already installed at the requested version.
+      $needsInstall = $false
+      & $pythonExe -c "import azure.cosmos, azure.identity" 2>$null
+      if ($LASTEXITCODE -ne 0) { $needsInstall = $true }
+      if ($needsInstall) {
+        Write-Host "[>] Installing seed script dependencies (azure-cosmos, azure-identity)..."
+        & $pythonExe -m pip install --quiet --disable-pip-version-check azure-cosmos azure-identity 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "[!] pip install failed (exit $LASTEXITCODE). Cosmos sample seed will likely fail."
+        }
+      }
       # Resource names were resolved at startup from App Configuration (the
       # source of truth populated by Bicep). Use them directly; only derive
       # endpoint as the very last fallback.
