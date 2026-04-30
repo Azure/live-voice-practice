@@ -191,47 +191,19 @@ cd live-voice-practice
 git submodule update --init --recursive
 ```
 
-#### B.3. Sign in with managed identity and verify the azd env
+#### B.3. Sign in with the jumpbox managed identity
 
-The jumpbox is provisioned with a system-assigned managed identity that already has the
-RBAC needed on the resource group, ACR, App Config, Search, Cosmos, Speech, etc.
-**You do NOT need `azd auth login` or `azd env refresh` on the jumpbox** — the AILZ
-bootstrap copied the `.azure/<env>/.env` file from your workstation, so it already has
-every output from the `azd provision` you ran in Phase A (App Config endpoint, ACR
-endpoint, Container App name, Speech endpoint, Cosmos account, etc.).
-
-> **Why we skip `azd env refresh`:** `azd` 1.24.x calls `getCurrentPrincipalType()`
-> through Microsoft Graph during `env refresh`/`provision`, and the jumpbox MI doesn't
-> have Graph permissions. The refresh is unnecessary anyway — the workstation's `.env`
-> already contains every output we need. `postProvision.ps1` reads from that file via
-> `azd env get-values`, so it'll pick up the values directly.
+The `.azure/<env>/.env` already came over with the bootstrap — no refresh needed.
+Just log `az` in with the VM's MI:
 
 ```powershell
-# 1. Sign in az CLI with the VM's managed identity (no Graph dependency)
 az login --identity
-az account set --subscription <AZURE_SUBSCRIPTION_ID>
-
-# 2. Verify the azd env file is present and populated (sanity check)
-azd env get-values | Select-String 'AZURE_CONTAINER_APP_NAME|APP_CONFIG_ENDPOINT|AZURE_SPEECH_ENDPOINT|AZURE_COSMOS|AZURE_RESOURCE_GROUP'
-# You should see all four lines with real values. If anything is empty, your .env
-# wasn't copied correctly — see the fallback below.
 ```
 
-> **Fallback (only if `azd env get-values` returns empty values):** copy the contents of
-> `.azure/<env>/.env` from your workstation to the same path on the jumpbox (use the
-> portal Cloud Shell or paste through the Bastion clipboard). Do NOT run `azd env refresh`.
-
-> **Fallback:** if `azd env list` shows nothing or the wrong default, run:
+> **Fallback** (only if `az login --identity` fails):
 > ```powershell
-> azd env list
-> azd env select <env-name>      # or: azd env new <env-name>
-> azd env set AZURE_LOCATION        <region>
-> azd env set AZURE_SUBSCRIPTION_ID <subscription-guid>
-> azd env set NETWORK_ISOLATION     true
-> azd env refresh
+> az login --use-device-code --tenant <AZURE_TENANT_ID>
 > ```
-
-`azd env refresh` populates the Bicep outputs (App Config endpoint, Container App name, ACR endpoint, Speech endpoint/region, Cosmos account, etc.) into the local env file by reading the existing deployment in the resource group.
 
 #### B.4. Run the post-provision hook from inside the VNet
 
