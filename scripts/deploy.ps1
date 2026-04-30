@@ -24,9 +24,21 @@ function Write-ErrorColored($msg) { Write-Host $msg -ForegroundColor Red }
 Write-Host ""
 
 #region Load azd env
+# When invoked as an azd hook, azd injects env values as process env vars
+# (e.g. NETWORK_ISOLATION, ACR_TASK_AGENT_POOL). Recursive `azd env get-values`
+# from inside a running hook can return empty in some azd versions, so we
+# prefer process env vars and only fall back to parsing.
 $envValues = azd env get-values 2>$null
-$niFlag = ($envValues | Select-String '^NETWORK_ISOLATION=' | ForEach-Object { $_ -replace '.*=\s*"?([^"]+)"?.*','$1' } | Select-Object -First 1)
-$agentPool = ($envValues | Select-String '^ACR_TASK_AGENT_POOL=' | ForEach-Object { $_ -replace '.*=\s*"?([^"]*)"?.*','$1' } | Select-Object -First 1)
+function Get-AzdEnvValue {
+    param([string]$Name)
+    $procVal = [Environment]::GetEnvironmentVariable($Name)
+    if ($procVal) { return $procVal.Trim('"') }
+    $line = $envValues | Select-String "^$Name=" | Select-Object -First 1
+    if (-not $line) { return $null }
+    return ($line.ToString() -replace "^$Name=`"?([^`"]*)`"?.*",'$1')
+}
+$niFlag    = Get-AzdEnvValue 'NETWORK_ISOLATION'
+$agentPool = Get-AzdEnvValue 'ACR_TASK_AGENT_POOL'
 #endregion
 
 #region Read APP_CONFIG_ENDPOINT
