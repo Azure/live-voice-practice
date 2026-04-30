@@ -1,7 +1,24 @@
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
+# Intentionally NOT using `Set-StrictMode -Version Latest` or
+# `$ErrorActionPreference = 'Stop'`: this script makes many `az` calls that
+# return non-zero exit codes (e.g. ResourceNotFound on first run, idempotent
+# Conflict on re-run) which we handle explicitly via `$LASTEXITCODE`. Strict
+# mode also breaks pragmatic patterns like `$env:OPTIONAL_VAR ?? 'default'`.
+$ErrorActionPreference = 'Continue'
 
-Write-Host "🔧 Running post-provision speech setup..."
+# Note: starting with bicep-ptn-aiml-landing-zone v1.1.4 the Azure AI Speech
+# account, its private endpoint, DNS zone group, RBAC (CognitiveServicesUser
+# on the Container App MI + executor + test VM) and the AppConfig keys
+# AZURE_SPEECH_ENDPOINT / AZURE_SPEECH_REGION / AZURE_SPEECH_RESOURCE_NAME /
+# AZURE_SPEECH_RESOURCE_ID are all created by the Bicep template (closes #35
+# upstream). This hook only handles the bits that are *application-specific*
+# and not part of the generic landing zone:
+#   - AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech App Config flag
+#   - ACR endpoint persistence + Container App MI registry binding
+#   - Search index data-plane setup
+#   - Cosmos sample seed
+# All Azure AI Speech control-plane work has been removed from this script.
+
+Write-Host "🔧 Running post-provision hook..."
 
 & azd env get-values | ForEach-Object {
   if ($_ -match '^([^=]+)=(.*)$') {
@@ -11,37 +28,42 @@ Write-Host "🔧 Running post-provision speech setup..."
   }
 }
 
-if ($env:DEPLOY_SPEECH_SERVICE -match '^(false|False|0|no|NO)$') {
-  Write-Host "⏭️ DEPLOY_SPEECH_SERVICE=false, skipping speech setup."
-  exit 0
-}
-
 $resourceGroup = $env:AZURE_RESOURCE_GROUP
-$location = if ($env:AZURE_LOCATION) { $env:AZURE_LOCATION } else { $env:LOCATION }
-$speechRegion = if ($env:AZURE_SPEECH_REGION) { $env:AZURE_SPEECH_REGION } elseif ($env:AZURE_AI_REGION) { $env:AZURE_AI_REGION } else { $location }
 $appConfigEndpoint = $env:APP_CONFIG_ENDPOINT
 $appConfigLabel = if ($env:APP_CONFIG_LABEL) { $env:APP_CONFIG_LABEL } else { 'live-voice-practice' }
 $networkIsolationValue = if ($env:NETWORK_ISOLATION) { $env:NETWORK_ISOLATION } else { $env:AZURE_NETWORK_ISOLATION }
 $networkIsolationEnabled = $networkIsolationValue -match '^(true|True|1|yes|YES)$'
 
-# When NETWORK_ISOLATION=true, data-plane operations (Cosmos seed, Search index)
-# require running from inside the VNet (jumpbox / Bastion VM). Set
-# RUN_FROM_JUMPBOX=true to opt-in those steps when invoking this script directly
-# from the jumpbox after `azd provision` completed from the dev workstation.
-# If the variable is not set and the host is interactive, prompt the user.
-if ($null -ne $env:RUN_FROM_JUMPBOX -and $env:RUN_FROM_JUMPBOX -ne '') {
-  $runFromJumpboxEnabled = $env:RUN_FROM_JUMPBOX -match '^(true|True|1|yes|YES)$'
-} elseif ($networkIsolationEnabled -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+if (-not $resourceGroup) {
+  Write-Host "❌ Missing AZURE_RESOURCE_GROUP."
+  exit 1
+}
+
+# When NETWORK_ISOLATION=true, data-plane operations (Cosmos seed, Search index
+# setup, App Configuration writes) require connectivity to private endpoints,
+# i.e. running from inside the VNet (jumpbox/Bastion VM or via VPN).
+# Mirror the GPT-RAG zero-trust UX: prompt the user interactively. If the
+# session is non-interactive (e.g. azd hook in CI), skip data-plane steps.
+if ($networkIsolationEnabled) {
   Write-Host ""
-  Write-Host "🔒 Network isolation is enabled. Data-plane steps (Cosmos seed, Search index"
-  Write-Host "   setup, App Configuration writes) require connectivity to private endpoints."
-  $answer = Read-Host "❓ Are you currently connected to the VNet (jumpbox/Bastion or VPN)? [y/N]"
-  if ($answer -match '^(y|Y|yes|YES|true|True|1)$') {
-    $runFromJumpboxEnabled = $true
-    Write-Host "✅ Continuing with data-plane post-provisioning."
+  Write-Host "🔒 Zero Trust / Network Isolation enabled."
+  Write-Host "   Data-plane steps (Cosmos seed, Search index setup, App Configuration writes)"
+  Write-Host "   require connectivity to the VNet private endpoints."
+  Write-Host "   Ensure you run scripts/postProvision.ps1 from within the VNet (jumpbox via"
+  Write-Host "   Bastion or VPN). Otherwise these steps will be skipped."
+  if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+    $answer = Read-Host "❓ Are you running this script from inside the VNet or via VPN? [Y/n]"
+    if ([string]::IsNullOrWhiteSpace($answer) -or $answer -match '^(y|Y|yes|YES|true|True|1)$') {
+      $runFromJumpboxEnabled = $true
+      Write-Host "✅ Continuing with data-plane post-provisioning."
+    } else {
+      $runFromJumpboxEnabled = $false
+      Write-Host "⏭️ Data-plane steps will be skipped. Re-run from the jumpbox to apply them."
+    }
   } else {
     $runFromJumpboxEnabled = $false
-    Write-Host "⏭️ Skipping data-plane steps. Re-run from the jumpbox to apply them."
+    Write-Host "⏭️ Non-interactive shell detected; data-plane steps will be skipped."
+    Write-Host "   Re-run interactively from the jumpbox/Bastion to apply them."
   }
 } else {
   $runFromJumpboxEnabled = $false
@@ -53,131 +75,11 @@ function Test-DataplaneShouldRun {
   return $false
 }
 
-if (-not $resourceGroup -or -not $speechRegion) {
-  Write-Host "❌ Missing AZURE_RESOURCE_GROUP or AZURE_LOCATION/AZURE_SPEECH_REGION."
-  exit 1
-}
-
-# Note: starting with bicep-ptn-aiml-landing-zone v1.1.0 the Azure Firewall
-# Policy already ships the full jumpbox bootstrap FQDN allow-list by default
-# (controlled by `extendFirewallForJumpboxBootstrap`). No post-provision hook
-# is needed here. If you need to tweak it on an existing deployment, edit the
-# Firewall Policy directly.
-
-$envBase = (($env:AZURE_ENV_NAME ?? 'voicelab') -replace '[^a-zA-Z0-9]', '').ToLower()
-if (-not $envBase) { $envBase = 'voicelab' }
-$resourceToken = (($env:RESOURCE_TOKEN ?? '') -replace '[^a-zA-Z0-9]', '')
-if ($resourceToken.Length -gt 8) { $resourceToken = $resourceToken.Substring(0, 8) }
-$defaultSpeechName = "$envBase" + "speech" + "$resourceToken"
-if ($defaultSpeechName.Length -gt 40) { $defaultSpeechName = $defaultSpeechName.Substring(0, 40) }
-$speechAccountName = if ($env:AZURE_SPEECH_RESOURCE_NAME) { $env:AZURE_SPEECH_RESOURCE_NAME } else { $defaultSpeechName }
-
-Write-Host "📦 Ensuring Speech resource '$speechAccountName' in '$speechRegion'..."
-$exists = $false
-try {
-  $null = az cognitiveservices account show -g $resourceGroup -n $speechAccountName 2>$null
-  if ($LASTEXITCODE -eq 0) { $exists = $true }
-} catch { }
-
-if (-not $exists) {
-  az cognitiveservices account create --name $speechAccountName --resource-group $resourceGroup --location $speechRegion --kind SpeechServices --sku S0 --custom-domain $speechAccountName --yes | Out-Null
-  Write-Host "✅ Speech resource created."
-} else {
-  Write-Host "✅ Speech resource already exists."
-}
-
-$speechResourceId = az cognitiveservices account show -g $resourceGroup -n $speechAccountName --query id -o tsv
-$speechEndpoint = az cognitiveservices account show -g $resourceGroup -n $speechAccountName --query properties.endpoint -o tsv
-$speechCustomSubDomain = az cognitiveservices account show -g $resourceGroup -n $speechAccountName --query properties.customSubDomainName -o tsv 2>$null
-if (-not $speechCustomSubDomain) {
-  Write-Host "🔧 Patching Speech resource with customSubDomainName '$speechAccountName'..."
-  az resource update --ids $speechResourceId --set properties.customSubDomainName=$speechAccountName | Out-Null
-  $speechEndpoint = az cognitiveservices account show -g $resourceGroup -n $speechAccountName --query properties.endpoint -o tsv
-}
-
-if ($networkIsolationEnabled) {
-  Write-Host "🔒 NETWORK_ISOLATION=true: enforcing private network for Speech..."
-  az resource update --ids $speechResourceId --set properties.publicNetworkAccess=Disabled | Out-Null
-
-  $vnetName = az network vnet list -g $resourceGroup --query "[0].name" -o tsv 2>$null
-  $peSubnetId = $null
-  if ($vnetName) {
-    $peSubnetId = az network vnet subnet show -g $resourceGroup --vnet-name $vnetName -n pe-subnet --query id -o tsv 2>$null
-  }
-
-  if (-not $peSubnetId) {
-    Write-Host "❌ Could not locate 'pe-subnet' to create Speech private endpoint."
-    exit 1
-  }
-
-  $dnsZoneName = 'privatelink.cognitiveservices.azure.com'
-  $dnsZoneId = az network private-dns zone show -g $resourceGroup -n $dnsZoneName --query id -o tsv 2>$null
-  if (-not $dnsZoneId) {
-    az network private-dns zone create -g $resourceGroup -n $dnsZoneName | Out-Null
-    $dnsZoneId = az network private-dns zone show -g $resourceGroup -n $dnsZoneName --query id -o tsv
-  }
-
-  $vnetId = if ($vnetName) { az network vnet list -g $resourceGroup --query "[0].id" -o tsv 2>$null } else { $null }
-  if ($vnetId) {
-    $dnsLinkName = "$vnetName-speech-link"
-    $dnsLinkExists = $false
-    try {
-      $null = az network private-dns link vnet show -g $resourceGroup -z $dnsZoneName -n $dnsLinkName 2>$null
-      if ($LASTEXITCODE -eq 0) { $dnsLinkExists = $true }
-    } catch { }
-
-    if (-not $dnsLinkExists) {
-      az network private-dns link vnet create -g $resourceGroup -z $dnsZoneName -n $dnsLinkName -v $vnetId -e false | Out-Null
-    }
-  }
-
-  $peName = "$speechAccountName-pe"
-  if ($peName.Length -gt 80) { $peName = $peName.Substring(0, 80) }
-  $connectionName = "$speechAccountName-conn"
-  if ($connectionName.Length -gt 80) { $connectionName = $connectionName.Substring(0, 80) }
-
-  $peExists = $false
-  try {
-    $null = az network private-endpoint show -g $resourceGroup -n $peName 2>$null
-    if ($LASTEXITCODE -eq 0) { $peExists = $true }
-  } catch { }
-
-  if (-not $peExists) {
-    az network private-endpoint create -g $resourceGroup -n $peName --location $speechRegion --subnet $peSubnetId --private-connection-resource-id $speechResourceId --group-id account --connection-name $connectionName | Out-Null
-  }
-
-  $zoneGroupExists = $false
-  try {
-    $null = az network private-endpoint dns-zone-group show -g $resourceGroup --endpoint-name $peName -n speech-zone-group 2>$null
-    if ($LASTEXITCODE -eq 0) { $zoneGroupExists = $true }
-  } catch { }
-
-  if (-not $zoneGroupExists) {
-    az network private-endpoint dns-zone-group create -g $resourceGroup --endpoint-name $peName -n speech-zone-group --private-dns-zone $dnsZoneId --zone-name speech | Out-Null
-  }
-
-  Write-Host "✅ Speech private endpoint and DNS configured."
-}
-
-Write-Host "🔐 Ensuring Container App identity has 'Cognitive Services User'..."
+Write-Host "📦 Ensuring ACR endpoint is persisted and Container App is bound to ACR via managed identity..."
 $containerAppName = $env:AZURE_CONTAINER_APP_NAME
 if (-not $containerAppName) {
   $containerAppName = az containerapp list -g $resourceGroup --query "[0].name" -o tsv 2>$null
 }
-
-if ($containerAppName) {
-  $principalId = az containerapp show -g $resourceGroup -n $containerAppName --query identity.principalId -o tsv 2>$null
-  if ($principalId) {
-    az role assignment create --assignee-object-id $principalId --assignee-principal-type ServicePrincipal --role "Cognitive Services User" --scope $speechResourceId 2>$null | Out-Null
-    Write-Host "✅ Role assignment ensured for container app '$containerAppName'."
-  } else {
-    Write-Host "⚠️ Container App '$containerAppName' has no managed identity principalId yet."
-  }
-} else {
-  Write-Host "⚠️ No Container App found to assign role."
-}
-
-Write-Host "📦 Ensuring ACR endpoint is persisted and Container App is bound to ACR via managed identity..."
 $acrName = az acr list -g $resourceGroup --query "[0].name" -o tsv 2>$null
 if ($acrName) {
   $acrLoginServer = az acr show -g $resourceGroup -n $acrName --query loginServer -o tsv 2>$null
@@ -200,13 +102,9 @@ if ($acrName) {
   Write-Host "⚠️ No ACR found in resource group; skipping registry wiring."
 }
 
-if ($appConfigEndpoint) {
-  Write-Host "🧩 Writing Speech settings to App Configuration..."
+if ($appConfigEndpoint -and (Test-DataplaneShouldRun)) {
+  Write-Host "🧩 Writing app-specific settings to App Configuration..."
   $appConfigFailed = $false
-  $kvOut = az appconfig kv set --endpoint $appConfigEndpoint --key AZURE_SPEECH_ENDPOINT --value $speechEndpoint --label $appConfigLabel --auth-mode login --yes 2>&1
-  if ($LASTEXITCODE -ne 0) { $appConfigFailed = $true }
-  $kvOut = az appconfig kv set --endpoint $appConfigEndpoint --key AZURE_SPEECH_REGION --value $speechRegion --label $appConfigLabel --auth-mode login --yes 2>&1
-  if ($LASTEXITCODE -ne 0) { $appConfigFailed = $true }
   $kvOut = az appconfig kv set --endpoint $appConfigEndpoint --key AZURE_INPUT_TRANSCRIPTION_MODEL --value azure-speech --label $appConfigLabel --auth-mode login --yes 2>&1
   if ($LASTEXITCODE -ne 0) { $appConfigFailed = $true }
   if ($appConfigFailed) {
@@ -216,8 +114,10 @@ if ($appConfigEndpoint) {
       Write-Host "⚠️ App Configuration updates failed. Last output: $kvOut"
     }
   } else {
-    Write-Host "✅ App Configuration updated."
+    Write-Host "✅ App Configuration updated (AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech)."
   }
+} elseif ($appConfigEndpoint) {
+  Write-Host "⏭️ Skipping App Configuration writes (network isolation; not running from VNet)."
 } else {
   Write-Host "⚠️ APP_CONFIG_ENDPOINT not set. Skipping App Configuration updates."
 }
@@ -227,8 +127,8 @@ if (-not ($env:ENABLE_SEARCH_DATAPLANE_SETUP -match '^(false|False|0|no|NO)$')) 
     Write-Host "🔎 Running Search data-plane setup hook..."
     & "$PSScriptRoot\setup_search_dataplane.ps1"
   } else {
-    Write-Host "⏭️ NETWORK_ISOLATION=true and RUN_FROM_JUMPBOX!=true: skipping Search data-plane setup."
-    Write-Host "   Run with `$env:RUN_FROM_JUMPBOX='true'; ./scripts/postProvision.ps1` from the jumpbox to apply it."
+    Write-Host "⏭️ Skipping Search data-plane setup (network isolation; not running from VNet)."
+    Write-Host "   Re-run scripts/postProvision.ps1 from the jumpbox/Bastion to apply it."
   }
 } else {
   Write-Host "⏭️ ENABLE_SEARCH_DATAPLANE_SETUP=false, skipping Search data-plane setup."
@@ -236,31 +136,31 @@ if (-not ($env:ENABLE_SEARCH_DATAPLANE_SETUP -match '^(false|False|0|no|NO)$')) 
 
 if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
   if (-not (Test-DataplaneShouldRun)) {
-    Write-Host "⏭️ NETWORK_ISOLATION=true and RUN_FROM_JUMPBOX!=true: skipping Cosmos sample seed."
-    Write-Host "   Run with `$env:RUN_FROM_JUMPBOX='true'; ./scripts/postProvision.ps1` from the jumpbox to apply it."
+    Write-Host "⏭️ Skipping Cosmos sample seed (network isolation; not running from VNet)."
+    Write-Host "   Re-run scripts/postProvision.ps1 from the jumpbox/Bastion to apply it."
   } else {
-  Write-Host "🌱 Running Cosmos sample seed hook..."
-  $databaseAccountName = if ($env:DATABASE_ACCOUNT_NAME) { $env:DATABASE_ACCOUNT_NAME } else { az cosmosdb list -g $resourceGroup --query "[0].name" -o tsv }
-  if ($databaseAccountName) {
-    $databaseName = if ($env:DATABASE_NAME) { $env:DATABASE_NAME } else { az cosmosdb sql database list -g $resourceGroup -a $databaseAccountName --query "[0].name" -o tsv }
-    if ($databaseName) {
-      $env:COSMOS_ENDPOINT = az cosmosdb show -g $resourceGroup -n $databaseAccountName --query documentEndpoint -o tsv
-      $env:COSMOS_KEY = az cosmosdb keys list -g $resourceGroup -n $databaseAccountName --query primaryMasterKey -o tsv
-      $env:COSMOS_DATABASE_NAME = $databaseName
-      $env:COSMOS_SCENARIOS_CONTAINER = if ($env:SCENARIOS_DATABASE_CONTAINER) { $env:SCENARIOS_DATABASE_CONTAINER } else { 'scenarios' }
-      $env:COSMOS_RUBRICS_CONTAINER = if ($env:RUBRICS_DATABASE_CONTAINER) { $env:RUBRICS_DATABASE_CONTAINER } else { 'rubrics' }
+    Write-Host "🌱 Running Cosmos sample seed hook..."
+    $databaseAccountName = if ($env:DATABASE_ACCOUNT_NAME) { $env:DATABASE_ACCOUNT_NAME } else { az cosmosdb list -g $resourceGroup --query "[0].name" -o tsv }
+    if ($databaseAccountName) {
+      $databaseName = if ($env:DATABASE_NAME) { $env:DATABASE_NAME } else { az cosmosdb sql database list -g $resourceGroup -a $databaseAccountName --query "[0].name" -o tsv }
+      if ($databaseName) {
+        $env:COSMOS_ENDPOINT = az cosmosdb show -g $resourceGroup -n $databaseAccountName --query documentEndpoint -o tsv
+        $env:COSMOS_KEY = az cosmosdb keys list -g $resourceGroup -n $databaseAccountName --query primaryMasterKey -o tsv
+        $env:COSMOS_DATABASE_NAME = $databaseName
+        $env:COSMOS_SCENARIOS_CONTAINER = if ($env:SCENARIOS_DATABASE_CONTAINER) { $env:SCENARIOS_DATABASE_CONTAINER } else { 'scenarios' }
+        $env:COSMOS_RUBRICS_CONTAINER = if ($env:RUBRICS_DATABASE_CONTAINER) { $env:RUBRICS_DATABASE_CONTAINER } else { 'rubrics' }
 
-      if (Get-Command python -ErrorAction SilentlyContinue) {
-        python scripts/seed_cosmos_samples.py --mode upsert
+        if (Get-Command python -ErrorAction SilentlyContinue) {
+          python scripts/seed_cosmos_samples.py --mode upsert
+        } else {
+          Write-Host "⚠️ Python executable not found. Skipping Cosmos sample seed."
+        }
       } else {
-        Write-Host "⚠️ Python executable not found. Skipping Cosmos sample seed."
+        Write-Host "⚠️ Cosmos database name could not be resolved. Skipping Cosmos sample seed."
       }
     } else {
-      Write-Host "⚠️ Cosmos database name could not be resolved. Skipping Cosmos sample seed."
+      Write-Host "⚠️ Cosmos account name could not be resolved. Skipping Cosmos sample seed."
     }
-  } else {
-    Write-Host "⚠️ Cosmos account name could not be resolved. Skipping Cosmos sample seed."
-  }
   }
 } else {
   Write-Host "⏭️ ENABLE_COSMOS_SAMPLE_SEED=false, skipping Cosmos sample seed."
@@ -268,12 +168,13 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
 
 if ($networkIsolationEnabled -and -not $runFromJumpboxEnabled) {
   Write-Host ""
-  Write-Host "ℹ️  Network isolation is enabled. Two data-plane steps were skipped because they"
+  Write-Host "ℹ️  Network isolation is enabled. Three data-plane steps were skipped because they"
   Write-Host "   require VNet access (private endpoints):"
+  Write-Host "     - App Configuration writes (AZURE_INPUT_TRANSCRIPTION_MODEL)"
   Write-Host "     - Cosmos sample seed (scenarios/rubrics)"
   Write-Host "     - Azure AI Search data-plane setup"
   Write-Host "   Connect to the jumpbox via Bastion, clone this repo, run 'azd auth login' and"
-  Write-Host "   then `$env:RUN_FROM_JUMPBOX='true'; ./scripts/postProvision.ps1` to apply them."
+  Write-Host "   then run './scripts/postProvision.ps1' interactively to apply them."
 }
 
-Write-Host "✅ post-provision speech setup completed."
+Write-Host "✅ post-provision hook completed."

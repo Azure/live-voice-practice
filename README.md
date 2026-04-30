@@ -29,44 +29,31 @@ In a typical session, a trainee selects a practice scenario and begins a real-ti
 
 ## Deployment
 
-This project can be deployed to Azure using the provided infrastructure templates.
+This project supports two deployment modes:
 
-```bash
-azd up
-```
+- **Basic** (public endpoints) — fastest path, suitable for dev/demo:
 
-The deployment process provisions the required Azure resources and outputs the application endpoint.
+  ```bash
+  azd up
+  ```
 
-### Post-provision Speech setup
+- **Network-isolated** (private endpoints + jumpbox + Azure Firewall) — production-grade:
 
-This project uses an `azd` `postprovision` hook to ensure Speech is available for pronunciation assessment without changing the infrastructure submodule.
+  ```bash
+  azd env set NETWORK_ISOLATION true
+  azd provision   # from your workstation
+  # then connect to the jumpbox via Bastion and run azd deploy + postProvision there
+  ```
 
-After `azd provision` (or `azd up`), the hook scripts:
+See **[docs/deployment.md](docs/deployment.md)** for the full step-by-step guide covering both modes (prerequisites, env variables, the workstation/jumpbox split for network isolation, post-provision hook, image build via the in-VNet ACR Tasks agent pool, validation, and teardown).
 
-- Create (or reuse) an Azure Speech resource (`SpeechServices`) in the current resource group
-- Assign `Cognitive Services User` to the Container App managed identity on that Speech resource
-- Write Speech settings to App Configuration (label `live-voice-practice` by default):
-	- `AZURE_SPEECH_ENDPOINT`
-	- `AZURE_SPEECH_REGION`
-	- `AZURE_INPUT_TRANSCRIPTION_MODEL=azure-speech`
+Quick reference for the jumpbox split (subnets, firewall allow-list, troubleshooting): [docs/network-isolation-jumpbox-runbook.md](docs/network-isolation-jumpbox-runbook.md).
 
-When `NETWORK_ISOLATION=true`, the post-provision hook also enforces private networking for Speech:
-
-- Disables public network access on the Speech resource
-- Creates a Private Endpoint in the `pe-subnet`
-- Ensures Private DNS zone/link for `privatelink.cognitiveservices.azure.com`
-
-You can disable this automation for a specific environment:
+Speech is provisioned by the AILZ Bicep template (`deploySpeechService=true` by default, AILZ v1.1.4+). To opt out:
 
 ```bash
 azd env set DEPLOY_SPEECH_SERVICE false
 ```
-
-Optional overrides:
-
-- `AZURE_SPEECH_RESOURCE_NAME`: custom Speech account name
-- `AZURE_SPEECH_REGION`: region for the Speech resource
-- `APP_CONFIG_LABEL`: App Configuration label used by the hook
 
 
 ## Local Development

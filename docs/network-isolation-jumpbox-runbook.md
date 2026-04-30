@@ -1,243 +1,92 @@
-# Network Isolation — Jumpbox runbook
+# Network Isolation — Jumpbox quick reference
 
-When `NETWORK_ISOLATION=true`, most data-plane endpoints (ACR, App Configuration,
-AI Search, Cosmos DB, Key Vault, Speech, Foundry) reject traffic from the public
-internet. The `azd provision` hook runs from your workstation and is expected to
-log warnings such as:
-
-- `⏭️ NETWORK_ISOLATION=true: skipping Search data-plane setup (...)`
-- `⏭️ NETWORK_ISOLATION=true: skipping Cosmos sample seed (...)`
-- `⚠️ App Configuration data-plane not reachable from current network (NI mode).`
-
-These steps, plus the container image build/push and `azd deploy`, must be
-completed from the **jumpbox VM** inside the spoke VNet. Connect to it via
-**Azure Bastion** and follow the steps below.
+> The full step-by-step deployment procedure (basic and network-isolated) lives
+> in [deployment.md](deployment.md). **Start there.** This page is a quick
+> reference for operators already familiar with the workflow: subnet layout,
+> firewall allow-list, troubleshooting tips, and the “what runs where” split.
 
 ---
 
-## 0. Prerequisites (on your workstation)
+## What runs where
 
-Run `azd provision` once from your workstation so the infrastructure
-(including ACR, jumpbox VM, Bastion, private endpoints, and Container App) is
-created. A `SUCCESS: Your application was provisioned in Azure` message means
-the control plane is complete — the jumpbox steps pick up from there.
+| Step | Workstation | Jumpbox (in-VNet) | Notes |
+|------|:-----------:|:----------------:|-------|
+| `azd auth login` / `az login` | ✅ | ✅ | Both, with the same tenant. |
+| `azd provision` (control plane: ARM/Bicep) | ✅ | ➖ | Public ARM endpoints; runs from the workstation. |
+| `postprovision` hook — ACR endpoint persistence + Container App registry binding | ✅ | ✅ | ARM-only; runs in both. |
+| `postprovision` hook — App Configuration data-plane writes | ❌ | ✅ | Private endpoint only. |
+| `postprovision` hook — AI Search data-plane (skillset/index/indexer) | ❌ | ✅ | Private endpoint only. |
+| `postprovision` hook — Cosmos sample seed | ❌ | ✅ | Private endpoint only. |
+| `azd deploy` (image build + Container App update) | ❌ | ✅ | Build runs on the **ACR Tasks `build-pool` agent pool** inside the VNet; no Docker on the jumpbox. |
+| Open the app FQDN in a browser | ❌ | ✅ | Container App ingress is internal-only. |
 
-Capture these values (from `azd env get-values` or the Azure Portal) — you will
-re-enter them inside the VM:
+The hook auto-detects the situation:
 
-| Variable | Example |
-|----------|---------|
-| `AZURE_SUBSCRIPTION_ID` | `9788a92c-2f71-4629-8173-7ad449cb50e1` |
-| `AZURE_TENANT_ID` | `16b3c013-d300-468d-ac64-7eda0820b6d3` |
-| `AZURE_RESOURCE_GROUP` | `rg-voice-live-ni-<timestamp>` |
-| `AZURE_ENV_NAME` | `voice-live-ni-<timestamp>` |
-| `AZURE_LOCATION` | `eastus2` |
-| `APP_CONFIG_ENDPOINT` | `https://appcs-<token>.azconfig.io` |
-| `AZURE_CONTAINER_REGISTRY_ENDPOINT` | `cr<token>.azurecr.io` |
-| `AZURE_CONTAINER_APP_NAME` | `ca-<token>-voicelab` |
-| VM name | `testvm<token>` (8-char suffix from the resource token) |
+- `NETWORK_ISOLATION=false` → all steps run inline on the workstation.
+- `NETWORK_ISOLATION=true` + non-interactive (azd hook in CI / from `azd provision`) → data-plane steps **skipped** with a printed reminder.
+- `NETWORK_ISOLATION=true` + interactive on the jumpbox → prompts `Are you running this script from inside the VNet or via VPN? [Y/n]`. Answer `Y` to apply data-plane steps.
 
 ---
 
-## 1. Connect to the jumpbox via Bastion
+## Network layout
 
-1. In the Azure Portal, open the resource group
-   (`rg-voice-live-ni-<timestamp>`).
-2. Select the VM named `testvm<token>`.
-3. Click **Connect → Bastion**.
-4. Provide the admin credentials configured during provisioning
-   (`vmAdminUsername` / `vmAdminPassword` parameters).
-5. Enable the clipboard (paste button on the Bastion toolbar) so you can copy
-   commands into the RDP session.
+| Subnet | Default CIDR | Purpose |
+|--------|--------------|---------|
+| `AzureBastionSubnet` | `192.168.2.64/26` | Bastion host. |
+| `AzureFirewallSubnet` | `192.168.2.0/26` | Azure Firewall data plane. |
+| `jumpbox-subnet` | `192.168.3.64/27` | `testvm<token>` Windows Server jumpbox. |
+| `pe-subnet` | `192.168.0.0/24` | Private endpoints for ACR, App Config, KV, Cosmos, Search, Speech, Foundry, Storage. |
+| `agents-subnet` | `192.168.4.0/24` | ACR Tasks `build-pool` (in-VNet image builds). |
+| `aca-environment-subnet` | `192.168.5.0/24` | Container Apps Environment. |
 
-> The jumpbox is a Windows Server VM on the `jumpbox-subnet`. It is the only
-> host that can reach the private endpoints of ACR, App Config, Search, Cosmos,
-> and Key Vault through the linked private DNS zones.
+Egress from the jumpbox + ACR Tasks subnets is forced through Azure Firewall (`afw-<token>` / `afwp-<token>`).
 
 ---
 
-## 2. Install tooling inside the VM (first time only)
+## Firewall allow-list (jumpbox bootstrap)
 
-Open an elevated **PowerShell** terminal on the jumpbox and install:
+Defined upstream in `_firewallVmBootstrapFqdns` (AILZ `main.bicep`). Ships with v1.1.4+:
+
+- Microsoft / Windows update: `*.update.microsoft.com`, `*.windowsupdate.com`, `download.windowsupdate.com`
+- Tooling installers: `aka.ms`, `go.microsoft.com`, `download.microsoft.com`, `*.azureedge.net`, `*.core.windows.net`
+- Chocolatey: `chocolatey.org`, `*.chocolatey.org`, `nuget.org`, `*.nuget.org`, `dist.nuget.org`, `dl.bintray.com`
+- Visual Studio installer: `aka.ms/vs/...`, `download.visualstudio.microsoft.com`
+- GitHub: `github.com`, `*.github.com`, `objects.githubusercontent.com`, `*.githubusercontent.com`, `codeload.github.com`
+- **Bicep CLI bootstrap** (added in v1.1.4 / issue #36): `downloads.bicep.azure.com`
+- Speech FQDNs (added when `deploySpeechService=true`): `*.cognitiveservices.azure.com`, `*.tts.speech.microsoft.com`, `*.stt.speech.microsoft.com`
+
+Need to extend the allow-list for your scenario (e.g. internal artifact feed)? Use [scripts/add-jumpbox-fw-rules.ps1](../scripts/add-jumpbox-fw-rules.ps1):
 
 ```powershell
-# Azure CLI
-Invoke-WebRequest -Uri https://aka.ms/installazurecliwindows -OutFile .\AzureCLI.msi
-Start-Process msiexec.exe -Wait -ArgumentList '/I AzureCLI.msi /quiet'
-Remove-Item .\AzureCLI.msi
-
-# Azure Developer CLI (azd)
-powershell -ex AllSigned -c "Invoke-RestMethod 'https://aka.ms/install-azd.ps1' | Invoke-Expression"
-
-# Git, Python 3.11+, Node.js LTS (only needed if you will build the frontend here)
-winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements
-winget install --id Python.Python.3.11 -e --accept-source-agreements --accept-package-agreements
-
-# Docker Desktop (required for image build/push via buildx)
-winget install --id Docker.DockerDesktop -e --accept-source-agreements --accept-package-agreements
+./scripts/add-jumpbox-fw-rules.ps1 -ResourceGroup <rg-name> -SubscriptionId <sub-guid>
 ```
 
-Sign out / sign back in (or reboot) after Docker Desktop installs, then start
-Docker Desktop and wait for the whale icon to turn ready.
-
-Verify:
-
-```powershell
-az --version
-azd version
-docker version
-docker buildx version
-```
+Run it **after** `azd provision` completes — the firewall policy is locked while provision is in-flight (`FirewallPolicyUpdateFailed: ... 1 faulted referenced firewalls`).
 
 ---
 
-## 3. Sign in
+## Connect to the jumpbox
 
-```powershell
-# Azure CLI — use device code if the VM blocks interactive browser
-az login --tenant <AZURE_TENANT_ID> --use-device-code
-az account set --subscription <AZURE_SUBSCRIPTION_ID>
+1. Azure Portal → resource group → **`testvm<token>`**.
+2. **Connect → Bastion**.
+3. Admin user: see `azd env get-value VM_ADMIN_USERNAME`. If you didn't set the password during provision, reset it via the portal.
+4. Open the Bastion clipboard panel so you can paste env values.
 
-# azd
-azd auth login --tenant-id <AZURE_TENANT_ID>
-```
+The jumpbox boots with the AILZ bootstrap installed: Azure CLI, `azd`, Git, PowerShell 7, Python 3.11, Bicep CLI, and the AILZ repo cloned at `C:\github\bicep-ptn-aiml-landing-zone`. Extra repos can be added via `manifest.json#components` (see [`infra/README.md`](../infra/README.md)).
 
 ---
 
-## 4. Get the repository and select the azd environment
+## Re-running the post-provision hook (jumpbox)
 
 ```powershell
-cd $HOME
-git clone https://github.com/<your-org>/live-voice-practice.git
-cd live-voice-practice
-
-azd env select <AZURE_ENV_NAME>
-# Verify you see the same RG/subscription:
-azd env get-values | Select-String -Pattern 'AZURE_RESOURCE_GROUP|AZURE_SUBSCRIPTION_ID|APP_CONFIG_ENDPOINT'
-```
-
-If the env does not exist on this machine, create it and copy the values:
-
-```powershell
-azd env new <AZURE_ENV_NAME> --subscription <AZURE_SUBSCRIPTION_ID> --location <AZURE_LOCATION>
-azd env set NETWORK_ISOLATION true
-azd env set AZURE_RESOURCE_GROUP <AZURE_RESOURCE_GROUP>
-azd env set APP_CONFIG_ENDPOINT <APP_CONFIG_ENDPOINT>
-azd env set AZURE_CONTAINER_REGISTRY_ENDPOINT <ACR_LOGIN_SERVER>
-azd env set AZURE_CONTAINER_APP_NAME <AZURE_CONTAINER_APP_NAME>
-```
-
----
-
-## 5. Re-run the post-provision hook from inside the VNet
-
-The hook is idempotent. Running it from the jumpbox lets the data-plane steps
-(App Configuration writes, Search indexing, Cosmos seed) succeed.
-
-When network isolation is enabled, the hook **only runs the data-plane steps**
-(Cosmos sample seed and Search index setup) when you opt-in via
-`RUN_FROM_JUMPBOX=true`. This mirrors the GPT-RAG pattern: `azd provision` runs
-the infra-only portion from the developer workstation, then you SSH into the
-jumpbox via Bastion and re-run the hook with the opt-in to apply the
-data-plane work that requires VNet access:
-
-```powershell
-# Windows jumpbox
-$env:RUN_FROM_JUMPBOX = 'true'
+cd C:\github\live-voice-practice    # clone the repo on first use
+git pull
+azd env refresh                      # pull deployment outputs into the local .env
 pwsh -NoProfile -File .\scripts\postProvision.ps1
+# When asked: "Are you running this script from inside the VNet or via VPN? [Y/n]"  → Y
 ```
 
-```bash
-# Linux jumpbox
-RUN_FROM_JUMPBOX=true bash scripts/postProvision.sh
-```
-
-Expected output:
-
-- `✅ Speech private endpoint and DNS configured.` (already done, no-op)
-- `✅ Role assignment ensured for container app ...`
-- `✅ App Configuration updated.`
-- Search data-plane setup runs and indexes are created.
-- Cosmos sample seed runs (`seed_cosmos_samples.py`).
-
-If App Configuration still returns `403 ip-address-rejected`, confirm that the
-jumpbox NIC IP is on the `jumpbox-subnet` and that the private DNS zone
-`privatelink.azconfig.io` resolves `appcs-<token>.azconfig.io` to a
-`10.*/192.168.*` address:
-
-```powershell
-Resolve-DnsName appcs-<token>.azconfig.io
-```
-
----
-
-## 6. Build and push the container image to the private ACR
-
-From the repo root on the jumpbox:
-
-```powershell
-pwsh -NoProfile -File .\scripts\deploy.ps1
-```
-
-`deploy.ps1` will:
-
-1. Detect `NETWORK_ISOLATION=true` and continue (it only aborts when run
-   outside the VNet).
-2. Verify Docker + buildx.
-3. Read `CONTAINER_REGISTRY_NAME`, `CONTAINER_REGISTRY_LOGIN_SERVER`,
-   `AZURE_RESOURCE_GROUP`, and `VOICELAB_APP_NAME` from App Configuration.
-4. `az acr login` against the private ACR (resolves via private endpoint).
-5. `docker buildx build --platform linux/amd64 --push` with a tag of
-   `<git-sha>` (or timestamp when the tree is dirty) plus `:latest`.
-6. `az containerapp update` to point the `ca-<token>-voicelab` Container App
-   at the new image and restart the latest revision.
-
-Alternative: `azd deploy` — this calls the same predeploy hook and works from
-the jumpbox as long as Docker Desktop is running.
-
----
-
-## 7. Validate the deployment
-
-Still on the jumpbox:
-
-```powershell
-# Container App provisioning + running revision
-az containerapp show -g <AZURE_RESOURCE_GROUP> -n <AZURE_CONTAINER_APP_NAME> `
-  --query "{fqdn:properties.configuration.ingress.fqdn,revision:properties.latestRevisionName,status:properties.runningStatus}" -o table
-
-# Latest revision health
-az containerapp revision list -g <AZURE_RESOURCE_GROUP> -n <AZURE_CONTAINER_APP_NAME> `
-  --query "[0].{name:name,active:properties.active,healthState:properties.healthState,replicas:properties.replicas}" -o table
-
-# Tail logs (container stdout)
-az containerapp logs show -g <AZURE_RESOURCE_GROUP> -n <AZURE_CONTAINER_APP_NAME> --follow --tail 100
-```
-
-Open the app FQDN from a browser **inside the jumpbox** (the Container App
-ingress is internal-only in NI mode).
-
----
-
-## 8. Optional — run smoke tests
-
-```powershell
-# Backend tests against the deployed API (from the jumpbox, so private DNS resolves)
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt -r requirements-test.txt
-pytest tests\integration -k "network_isolation" -q
-```
-
----
-
-## 9. Shut down / clean up
-
-- Sign out of Bastion (or close the browser tab) to release the session.
-- Stop the VM from the portal to avoid compute charges:
-  `az vm deallocate -g <AZURE_RESOURCE_GROUP> -n testvm<token>`.
-- Full teardown: `azd down --force --purge` from your workstation.
+Idempotent. Re-run any time you need to re-apply data-plane steps (e.g. after Cosmos / Search schema changes).
 
 ---
 
@@ -245,24 +94,20 @@ pytest tests\integration -k "network_isolation" -q
 
 | Symptom | Fix |
 |---------|-----|
-| `az appconfig kv set ... 403 ip-address-rejected` | You are running from outside the VNet. Re-run from the jumpbox. |
-| `docker: error during connect: ... pipe/docker_engine` | Start Docker Desktop and wait for ready state. |
-| `az acr login` hangs or fails TLS | `Resolve-DnsName <acr>.azurecr.io` must return a private IP. If not, verify the DNS zone link on `privatelink.azurecr.io` and restart the VM to flush the resolver cache. |
-| `AccountCustomSubDomainNameNotSet` on Speech | `postProvision.ps1` now patches `customSubDomainName` automatically. If it already existed without the property, delete and purge the Speech account, then re-run the hook. |
-| Cosmos seed script `ResourceNotFound` | Private endpoint for Cosmos may still be propagating. Wait a minute and re-run `scripts\postProvision.ps1`. |
-| Container App revision stuck in `Provisioning` | Check ACR image pull: `az containerapp logs show ... --type system`. Most failures are the identity missing `AcrPull` on the registry. |
+| `azd provision` fails with `OperationNotAllowed: Cannot modify extensions in the VM when the VM is not running` | The jumpbox is deallocated. `az vm start -g <rg> -n testvm<token>` and re-run `azd provision`. |
+| `azd env refresh` fails with `Failed: Downloading Bicep` from the jumpbox | The firewall is missing `downloads.bicep.azure.com` in the bootstrap allow-list. Verify `git -C infra describe --tags` is `v1.1.4+`. If you're stuck on an older tag and can't bump, set `AZURE_DEV_USE_INSTALLED_BICEP=true` and pre-install Bicep (`winget install Microsoft.Bicep`). |
+| `az appconfig kv set ... 403 ip-address-rejected` | You're outside the VNet. Re-run `postProvision.ps1` from the jumpbox. |
+| `Resolve-DnsName <name>.azconfig.io` (or any `.privatelink.*`) returns a public IP from the jumpbox | The DNS zone link is missing or the OS resolver cache is stale. Verify `az network private-dns link vnet list -g <rg> -z privatelink.azconfig.io`, then `Restart-Computer` on the VM. |
+| `az acr build` returns `agent pool not found` | The ACR Tasks pool failed to provision. Check `az acr agentpool show -r <acr> -n build-pool -g <rg>`. The pool needs the dedicated `agents-subnet` and the registry must be Premium. |
+| Cosmos seed fails with `ResourceNotFound` | Cosmos PE still propagating; wait ~60s and re-run the hook. |
+| Container App revision stuck in `Provisioning` | `az containerapp logs show ... --type system`. Most failures are missing `AcrPull` on the Container App MI (Bicep grants it; verify role assignment exists). |
+| Speech REST returns `AccountCustomSubDomainNameNotSet` | Should not happen with AILZ v1.1.4+ (Bicep sets `customSubDomainName=speechServiceName`). If you see it, delete + purge the Speech account and re-run `azd provision`. |
 
 ---
 
 ## Reference
 
-- Jumpbox subnet: `jumpbox-subnet` (default `192.168.3.64/27`)
-- Bastion subnet: `AzureBastionSubnet` (default `192.168.2.64/26`)
-- Private endpoint subnet: `pe-subnet`
-- Data-plane operations that require the VNet: ACR push/pull, App Configuration
-  read/write, AI Search data-plane (`setup_search_dataplane.ps1`), Cosmos seed,
-  Key Vault secret reads, Speech REST calls.
-- Scripts referenced: [scripts/postProvision.ps1](../scripts/postProvision.ps1),
-  [scripts/deploy.ps1](../scripts/deploy.ps1),
-  [scripts/setup_search_dataplane.ps1](../scripts/setup_search_dataplane.ps1),
-  [scripts/seed_cosmos_samples.py](../scripts/seed_cosmos_samples.py).
+- Full deployment guide: [docs/deployment.md](deployment.md)
+- AI Search dataplane runbook: [docs/ai-search-indexing-runbook.md](ai-search-indexing-runbook.md)
+- AILZ submodule: [`infra/`](../infra/)
+- Scripts: [scripts/postProvision.ps1](../scripts/postProvision.ps1) · [scripts/setup_search_dataplane.ps1](../scripts/setup_search_dataplane.ps1) · [scripts/seed_cosmos_samples.py](../scripts/seed_cosmos_samples.py) · [scripts/add-jumpbox-fw-rules.ps1](../scripts/add-jumpbox-fw-rules.ps1)
