@@ -39,6 +39,20 @@ if (-not $resourceGroup) {
   exit 1
 }
 
+# Derive resource token from a known endpoint env var so we can fall back to
+# composing resource names when the executing identity lacks Reader on the RG
+# (typical for the AILZ jumpbox MI, which only holds data-plane roles on
+# specific resources).
+$resourceToken = $env:RESOURCE_TOKEN
+if (-not $resourceToken) {
+  foreach ($candidate in @($env:APP_CONFIG_ENDPOINT, $env:AZURE_APP_CONFIG_ENDPOINT, $env:AZURE_KEY_VAULT_ENDPOINT, $env:AZURE_CONTAINER_REGISTRY_ENDPOINT)) {
+    if ($candidate -and $candidate -match '(?:appcs|kv|cr|st|srch)-?([a-z0-9]{8,})') {
+      $resourceToken = $matches[1]
+      break
+    }
+  }
+}
+
 # When NETWORK_ISOLATION=true, data-plane operations (Cosmos seed, Search index
 # setup, App Configuration writes) require connectivity to private endpoints,
 # i.e. running from inside the VNet (jumpbox/Bastion VM or via VPN).
@@ -140,26 +154,49 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
     Write-Host "   Re-run scripts/postProvision.ps1 from the jumpbox/Bastion to apply it."
   } else {
     Write-Host "[>] Running Cosmos sample seed hook..."
-    $databaseAccountName = if ($env:DATABASE_ACCOUNT_NAME) { $env:DATABASE_ACCOUNT_NAME } else { az cosmosdb list -g $resourceGroup --query "[0].name" -o tsv }
-    if ($databaseAccountName) {
-      $databaseName = if ($env:DATABASE_NAME) { $env:DATABASE_NAME } else { az cosmosdb sql database list -g $resourceGroup -a $databaseAccountName --query "[0].name" -o tsv }
-      if ($databaseName) {
-        $env:COSMOS_ENDPOINT = az cosmosdb show -g $resourceGroup -n $databaseAccountName --query documentEndpoint -o tsv
-        $env:COSMOS_KEY = az cosmosdb keys list -g $resourceGroup -n $databaseAccountName --query primaryMasterKey -o tsv
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+      Write-Host "[!] Python executable not found. Skipping Cosmos sample seed."
+    } else {
+      # Resolve Cosmos account name. Prefer env vars (AILZ bootstrap pre-populates
+      # them from App Configuration); fall back to ARM list (needs Reader on RG)
+      # and finally to deriving the name from the resource token.
+      $databaseAccountName = $env:DATABASE_ACCOUNT_NAME
+      if (-not $databaseAccountName) {
+        $databaseAccountName = az cosmosdb list -g $resourceGroup --query "[0].name" -o tsv 2>$null
+      }
+      if (-not $databaseAccountName -and $resourceToken) {
+        $databaseAccountName = "cosmos-$resourceToken"
+        Write-Host "[>] Derived Cosmos account name from token: $databaseAccountName"
+      }
+
+      $databaseName = $env:DATABASE_NAME
+      if (-not $databaseName -and $databaseAccountName) {
+        $databaseName = az cosmosdb sql database list -g $resourceGroup -a $databaseAccountName --query "[0].name" -o tsv 2>$null
+      }
+
+      $cosmosEndpoint = $env:COSMOS_DB_ENDPOINT
+      if (-not $cosmosEndpoint -and $databaseAccountName) {
+        $cosmosEndpoint = az cosmosdb show -g $resourceGroup -n $databaseAccountName --query documentEndpoint -o tsv 2>$null
+      }
+      if (-not $cosmosEndpoint -and $databaseAccountName) {
+        $cosmosEndpoint = "https://$databaseAccountName.documents.azure.com:443/"
+      }
+
+      if (-not $databaseAccountName) {
+        Write-Host "[!] Cosmos account name could not be resolved. Skipping Cosmos sample seed."
+      } elseif (-not $databaseName) {
+        Write-Host "[!] Cosmos database name could not be resolved. Skipping Cosmos sample seed."
+      } elseif (-not $cosmosEndpoint) {
+        Write-Host "[!] Cosmos endpoint could not be resolved. Skipping Cosmos sample seed."
+      } else {
+        # Auth: DefaultAzureCredential. Bicep grants the executor / jumpbox MI
+        # 'Cosmos DB Built-in Data Contributor' (data-plane) on the account.
+        $env:COSMOS_ENDPOINT = $cosmosEndpoint
         $env:COSMOS_DATABASE_NAME = $databaseName
         $env:COSMOS_SCENARIOS_CONTAINER = if ($env:SCENARIOS_DATABASE_CONTAINER) { $env:SCENARIOS_DATABASE_CONTAINER } else { 'scenarios' }
         $env:COSMOS_RUBRICS_CONTAINER = if ($env:RUBRICS_DATABASE_CONTAINER) { $env:RUBRICS_DATABASE_CONTAINER } else { 'rubrics' }
-
-        if (Get-Command python -ErrorAction SilentlyContinue) {
-          python scripts/seed_cosmos_samples.py --mode upsert
-        } else {
-          Write-Host "[!] Python executable not found. Skipping Cosmos sample seed."
-        }
-      } else {
-        Write-Host "[!] Cosmos database name could not be resolved. Skipping Cosmos sample seed."
+        python scripts/seed_cosmos_samples.py --mode upsert
       }
-    } else {
-      Write-Host "[!] Cosmos account name could not be resolved. Skipping Cosmos sample seed."
     }
   }
 } else {

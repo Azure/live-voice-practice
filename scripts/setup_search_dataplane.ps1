@@ -86,7 +86,7 @@ Write-Host "[>] Using Storage account: $storageAccountName"
 
 $aiServicesName = $env:AI_FOUNDRY_ACCOUNT_NAME
 if (-not $aiServicesName) {
-  $aiAccountsRaw = az cognitiveservices account list -g $resourceGroup -o json
+  $aiAccountsRaw = az cognitiveservices account list -g $resourceGroup -o json 2>$null
   if ($LASTEXITCODE -eq 0 -and $aiAccountsRaw) {
     $aiAccount = ($aiAccountsRaw | ConvertFrom-Json | Where-Object { $_.kind -eq 'AIServices' } | Select-Object -First 1)
     if ($aiAccount) {
@@ -94,8 +94,13 @@ if (-not $aiServicesName) {
     }
   }
 }
+if (-not $aiServicesName -and $resourceToken) {
+  # Last resort: derive from token. Bicep's `aiFoundryName` is `aif-<token>`.
+  $aiServicesName = "aif-$resourceToken"
+  Write-Host "[>] Derived AI Services account name from token: $aiServicesName"
+}
 if (-not $aiServicesName) {
-  throw "Could not resolve AI Services account name"
+  throw "Could not resolve AI Services account name in resource group '$resourceGroup'. Set `$env:AI_FOUNDRY_ACCOUNT_NAME before re-running."
 }
 
 $embeddingDeploymentName = if ($env:EMBEDDING_DEPLOYMENT_NAME) { $env:EMBEDDING_DEPLOYMENT_NAME } else { 'text-embedding-3-small' }
