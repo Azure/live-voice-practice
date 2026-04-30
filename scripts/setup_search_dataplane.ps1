@@ -25,10 +25,17 @@ if (-not $resourceGroup) {
 
 $searchServiceName = $env:SEARCH_SERVICE_NAME
 if (-not $searchServiceName) {
+  # Prefer the general-purpose Search; AI Foundry provisions a private one named srch-aif-*
+  $searchServiceName = az search service list -g $resourceGroup `
+    --query "[?!(starts_with(name, 'srch-aif'))] | [0].name" -o tsv
+}
+if (-not $searchServiceName) {
+  # Fallback: any Search service in the RG
   $searchServiceName = az search service list -g $resourceGroup --query "[0].name" -o tsv
 }
 if (-not $searchServiceName) {
-  throw "Could not resolve Search service name"
+  throw "Could not resolve Search service name in resource group '$resourceGroup'. " +
+        "Set `$env:SEARCH_SERVICE_NAME before re-running this script."
 }
 
 $storageAccountName = $env:STORAGE_ACCOUNT_NAME
