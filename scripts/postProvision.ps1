@@ -151,6 +151,35 @@ if ($acrName) {
   Write-Host "[!] No ACR found in resource group; skipping registry wiring."
 }
 
+# Workaround for upstream bug Azure/bicep-ptn-aiml-landing-zone#38:
+# the Container App template injects AZURE_CLIENT_ID="" (empty string) when
+# the deployment uses a System-Assigned managed identity. An empty
+# AZURE_CLIENT_ID confuses azure-identity's DefaultAzureCredential and the
+# IMDS proxy returns HTTP 500 'invalid_scope', breaking App Configuration,
+# Cosmos DB and AI Search access at runtime. Until the upstream module is
+# updated, strip the conflicting env vars here so SystemAssigned MI works.
+if ($containerAppName) {
+  $idType = az containerapp show -g $resourceGroup -n $containerAppName --query "identity.type" -o tsv 2>$null
+  if ($idType -and $idType -match 'SystemAssigned' -and $idType -notmatch 'UserAssigned') {
+    $envVarNames = az containerapp show -g $resourceGroup -n $containerAppName --query "properties.template.containers[0].env[].name" -o tsv 2>$null
+    $toRemove = @()
+    foreach ($n in @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID')) {
+      if ($envVarNames -split "`r?`n" -contains $n) { $toRemove += $n }
+    }
+    if ($toRemove.Count -gt 0) {
+      Write-Host "[>] Removing conflicting env vars from Container App (workaround for upstream issue #38): $($toRemove -join ', ')"
+      az containerapp update -g $resourceGroup -n $containerAppName --remove-env-vars @toRemove -o none 2>$null
+      if ($LASTEXITCODE -eq 0) {
+        Write-Host "[OK] Removed: $($toRemove -join ', '). New revision will start with clean MI auth."
+      } else {
+        Write-Host "[!] Failed to remove env vars (exit=$LASTEXITCODE); manual intervention may be required."
+      }
+    } else {
+      Write-Host "[OK] No conflicting AZURE_CLIENT_ID/AZURE_TENANT_ID env vars present on Container App."
+    }
+  }
+}
+
 if ($appConfigEndpoint -and (Test-DataplaneShouldRun)) {
   Write-Host "[>] Writing app-specific settings to App Configuration..."
 
