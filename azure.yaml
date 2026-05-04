@@ -27,4 +27,11 @@ hooks:
     windows:
       run: scripts/deploy.ps1
       interactive: true
+  postdeploy:
+    posix:
+      shell: sh
+      run: scripts/postDeploy.sh
+    windows:
+      shell: pwsh
+      run: scripts/postDeploy.ps1
 
