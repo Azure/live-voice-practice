@@ -52,6 +52,21 @@ export const api = {
 
   async getScenarios(): Promise<Scenario[]> {
     const res = await fetch('/api/scenarios')
+    if (!res.ok) {
+      // Fail loud: previously returning res.json() blindly meant a 503 with
+      // an error object got rendered as if it were the scenarios list,
+      // crashing downstream UI silently. Now we surface the diagnostic.
+      let detail: { error?: string; code?: string; hint?: string } = {}
+      try {
+        detail = await res.json()
+      } catch {
+        // body wasn't JSON; that's fine, we'll throw a generic message
+      }
+      const code = detail.code ? `[${detail.code}] ` : ''
+      const message = detail.error ?? `HTTP ${res.status}`
+      const hint = detail.hint ? ` — ${detail.hint}` : ''
+      throw new Error(`${code}${message}${hint}`)
+    }
     return res.json()
   },
 

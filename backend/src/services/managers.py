@@ -7,14 +7,16 @@
 
 import logging
 import re
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from azure.ai.projects import AIProjectClient
+from azure.core.exceptions import ClientAuthenticationError
 from azure.cosmos import CosmosClient
-from azure.identity import DefaultAzureCredential
+from azure.identity import CredentialUnavailableError, DefaultAzureCredential
 
 from src.config import config
 from src.services.graph_scenario_generator import GraphScenarioGenerator
@@ -35,6 +37,38 @@ MAX_TRANSCRIPT_EXAMPLES = 2
 logger = logging.getLogger(__name__)
 
 
+# Health status constants
+HEALTH_OK = "ok"
+HEALTH_DEGRADED_NO_COSMOS = "degraded_no_cosmos"
+HEALTH_DEGRADED_AUTH_FAILURE = "degraded_auth_failure"
+HEALTH_DEGRADED_CONFIG_MISSING = "degraded_config_missing"
+
+# IMDS / auth error fingerprints — substrings that indicate a managed-identity
+# token failure rather than a generic Cosmos / network problem.
+_AUTH_ERROR_FINGERPRINTS = (
+    "imds",
+    "invalid_scope",
+    "managedidentitycredential",
+    "defaultazurecredential",
+    "credentialunavailable",
+    "failed to retrieve token",
+    "no credential in this chain",
+)
+
+# Retry settings for transient IMDS / network errors during initial scenario load.
+# Bounded: if IMDS is permanently broken we want to fail fast, not loop forever.
+_LOAD_RETRY_ATTEMPTS = 3
+_LOAD_RETRY_BACKOFF_SECONDS = (1, 3, 9)
+
+
+def _looks_like_auth_error(error: BaseException) -> bool:
+    """Heuristic to tag a Cosmos client error as an auth/IMDS failure."""
+    if isinstance(error, (ClientAuthenticationError, CredentialUnavailableError)):
+        return True
+    msg = str(error).lower()
+    return any(fp in msg for fp in _AUTH_ERROR_FINGERPRINTS)
+
+
 class ScenarioManager:
     """Manages training scenarios loaded from Cosmos DB."""
 
@@ -42,6 +76,14 @@ class ScenarioManager:
         """Initialize the scenario manager."""
         self.graph_generator = GraphScenarioGenerator()
         self.generated_scenarios: Dict[str, Any] = {}
+        # Health tracking: record the most recent failure so callers (smoke
+        # tests, /api/health) can distinguish "no Cosmos configured" from
+        # "Cosmos is configured but auth is broken". Without this distinction
+        # the app silently returns an empty scenarios list and operators have
+        # no way to tell the difference.
+        self._last_error: Optional[str] = None
+        self._auth_failed: bool = False
+        self._config_missing: bool = False
         self.cosmos_client = self._initialize_cosmos_client()
         self.scenarios = self._load_scenarios()
 
@@ -49,18 +91,35 @@ class ScenarioManager:
         """Initialize Cosmos client using Entra ID (DefaultAzureCredential)."""
         endpoint = config.get("cosmos_endpoint", "")
         if not endpoint:
+            self._config_missing = True
+            self._last_error = "cosmos_endpoint is not configured"
             logger.warning("COSMOS endpoint is not configured; scenario list will be empty")
             return None
 
         try:
             return CosmosClient(endpoint, credential=DefaultAzureCredential())
         except Exception as error:
-            logger.error("Failed to initialize Cosmos client: %s", error)
+            # Construction itself rarely fails on auth — the actual auth
+            # happens lazily on the first request — but if it does, classify it.
+            self._last_error = f"CosmosClient init failed: {error}"
+            if _looks_like_auth_error(error):
+                self._auth_failed = True
+                logger.error(
+                    "Cosmos client init failed due to credential/IMDS error: %s. "
+                    "See docs/troubleshooting-imds.md for diagnostic steps.",
+                    error,
+                )
+            else:
+                logger.error("Failed to initialize Cosmos client: %s", error)
             return None
 
     def _load_scenarios(self) -> Dict[str, Any]:
         """
         Load scenarios from Cosmos DB.
+
+        Performs bounded retries on transient IMDS / auth failures (the first
+        request is when the credential actually mints a token, so this is
+        where IMDS flakiness manifests).
 
         Returns:
             Dict[str, Any]: Dictionary of scenarios keyed by ID
@@ -75,27 +134,86 @@ class ScenarioManager:
         container_name = config.get("cosmos_scenarios_container", "scenarios")
 
         if not database_name:
+            self._config_missing = True
+            self._last_error = "cosmos_database_name is not configured"
             logger.warning("COSMOS database name is not configured; scenarios were not loaded")
             return scenarios
 
-        try:
-            database_client = self.cosmos_client.get_database_client(database_name)
-            container_client = database_client.get_container_client(container_name)
+        last_error: Optional[BaseException] = None
+        for attempt in range(_LOAD_RETRY_ATTEMPTS):
+            try:
+                database_client = self.cosmos_client.get_database_client(database_name)
+                container_client = database_client.get_container_client(container_name)
 
-            for item in container_client.read_all_items():
-                try:
-                    scenario = self._build_runtime_scenario(item)
-                    scenarios[scenario["id"]] = scenario
-                    logger.info("Loaded scenario from Cosmos: %s", scenario["id"])
-                except ValueError as error:
-                    logger.warning("Skipping invalid scenario document: %s", error)
+                for item in container_client.read_all_items():
+                    try:
+                        scenario = self._build_runtime_scenario(item)
+                        scenarios[scenario["id"]] = scenario
+                        logger.info("Loaded scenario from Cosmos: %s", scenario["id"])
+                    except ValueError as error:
+                        logger.warning("Skipping invalid scenario document: %s", error)
+                # Success — clear any prior error state and break out.
+                self._last_error = None
+                self._auth_failed = False
+                last_error = None
+                break
 
-        except Exception as error:
-            logger.error("Failed to load scenarios from Cosmos: %s", error)
+            except Exception as error:  # pylint: disable=broad-except
+                last_error = error
+                is_auth = _looks_like_auth_error(error)
+                if is_auth and attempt < _LOAD_RETRY_ATTEMPTS - 1:
+                    backoff = _LOAD_RETRY_BACKOFF_SECONDS[attempt]
+                    logger.warning(
+                        "Cosmos auth/IMDS error on attempt %s/%s, retrying in %ss: %s",
+                        attempt + 1,
+                        _LOAD_RETRY_ATTEMPTS,
+                        backoff,
+                        error,
+                    )
+                    time.sleep(backoff)
+                    continue
+                # Non-auth errors are not retried — they're typically permanent
+                # config/data issues and retrying would just slow down startup.
+                break
+
+        if last_error is not None:
+            self._last_error = str(last_error)
+            if _looks_like_auth_error(last_error):
+                self._auth_failed = True
+                logger.error(
+                    "Failed to load scenarios from Cosmos due to credential/IMDS error "
+                    "after %s attempts: %s. See docs/troubleshooting-imds.md.",
+                    _LOAD_RETRY_ATTEMPTS,
+                    last_error,
+                )
+            else:
+                logger.error("Failed to load scenarios from Cosmos: %s", last_error)
             return {}
 
         logger.info("Total scenarios loaded: %s", len(scenarios))
         return scenarios
+
+    def health(self) -> Dict[str, Any]:
+        """Return health/diagnostic status for this manager.
+
+        Used by the /api/health endpoint and external smoke tests so they can
+        distinguish a healthy app, an app with no Cosmos configured (legitimate
+        local-dev case), and an app whose managed identity / IMDS is broken
+        (the case that previously manifested as a silent empty scenario list).
+        """
+        if self._auth_failed:
+            status = HEALTH_DEGRADED_AUTH_FAILURE
+        elif self._config_missing:
+            status = HEALTH_DEGRADED_CONFIG_MISSING
+        elif self.cosmos_client is None:
+            status = HEALTH_DEGRADED_NO_COSMOS
+        else:
+            status = HEALTH_OK
+        return {
+            "status": status,
+            "scenarios_loaded": len(self.scenarios),
+            "last_error": self._last_error,
+        }
 
     def _build_runtime_scenario(self, scenario_doc: Dict[str, Any]) -> Dict[str, Any]:
         """Map a Cosmos scenario document into runtime agent configuration."""
@@ -135,7 +253,7 @@ class ScenarioManager:
             f"\nYou are THE CUSTOMER in this phone call. {scenario_context}\n\n"
             "ABSOLUTE RULES — violating any of these breaks the simulation:\n"
             "• You are the person who CALLED IN with a problem. You are NOT the support representative.\n"
-            '• NEVER offer to help, apologize on behalf of the company, look up accounts, or propose solutions.\n'
+            "• NEVER offer to help, apologize on behalf of the company, look up accounts, or propose solutions.\n"
             '• NEVER use customer-service language like "I can help you with that", '
             '"Let me look into this", "I apologize for the inconvenience", '
             'or "Is there anything else I can assist you with?"\n'
@@ -148,21 +266,13 @@ class ScenarioManager:
         customer_bg = scenario_doc.get("customerBackground", [])
         if customer_bg:
             bg_sentences = [str(item).strip() for item in customer_bg if str(item).strip()]
-            parts.append(
-                "=== YOUR BACKGROUND ==="
-                f"\n{' '.join(bg_sentences)}"
-            )
+            parts.append("=== YOUR BACKGROUND ===" f"\n{' '.join(bg_sentences)}")
 
         # 3. Behavioral guidelines
         guidelines = scenario_doc.get("conversationGuidelines", [])
         if guidelines:
-            guidelines_text = "\n".join(
-                f"• {str(g).strip()}" for g in guidelines if str(g).strip()
-            )
-            parts.append(
-                "=== HOW YOU BEHAVE ON THIS CALL ==="
-                f"\n{guidelines_text}"
-            )
+            guidelines_text = "\n".join(f"• {str(g).strip()}" for g in guidelines if str(g).strip())
+            parts.append("=== HOW YOU BEHAVE ON THIS CALL ===" f"\n{guidelines_text}")
 
         # 4. Hidden evaluation criteria
         skills = scenario_doc.get("skillsToProbe", [])
@@ -185,13 +295,8 @@ class ScenarioManager:
         # 6. Opening instruction
         opening_lines = scenario_doc.get("openingLines", [])
         if opening_lines:
-            lines_text = "\n".join(
-                f'• "{str(line).strip()}"' for line in opening_lines if str(line).strip()
-            )
-            parts.append(
-                "=== START THE CONVERSATION ==="
-                f"\nBegin naturally with one of these:\n{lines_text}"
-            )
+            lines_text = "\n".join(f'• "{str(line).strip()}"' for line in opening_lines if str(line).strip())
+            parts.append("=== START THE CONVERSATION ===" f"\nBegin naturally with one of these:\n{lines_text}")
 
         return "\n\n".join(parts)
 

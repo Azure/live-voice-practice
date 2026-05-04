@@ -100,7 +100,10 @@ if ($networkIsolationEnabled) {
   Write-Host "   require connectivity to the VNet private endpoints."
   Write-Host "   Ensure you run scripts/postProvision.ps1 from within the VNet (jumpbox via"
   Write-Host "   Bastion or VPN). Otherwise these steps will be skipped."
-  if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+  if ($env:RUN_FROM_JUMPBOX -match '^(true|True|1|yes|YES)$') {
+    $runFromJumpboxEnabled = $true
+    Write-Host "[OK] RUN_FROM_JUMPBOX=true detected; continuing with data-plane post-provisioning non-interactively."
+  } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
     $answer = Read-Host "[?] Are you running this script from inside the VNet or via VPN? [Y/n]"
     if ([string]::IsNullOrWhiteSpace($answer) -or $answer -match '^(y|Y|yes|YES|true|True|1)$') {
       $runFromJumpboxEnabled = $true
@@ -112,7 +115,7 @@ if ($networkIsolationEnabled) {
   } else {
     $runFromJumpboxEnabled = $false
     Write-Host "[-] Non-interactive shell detected; data-plane steps will be skipped."
-    Write-Host "   Re-run interactively from the jumpbox/Bastion to apply them."
+    Write-Host "   Re-run interactively from the jumpbox/Bastion, OR set RUN_FROM_JUMPBOX=true to bypass the prompt."
   }
 } else {
   $runFromJumpboxEnabled = $false
@@ -138,10 +141,17 @@ if ($acrName) {
       Write-Host "[OK] AZURE_CONTAINER_REGISTRY_ENDPOINT set to '$acrLoginServer'."
     }
     if ($containerAppName) {
+      $useUaiFlag = ($env:USE_UAI -eq 'true')
+      $registryIdentity = 'system'
+      if ($useUaiFlag) {
+        $uaiResourceId = az containerapp show -g $resourceGroup -n $containerAppName --query "identity.userAssignedIdentities | keys(@) | [0]" -o tsv 2>$null
+        if ($uaiResourceId) { $registryIdentity = $uaiResourceId }
+      }
       $currentRegistry = az containerapp show -g $resourceGroup -n $containerAppName --query "properties.configuration.registries[?server=='$acrLoginServer'] | [0].identity" -o tsv 2>$null
-      if ($currentRegistry -ne 'system') {
-        az containerapp registry set -g $resourceGroup -n $containerAppName --server $acrLoginServer --identity system 2>$null | Out-Null
-        Write-Host "[OK] Container App '$containerAppName' bound to ACR '$acrLoginServer' via system-assigned identity."
+      if ($currentRegistry -ne $registryIdentity) {
+        az containerapp registry set -g $resourceGroup -n $containerAppName --server $acrLoginServer --identity $registryIdentity 2>$null | Out-Null
+        $idLabel = if ($useUaiFlag) { 'user-assigned identity' } else { 'system-assigned identity' }
+        Write-Host "[OK] Container App '$containerAppName' bound to ACR '$acrLoginServer' via $idLabel."
       } else {
         Write-Host "[OK] Container App registry binding already in place."
       }
@@ -158,7 +168,14 @@ if ($acrName) {
 # IMDS proxy returns HTTP 500 'invalid_scope', breaking App Configuration,
 # Cosmos DB and AI Search access at runtime. Until the upstream module is
 # updated, strip the conflicting env vars here so SystemAssigned MI works.
-if ($containerAppName) {
+#
+# When USE_UAI=true is set, AZURE_CLIENT_ID is intentionally populated with
+# the User-Assigned Identity's clientId by the bicep template; the strip
+# would break UAI auth, so it is short-circuited here.
+$useUai = (Get-Content env:USE_UAI -ErrorAction SilentlyContinue) -as [string]
+if ($useUai -and ($useUai.ToLower() -in @('true','1','yes'))) {
+  Write-Host "[OK] USE_UAI=$useUai detected; preserving AZURE_CLIENT_ID/AZURE_TENANT_ID (UAI mode)."
+} elseif ($containerAppName) {
   $idType = az containerapp show -g $resourceGroup -n $containerAppName --query "identity.type" -o tsv 2>$null
   if ($idType -and $idType -match 'SystemAssigned' -and $idType -notmatch 'UserAssigned') {
     $envVarNames = az containerapp show -g $resourceGroup -n $containerAppName --query "properties.template.containers[0].env[].name" -o tsv 2>$null
@@ -464,12 +481,23 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
           Write-Host "[!] pip install failed (exit $LASTEXITCODE). Cosmos sample seed will likely fail."
         }
       }
-      # Resource names were resolved at startup from App Configuration (the
-      # source of truth populated by Bicep). Use them directly; only derive
-      # endpoint as the very last fallback.
+      # Resource names were resolved at startup from App Configuration. Under
+      # NETWORK_ISOLATION the AILZ populate module is skipped and our own
+      # populate runs *later* in this same script, so $env may be stale.
+      # Re-read from App Configuration first, then fall back to ARM lookup.
       $databaseAccountName = $env:DATABASE_ACCOUNT_NAME
       $databaseName        = $env:DATABASE_NAME
       $cosmosEndpoint      = $env:COSMOS_DB_ENDPOINT
+      if (-not $databaseAccountName) { $databaseAccountName = Get-AppConfigValue 'DATABASE_ACCOUNT_NAME' }
+      if (-not $databaseName)        { $databaseName        = Get-AppConfigValue 'DATABASE_NAME' }
+      if (-not $cosmosEndpoint)      { $cosmosEndpoint      = Get-AppConfigValue 'COSMOS_DB_ENDPOINT' }
+      if (-not $databaseAccountName) {
+        $databaseAccountName = az cosmosdb list -g $resourceGroup --query "[?kind=='GlobalDocumentDB' && !contains(name, 'aif')] | [0].name" -o tsv 2>$null
+        if (-not $databaseAccountName) {
+          $databaseAccountName = az cosmosdb list -g $resourceGroup --query "[0].name" -o tsv 2>$null
+        }
+      }
+      if (-not $databaseName)   { $databaseName   = if ($env:COSMOS_DATABASE_NAME) { $env:COSMOS_DATABASE_NAME } else { 'voice-live-practice' } }
       if (-not $cosmosEndpoint -and $databaseAccountName) {
         $cosmosEndpoint = "https://$databaseAccountName.documents.azure.com:443/"
       }

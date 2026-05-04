@@ -204,6 +204,48 @@ class TestScenarioManager:
         assert scenarios[0]["id"] == "scenario1"
         assert scenarios[1]["id"] == "scenario2"
 
+    @patch("src.services.managers.config")
+    def test_health_no_cosmos_when_endpoint_missing(self, mock_config):
+        """Health should report degraded_config_missing when no endpoint is set."""
+        mock_config.get.side_effect = lambda key, default=None: {
+            "cosmos_endpoint": "",
+            "cosmos_database_name": "",
+            "cosmos_scenarios_container": "scenarios",
+        }.get(key, default)
+        mock_config.__getitem__.side_effect = lambda key: ""
+
+        manager = ScenarioManager()
+        result = manager.health()
+        assert result["status"] == "degraded_config_missing"
+        assert result["scenarios_loaded"] == 0
+
+    @patch("src.services.managers.CosmosClient")
+    @patch("src.services.managers.config")
+    def test_health_auth_failure_on_imds_error(self, mock_config, mock_cosmos_client):
+        """An IMDS-shaped error during load must surface as degraded_auth_failure."""
+        from azure.core.exceptions import ClientAuthenticationError
+
+        mock_config.get.side_effect = lambda key, default=None: {
+            "cosmos_endpoint": "https://test.documents.azure.com:443/",
+            "cosmos_database_name": "test-db",
+            "cosmos_scenarios_container": "scenarios",
+        }.get(key, default)
+        mock_config.__getitem__.side_effect = lambda key: ""
+
+        client_instance = Mock()
+        client_instance.get_database_client.side_effect = ClientAuthenticationError(
+            "DefaultAzureCredential failed: ManagedIdentityCredential IMDS invalid_scope"
+        )
+        mock_cosmos_client.return_value = client_instance
+
+        with patch("src.services.managers.time.sleep"):
+            manager = ScenarioManager()
+
+        result = manager.health()
+        assert result["status"] == "degraded_auth_failure"
+        assert result["scenarios_loaded"] == 0
+        assert result["last_error"] is not None
+
 
 class TestAgentManager:
     """Test cases for AgentManager."""
