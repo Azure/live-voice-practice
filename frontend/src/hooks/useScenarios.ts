@@ -11,13 +11,25 @@ export function useScenarios() {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [selectedScenario, setSelectedScenario] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   // Load scenarios on mount
   useEffect(() => {
     // Load server scenarios
     api
       .getScenarios()
-      .then(setScenarios)
+      .then((s) => {
+        setScenarios(s)
+        setError(null)
+      })
+      .catch((err: Error) => {
+        // Surface backend auth/IMDS failures instead of silently rendering an
+        // empty list. The error message includes the diagnostic code so ops
+        // can correlate it with backend logs.
+        console.error('Failed to load scenarios:', err)
+        setError(err.message ?? 'Failed to load scenarios')
+        setScenarios([])
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -26,6 +38,12 @@ export function useScenarios() {
     try {
       const updatedScenarios = await api.getScenarios()
       setScenarios(updatedScenarios)
+      setError(null)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to refresh scenarios'
+      console.error('Failed to refresh scenarios:', err)
+      setError(message)
+      setScenarios([])
     } finally {
       setLoading(false)
     }
@@ -36,6 +54,7 @@ export function useScenarios() {
     selectedScenario,
     setSelectedScenario,
     loading,
+    error,
     refreshScenarios,
   }
 }

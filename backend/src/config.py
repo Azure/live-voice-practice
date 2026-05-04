@@ -7,11 +7,12 @@
 
 import logging
 import os
+import time
 from typing import Any, Dict
 
 from azure.appconfiguration import AzureAppConfigurationClient
-from azure.core.exceptions import AzureError
-from azure.identity import DefaultAzureCredential
+from azure.core.exceptions import AzureError, ClientAuthenticationError
+from azure.identity import CredentialUnavailableError, DefaultAzureCredential
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,6 +34,32 @@ DEFAULT_AVATAR_STYLE = "casual-sitting"
 # Cosmos DB defaults
 DEFAULT_COSMOS_DATABASE = "voicelab"
 DEFAULT_COSMOS_CONTAINER = "conversations"
+
+# Bounded retry settings for App Configuration load. The first call is when
+# DefaultAzureCredential mints a token, so transient IMDS / network glitches
+# manifest here. Bounded so a permanently-broken IMDS still fails fast.
+_APP_CONFIG_RETRY_ATTEMPTS = 3
+_APP_CONFIG_RETRY_BACKOFF_SECONDS = (1, 3, 9)
+
+# Auth/IMDS failure fingerprints (see services/managers.py for rationale).
+_AUTH_ERROR_FINGERPRINTS = (
+    "imds",
+    "invalid_scope",
+    "managedidentitycredential",
+    "defaultazurecredential",
+    "credentialunavailable",
+    "failed to retrieve token",
+    "no credential in this chain",
+)
+
+
+def _looks_like_auth_error(error: BaseException) -> bool:
+    """Heuristic to tag an SDK error as an auth/IMDS failure."""
+    if isinstance(error, (ClientAuthenticationError, CredentialUnavailableError)):
+        return True
+    msg = str(error).lower()
+    return any(fp in msg for fp in _AUTH_ERROR_FINGERPRINTS)
+
 
 logger = logging.getLogger(__name__)
 
@@ -276,12 +303,16 @@ class Config:
                 app_config_key="AZURE_SEARCH_EMBEDDING_DEPLOYMENT",
                 default="text-embedding-3-small",
             ),
-
         }
         return result
 
     def _load_app_configuration_values(self) -> Dict[str, str]:
-        """Load key-values from Azure App Configuration when endpoint is available."""
+        """Load key-values from Azure App Configuration when endpoint is available.
+
+        Performs bounded retries on transient auth/IMDS failures so genuine
+        flakiness doesn't permanently degrade the app, while still failing
+        fast when IMDS is durably broken.
+        """
         endpoint = os.getenv("APP_CONFIG_ENDPOINT", "")
         if not endpoint:
             return {}
@@ -289,21 +320,44 @@ class Config:
         label = os.getenv("APP_CONFIG_LABEL", "live-voice-practice")
         values: Dict[str, str] = {}
 
-        try:
-            client = AzureAppConfigurationClient(base_url=endpoint, credential=DefaultAzureCredential())
+        for attempt in range(_APP_CONFIG_RETRY_ATTEMPTS):
+            try:
+                client = AzureAppConfigurationClient(base_url=endpoint, credential=DefaultAzureCredential())
 
-            for setting in client.list_configuration_settings(label_filter=label):
-                if setting.value is not None:
-                    values[setting.key] = setting.value
-
-            if not values:
-                for setting in client.list_configuration_settings():
+                for setting in client.list_configuration_settings(label_filter=label):
                     if setting.value is not None:
                         values[setting.key] = setting.value
 
-            logger.info("Loaded %s settings from Azure App Configuration", len(values))
-        except AzureError as error:
-            logger.warning("Failed to load App Configuration values: %s", error)
+                if not values:
+                    for setting in client.list_configuration_settings():
+                        if setting.value is not None:
+                            values[setting.key] = setting.value
+
+                logger.info("Loaded %s settings from Azure App Configuration", len(values))
+                return values
+            except (AzureError, ClientAuthenticationError, CredentialUnavailableError) as error:
+                is_auth = _looks_like_auth_error(error)
+                if is_auth and attempt < _APP_CONFIG_RETRY_ATTEMPTS - 1:
+                    backoff = _APP_CONFIG_RETRY_BACKOFF_SECONDS[attempt]
+                    logger.warning(
+                        "App Configuration auth/IMDS error on attempt %s/%s, retrying in %ss: %s",
+                        attempt + 1,
+                        _APP_CONFIG_RETRY_ATTEMPTS,
+                        backoff,
+                        error,
+                    )
+                    time.sleep(backoff)
+                    continue
+                if is_auth:
+                    logger.error(
+                        "Failed to load App Configuration values due to credential/IMDS error "
+                        "after %s attempts: %s. See docs/troubleshooting-imds.md.",
+                        _APP_CONFIG_RETRY_ATTEMPTS,
+                        error,
+                    )
+                else:
+                    logger.warning("Failed to load App Configuration values: %s", error)
+                return {}
 
         return values
 

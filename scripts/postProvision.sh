@@ -92,10 +92,19 @@ if [[ -n "$ACR_NAME" ]]; then
       echo "[OK] AZURE_CONTAINER_REGISTRY_ENDPOINT set to '$ACR_LOGIN_SERVER'."
     fi
     if [[ -n "${CONTAINER_APP_NAME:-}" ]]; then
+      REGISTRY_IDENTITY="system"
+      if [[ "${USE_UAI:-}" == "true" ]]; then
+        UAI_RESOURCE_ID="$(az containerapp show -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --query "identity.userAssignedIdentities | keys(@) | [0]" -o tsv 2>/dev/null || true)"
+        if [[ -n "$UAI_RESOURCE_ID" ]]; then REGISTRY_IDENTITY="$UAI_RESOURCE_ID"; fi
+      fi
       CURRENT_IDENTITY="$(az containerapp show -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --query "properties.configuration.registries[?server=='$ACR_LOGIN_SERVER'] | [0].identity" -o tsv 2>/dev/null || true)"
-      if [[ "$CURRENT_IDENTITY" != "system" ]]; then
-        az containerapp registry set -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --server "$ACR_LOGIN_SERVER" --identity system >/dev/null 2>&1 || true
-        echo "[OK] Container App '$CONTAINER_APP_NAME' bound to ACR '$ACR_LOGIN_SERVER' via system-assigned identity."
+      if [[ "$CURRENT_IDENTITY" != "$REGISTRY_IDENTITY" ]]; then
+        az containerapp registry set -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --server "$ACR_LOGIN_SERVER" --identity "$REGISTRY_IDENTITY" >/dev/null 2>&1 || true
+        if [[ "${USE_UAI:-}" == "true" ]]; then
+          echo "[OK] Container App '$CONTAINER_APP_NAME' bound to ACR '$ACR_LOGIN_SERVER' via user-assigned identity."
+        else
+          echo "[OK] Container App '$CONTAINER_APP_NAME' bound to ACR '$ACR_LOGIN_SERVER' via system-assigned identity."
+        fi
       else
         echo "[OK] Container App registry binding already in place."
       fi
@@ -112,7 +121,14 @@ fi
 # IMDS proxy returns HTTP 500 'invalid_scope', breaking App Configuration,
 # Cosmos DB and AI Search access at runtime. Until the upstream module is
 # updated, strip the conflicting env vars here so SystemAssigned MI works.
-if [[ -n "${CONTAINER_APP_NAME:-}" ]]; then
+#
+# When USE_UAI=true is set, AZURE_CLIENT_ID is intentionally populated with
+# the User-Assigned Identity's clientId by the bicep template; the strip
+# would break UAI auth, so it is short-circuited here.
+USE_UAI_LC="$(printf '%s' "${USE_UAI:-}" | tr '[:upper:]' '[:lower:]')"
+if [[ "$USE_UAI_LC" == "true" || "$USE_UAI_LC" == "1" || "$USE_UAI_LC" == "yes" ]]; then
+  echo "[OK] USE_UAI=$USE_UAI detected; preserving AZURE_CLIENT_ID/AZURE_TENANT_ID (UAI mode)."
+elif [[ -n "${CONTAINER_APP_NAME:-}" ]]; then
   ID_TYPE="$(az containerapp show -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --query "identity.type" -o tsv 2>/dev/null || true)"
   if [[ "$ID_TYPE" == *SystemAssigned* && "$ID_TYPE" != *UserAssigned* ]]; then
     ENV_NAMES="$(az containerapp show -g "$RESOURCE_GROUP" -n "$CONTAINER_APP_NAME" --query "properties.template.containers[0].env[].name" -o tsv 2>/dev/null || true)"

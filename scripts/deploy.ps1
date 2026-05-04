@@ -255,8 +255,47 @@ Write-Host ""
 
 #region Update container app
 Write-Green "Updating container app..."
-az containerapp update --name $appName --resource-group $rg --image $imageName
-if ($LASTEXITCODE -ne 0) {
+# Retry loop for the AcrPull race: when SystemAssigned MI was just bound to
+# the Container Registry, the AcrPull role assignment can take 30-120s to
+# propagate and the first 'containerapp update --image' fails with
+# UNAUTHORIZED. We retry only on auth-shaped errors; any other failure
+# fails fast.
+$maxAttempts = 5
+$backoffSeconds = @(15, 30, 60, 120)
+$updateOk = $false
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    $tmpErr = New-TemporaryFile
+    az containerapp update --name $appName --resource-group $rg --image $imageName 2>$tmpErr
+    $exit = $LASTEXITCODE
+    $errText = ''
+    try { $errText = (Get-Content $tmpErr -Raw -ErrorAction SilentlyContinue) } catch { $errText = '' }
+    Remove-Item $tmpErr -ErrorAction SilentlyContinue
+    if ($exit -eq 0) {
+        $updateOk = $true
+        break
+    }
+    $isAuthRace = $false
+    if ($errText) {
+        if ($errText -match '(?i)UNAUTHORIZED|denied|pull access denied|AuthorizationFailed|InvalidAuthenticationToken') {
+            $isAuthRace = $true
+        }
+    }
+    if (-not $isAuthRace) {
+        if ($errText) { Write-Host $errText }
+        Write-ErrorColored "Failed to update container app (non-retryable error)"
+        exit 1
+    }
+    if ($attempt -ge $maxAttempts) {
+        if ($errText) { Write-Host $errText }
+        Write-ErrorColored "Failed to update container app after $maxAttempts attempts (AcrPull role propagation timeout)"
+        Write-Host "    Manual fix: confirm the Container App MI has AcrPull on the registry, then re-run azd deploy."
+        exit 1
+    }
+    $sleep = $backoffSeconds[[Math]::Min($attempt - 1, $backoffSeconds.Count - 1)]
+    Write-Yellow "AcrPull race detected (attempt $attempt/$maxAttempts) — sleeping ${sleep}s before retry..."
+    Start-Sleep -Seconds $sleep
+}
+if (-not $updateOk) {
     Write-ErrorColored "Failed to update container app"
     exit 1
 }

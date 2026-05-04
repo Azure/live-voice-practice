@@ -217,7 +217,44 @@ echo
 
 #region Update container app
 echo -e "${GREEN}Updating container app...${NC}"
-az containerapp update --name "$appName" --resource-group "$rg" --image "$imageName"
+# Retry loop for the AcrPull race: when SystemAssigned MI was just bound to
+# the Container Registry, the AcrPull role assignment can take 30-120s to
+# propagate and the first 'containerapp update --image' fails with
+# UNAUTHORIZED. We retry only on auth-shaped errors; any other failure
+# fails fast.
+maxAttempts=5
+backoffSeconds=(15 30 60 120 120)
+updateOk=false
+for attempt in $(seq 1 "$maxAttempts"); do
+    errFile="$(mktemp)"
+    if az containerapp update --name "$appName" --resource-group "$rg" --image "$imageName" 2>"$errFile"; then
+        cat "$errFile"
+        rm -f "$errFile"
+        updateOk=true
+        break
+    fi
+    errText="$(cat "$errFile")"
+    rm -f "$errFile"
+    if ! echo "$errText" | grep -Eqi 'UNAUTHORIZED|denied|pull access denied|AuthorizationFailed|InvalidAuthenticationToken'; then
+        echo "$errText"
+        echo -e "${RED}Failed to update container app (non-retryable error)${NC}"
+        exit 1
+    fi
+    if [[ "$attempt" -ge "$maxAttempts" ]]; then
+        echo "$errText"
+        echo -e "${RED}Failed to update container app after $maxAttempts attempts (AcrPull role propagation timeout)${NC}"
+        echo "    Manual fix: confirm the Container App MI has AcrPull on the registry, then re-run azd deploy."
+        exit 1
+    fi
+    idx=$((attempt - 1))
+    sleepFor="${backoffSeconds[$idx]:-120}"
+    echo -e "${YELLOW}AcrPull race detected (attempt ${attempt}/${maxAttempts}) — sleeping ${sleepFor}s before retry...${NC}"
+    sleep "$sleepFor"
+done
+if [[ "$updateOk" != "true" ]]; then
+    echo -e "${RED}Failed to update container app${NC}"
+    exit 1
+fi
 echo -e "${GREEN}Container app updated${NC}"
 echo
 #endregion

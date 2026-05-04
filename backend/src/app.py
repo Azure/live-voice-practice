@@ -36,6 +36,7 @@ WEBSOCKET_ENDPOINT = "/ws/voice"
 
 # API endpoints
 API_CONFIG_ENDPOINT = "/api/config"
+API_HEALTH_ENDPOINT = "/api/health"
 API_SCENARIOS_ENDPOINT = "/api/scenarios"
 API_AGENTS_CREATE_ENDPOINT = "/api/agents/create"
 API_ANALYZE_ENDPOINT = "/api/analyze"
@@ -56,6 +57,15 @@ HTTP_UNAUTHORIZED = 401
 HTTP_FORBIDDEN = 403
 HTTP_NOT_FOUND = 404
 HTTP_INTERNAL_SERVER_ERROR = 500
+HTTP_SERVICE_UNAVAILABLE = 503
+
+# Diagnostic codes returned to clients/operators when the app is degraded.
+ERROR_CODE_COSMOS_AUTH_FAILED = "COSMOS_AUTH_FAILED"
+COSMOS_AUTH_FAILED_HINT = (
+    "Backend cannot authenticate to Cosmos DB. This usually indicates a managed-"
+    "identity / IMDS failure on Azure Container Apps. See "
+    "docs/troubleshooting-imds.md for diagnostic and remediation steps."
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -135,17 +145,59 @@ def index():
 @app.route(API_CONFIG_ENDPOINT)
 def get_config():
     """Get client configuration."""
-    return jsonify({
-        "proxy_enabled": True,
-        "ws_endpoint": WEBSOCKET_ENDPOINT,
-        "app_name": config.get("app_display_name", "Live Voice Practice"),
-    })
+    return jsonify(
+        {
+            "proxy_enabled": True,
+            "ws_endpoint": WEBSOCKET_ENDPOINT,
+            "app_name": config.get("app_display_name", "Live Voice Practice"),
+        }
+    )
 
 
 @app.route(API_SCENARIOS_ENDPOINT)
 def get_scenarios():
-    """Get list of available scenarios."""
+    """Get list of available scenarios.
+
+    Returns 503 if Cosmos is configured but the backend cannot authenticate
+    (typically a Container Apps IMDS failure). This is intentional: silently
+    returning an empty list previously masked auth bugs and made the broken
+    state invisible from the frontend. See docs/troubleshooting-imds.md.
+    """
+    health = scenario_manager.health()
+    if health["status"] == "degraded_auth_failure":
+        return (
+            jsonify(
+                {
+                    "error": "Cosmos authentication failed",
+                    "code": ERROR_CODE_COSMOS_AUTH_FAILED,
+                    "hint": COSMOS_AUTH_FAILED_HINT,
+                    "last_error": health["last_error"],
+                }
+            ),
+            HTTP_SERVICE_UNAVAILABLE,
+        )
     return jsonify(scenario_manager.list_scenarios())
+
+
+@app.route(API_HEALTH_ENDPOINT)
+def get_health():
+    """Health endpoint surfacing managed-identity / Cosmos connectivity status.
+
+    Used by the postdeploy smoke test (scripts/postDeploy.*) and by operators
+    to distinguish a healthy app from one whose managed identity is broken.
+    Returns 200 when ok, 503 when degraded with auth failure, 200 with a
+    warning status for non-critical degradations (e.g. no Cosmos configured).
+    """
+    scenarios_health = scenario_manager.health()
+    overall_ok = scenarios_health["status"] != "degraded_auth_failure"
+    body = {
+        "status": "ok" if overall_ok else "degraded",
+        "checks": {
+            "scenarios": scenarios_health,
+        },
+    }
+    status_code = 200 if overall_ok else HTTP_SERVICE_UNAVAILABLE
+    return jsonify(body), status_code
 
 
 @app.route(f"{API_SCENARIOS_ENDPOINT}/<scenario_id>")
@@ -448,12 +500,14 @@ def list_conversations():
     for conv in conversations:
         conv["scenario_name"] = scenario_map.get(conv.get("scenario_id", ""), "Unknown Scenario")
 
-    return jsonify({
-        "conversations": conversations,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    })
+    return jsonify(
+        {
+            "conversations": conversations,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @app.route(f"{API_CONVERSATIONS_ENDPOINT}/<conversation_id>", methods=["GET"])
