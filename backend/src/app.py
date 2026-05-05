@@ -42,6 +42,12 @@ API_AGENTS_CREATE_ENDPOINT = "/api/agents/create"
 API_ANALYZE_ENDPOINT = "/api/analyze"
 API_CONVERSATIONS_ENDPOINT = "/api/conversations"
 API_GRAPH_SCENARIO_ENDPOINT = "/api/scenarios/graph"
+API_CLIENT_LOG_ENDPOINT = "/api/client-log"
+
+# Whitelist of client-log levels that map to logger methods.
+_CLIENT_LOG_LEVELS = {"debug", "info", "warning", "error"}
+# Hard cap on payload size to keep noisy clients from filling logs.
+_CLIENT_LOG_MAX_DETAIL_CHARS = 2000
 
 # Error messages
 SCENARIO_ID_REQUIRED = "scenario_id is required"
@@ -615,6 +621,46 @@ def get_current_user_info():
 def audio_processor():
     """Serve the audio processor JavaScript file."""
     return send_from_directory("static", AUDIO_PROCESSOR_FILE)
+
+
+@app.route(API_CLIENT_LOG_ENDPOINT, methods=["POST"])
+def client_log():
+    """Surface client-side diagnostics in container logs.
+
+    The frontend POSTs structured events to this endpoint so that issues that
+    only manifest in the browser (mic permission failures, WebRTC ICE state
+    transitions, avatar pipeline stalls) become visible via
+    `az containerapp logs show` — no need to attach DevTools through Bastion.
+
+    Payload shape:
+        { "level": "info" | "warning" | "error" | "debug",
+          "event": "<short_identifier>",
+          "detail": <any json-serializable> }
+    """
+    try:
+        data = cast(Dict[str, Any], request.get_json(silent=True) or {})
+    except Exception:
+        data = {}
+
+    level = str(data.get("level", "info")).lower()
+    if level not in _CLIENT_LOG_LEVELS:
+        level = "info"
+
+    event = str(data.get("event", "client.log"))[:80]
+    detail = data.get("detail")
+    detail_str = ""
+    if detail is not None:
+        try:
+            detail_str = json.dumps(detail, default=str)
+        except Exception:
+            detail_str = repr(detail)
+        if len(detail_str) > _CLIENT_LOG_MAX_DETAIL_CHARS:
+            detail_str = detail_str[:_CLIENT_LOG_MAX_DETAIL_CHARS] + "...<truncated>"
+
+    user_agent = request.headers.get("User-Agent", "")[:120]
+    log_fn = getattr(logger, level)
+    log_fn("client_log event=%s ua=%s detail=%s", event, user_agent, detail_str)
+    return ("", 204)
 
 
 @sock.route(WEBSOCKET_ENDPOINT)  # pyright: ignore[reportUnknownMemberType]

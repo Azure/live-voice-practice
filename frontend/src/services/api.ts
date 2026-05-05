@@ -178,4 +178,38 @@ export const api = {
     return res.json()
   },
 
+  /**
+   * Fire-and-forget diagnostic log to the backend so client-side WebRTC /
+   * getUserMedia / avatar pipeline events show up in container logs without
+   * requiring the operator to attach browser DevTools through Bastion.
+   *
+   * Always resolves; failures are intentionally swallowed (and mirrored to
+   * console) so logging never breaks the UX.
+   */
+  clientLog(
+    level: 'debug' | 'info' | 'warning' | 'error',
+    event: string,
+    detail?: unknown
+  ): void {
+    try {
+      const consoleFn =
+        level === 'error'
+          ? console.error
+          : level === 'warning'
+          ? console.warn
+          : console.info
+      consoleFn(`[client-log] ${event}`, detail ?? '')
+      void fetch('/api/client-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level, event, detail }),
+        keepalive: true,
+      }).catch(() => {
+        /* swallow — diagnostic must never break UX */
+      })
+    } catch {
+      /* swallow */
+    }
+  },
+
 }

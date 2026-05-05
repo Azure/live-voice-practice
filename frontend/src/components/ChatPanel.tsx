@@ -6,6 +6,10 @@
 import {
     Button,
     Card,
+    MessageBar,
+    MessageBarActions,
+    MessageBarBody,
+    MessageBarTitle,
     Switch,
     Text,
     makeStyles,
@@ -14,6 +18,7 @@ import {
 import {
     ChartMultipleRegular,
     DeleteRegular,
+    DismissRegular,
     History20Regular,
     MicOffRegular,
     MicRegular,
@@ -82,6 +87,8 @@ const useStyles = makeStyles({
 interface Props {
   messages: Message[]
   recording: boolean
+  recordingError?: string | null
+  onDismissRecordingError?: () => void
   connected: boolean
   canAnalyze: boolean
   onToggleRecording: () => void
@@ -100,6 +107,8 @@ interface Props {
 export function ChatPanel({
   messages,
   recording,
+  recordingError,
+  onDismissRecordingError,
   connected: _connected,
   canAnalyze,
   onToggleRecording,
@@ -161,6 +170,29 @@ export function ChatPanel({
       </div>
 
       <div className={styles.controls}>
+        {recordingError && (
+          <MessageBar
+            intent="error"
+            style={{ marginBottom: tokens.spacingVerticalS, width: '100%' }}
+          >
+            <MessageBarBody>
+              <MessageBarTitle>Microphone unavailable</MessageBarTitle>
+              {recordingError}
+            </MessageBarBody>
+            {onDismissRecordingError && (
+              <MessageBarActions
+                containerAction={
+                  <Button
+                    appearance="transparent"
+                    icon={<DismissRegular />}
+                    onClick={onDismissRecordingError}
+                    aria-label="Dismiss"
+                  />
+                }
+              />
+            )}
+          </MessageBar>
+        )}
         <Button
           appearance={recording ? 'primary' : 'secondary'}
           icon={recording ? <MicOffRegular /> : <MicRegular />}

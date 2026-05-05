@@ -141,11 +141,21 @@ export default function App() {
   const handleWebRTCMessage = useCallback((msg: any) => {
     if (!avatarEnabled) return
 
+    api.clientLog('debug', 'app.webrtc_msg_received', {
+      type: msg?.type,
+      hasServerSdp: !!msg?.server_sdp,
+      hasSdp: !!msg?.sdp,
+      hasAnswer: !!msg?.answer,
+    })
+
     if (msg.type === 'proxy.connected') {
+      api.clientLog('info', 'app.stage.connecting', { trigger: 'proxy.connected' })
       setConnectionStage('connecting')
     } else if (msg.type === 'session.created') {
+      api.clientLog('info', 'app.stage.configuring', { trigger: 'session.created' })
       setConnectionStage('configuring')
     } else if (msg.type === 'session.updated') {
+      api.clientLog('info', 'app.stage.rendering', { trigger: 'session.updated' })
       setConnectionStage('rendering')
       const session = msg.session
       const servers =
@@ -163,13 +173,21 @@ export default function App() {
         session?.rtc?.ice_credential ||
         session?.ice_credential
 
+      api.clientLog('info', 'app.session_updated_ice', {
+        hasServers: !!servers,
+        hasCredentials: !!(username && credential),
+      })
+
       if (servers) {
         setupWebRTC(servers, username, credential)
+      } else {
+        api.clientLog('warning', 'app.session_updated_no_ice_servers')
       }
     } else if (
       (msg.server_sdp || msg.sdp || msg.answer) &&
       msg.type !== 'session.update'
     ) {
+      api.clientLog('info', 'app.received_sdp_answer', { type: msg?.type })
       handleAnswer(msg)
     }
   }, [avatarEnabled])
@@ -198,7 +216,7 @@ export default function App() {
     [send]
   )
 
-  const { recording, toggleRecording, getAudioRecording } =
+  const { recording, recordingError, clearRecordingError, toggleRecording, getAudioRecording } =
     useRecorder(sendAudioChunk)
 
   const handleStart = async (avatarValue: string) => {
@@ -371,6 +389,8 @@ export default function App() {
           <ChatPanel
             messages={messages}
             recording={recording}
+            recordingError={recordingError}
+            onDismissRecordingError={clearRecordingError}
             connected={connected}
             canAnalyze={messages.length > 0}
             onToggleRecording={toggleRecording}
