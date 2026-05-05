@@ -404,118 +404,135 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
     Write-Host "[-] Skipping Cosmos sample seed (network isolation; not running from VNet)."
     Write-Host "   Re-run scripts/postProvision.ps1 from the jumpbox/Bastion to apply it."
   } else {
-    Write-Host "[>] Running Cosmos sample seed hook..."
-    # The jumpbox bootstrap *attempts* to install Python 3.11 but the result
-    # has been observed to be incomplete (e.g. C:\Python311 with only `Lib`
-    # and `Scripts`, no `python.exe`). Probe well-known locations, validate
-    # via `--version`, and self-heal by downloading the official Python
-    # installer if nothing usable is found.
-    $pythonExe = $null
-    $candidates = @()
-    $candidates += Get-ChildItem 'C:\Program Files\Python*\python.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-    $candidates += Get-ChildItem 'C:\Python*\python.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-    $candidates += Get-ChildItem 'C:\Users\*\AppData\Local\Programs\Python\Python*\python.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-    $candidates += @('python', 'python3', 'py')
-    foreach ($candidate in $candidates) {
-      $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-      if (-not $cmd) { continue }
-      $resolved = $cmd.Source
-      $verOutput = & $resolved --version 2>&1
-      if ($LASTEXITCODE -eq 0 -and $verOutput -match 'Python\s+\d') {
-        $pythonExe = $resolved
-        break
-      }
+    Write-Host "[>] Running Cosmos sample seed hook (PowerShell + REST API)..."
+    # Resolve names from App Configuration (source of truth populated by Bicep).
+    # We deliberately do NOT call `az cosmosdb list` here because the jumpbox
+    # SAMI in network-isolated deployments only has data-plane roles
+    # (Cosmos DB Built-in Data Contributor) and lacks ARM Reader, so
+    # `az resource list` / `az cosmosdb list` returns []. App Configuration
+    # is the canonical source and is reachable via private endpoint.
+    $databaseAccountName = $env:DATABASE_ACCOUNT_NAME
+    $databaseName        = $env:DATABASE_NAME
+    $cosmosEndpoint      = $env:COSMOS_DB_ENDPOINT
+    if (-not $databaseAccountName) { $databaseAccountName = Get-AppConfigValue 'DATABASE_ACCOUNT_NAME' }
+    if (-not $databaseName)        { $databaseName        = Get-AppConfigValue 'DATABASE_NAME' }
+    if (-not $cosmosEndpoint)      { $cosmosEndpoint      = Get-AppConfigValue 'COSMOS_DB_ENDPOINT' }
+    if (-not $cosmosEndpoint -and $databaseAccountName) {
+      $cosmosEndpoint = "https://$databaseAccountName.documents.azure.com:443/"
     }
-    if (-not $pythonExe) {
-      Write-Host "[!] No working Python interpreter found. Installing Python 3.11.9 from python.org..."
-      try {
-        $pyVersion = '3.11.9'
-        $arch = if ([Environment]::Is64BitOperatingSystem) { 'amd64' } else { 'win32' }
-        $installerUrl = "https://www.python.org/ftp/python/$pyVersion/python-$pyVersion-$arch.exe"
-        $installerPath = Join-Path $env:TEMP "python-$pyVersion-$arch.exe"
-        Write-Host "[>] Downloading $installerUrl..."
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
-        Write-Host "[>] Running silent install (PrependPath=1, InstallAllUsers=1)..."
-        $installArgs = @(
-          '/quiet',
-          'InstallAllUsers=1',
-          'PrependPath=1',
-          'Include_test=0',
-          'Include_launcher=1',
-          "TargetDir=C:\Python311"
-        )
-        $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
-        if ($proc.ExitCode -ne 0) {
-          Write-Host "[!] Python installer exited with code $($proc.ExitCode)."
-        }
-        # Refresh PATH and re-probe.
-        $env:PATH = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
-        foreach ($candidate in @('C:\Python311\python.exe', 'python', 'py')) {
-          $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-          if (-not $cmd) { continue }
-          $resolved = $cmd.Source
-          $verOutput = & $resolved --version 2>&1
-          if ($LASTEXITCODE -eq 0 -and $verOutput -match 'Python\s+\d') {
-            $pythonExe = $resolved
-            break
-          }
-        }
-      } catch {
-        Write-Host "[!] Python installation failed: $_"
-      }
-    }
-    if (-not $pythonExe) {
-      Write-Host "[!] Python still unavailable after install attempt. Skipping Cosmos sample seed."
-    } else {
-      Write-Host "[>] Using Python: $pythonExe"
-      # Ensure the seed script's runtime dependencies are present. Idempotent:
-      # pip is a no-op when already installed at the requested version.
-      $needsInstall = $false
-      & $pythonExe -c "import azure.cosmos, azure.identity" 2>$null
-      if ($LASTEXITCODE -ne 0) { $needsInstall = $true }
-      if ($needsInstall) {
-        Write-Host "[>] Installing seed script dependencies (azure-cosmos, azure-identity)..."
-        & $pythonExe -m pip install --quiet --disable-pip-version-check azure-cosmos azure-identity 2>&1 | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-          Write-Host "[!] pip install failed (exit $LASTEXITCODE). Cosmos sample seed will likely fail."
-        }
-      }
-      # Resource names were resolved at startup from App Configuration. Under
-      # NETWORK_ISOLATION the AILZ populate module is skipped and our own
-      # populate runs *later* in this same script, so $env may be stale.
-      # Re-read from App Configuration first, then fall back to ARM lookup.
-      $databaseAccountName = $env:DATABASE_ACCOUNT_NAME
-      $databaseName        = $env:DATABASE_NAME
-      $cosmosEndpoint      = $env:COSMOS_DB_ENDPOINT
-      if (-not $databaseAccountName) { $databaseAccountName = Get-AppConfigValue 'DATABASE_ACCOUNT_NAME' }
-      if (-not $databaseName)        { $databaseName        = Get-AppConfigValue 'DATABASE_NAME' }
-      if (-not $cosmosEndpoint)      { $cosmosEndpoint      = Get-AppConfigValue 'COSMOS_DB_ENDPOINT' }
-      if (-not $databaseAccountName) {
-        $databaseAccountName = az cosmosdb list -g $resourceGroup --query "[?kind=='GlobalDocumentDB' && !contains(name, 'aif')] | [0].name" -o tsv 2>$null
-        if (-not $databaseAccountName) {
-          $databaseAccountName = az cosmosdb list -g $resourceGroup --query "[0].name" -o tsv 2>$null
-        }
-      }
-      if (-not $databaseName)   { $databaseName   = if ($env:COSMOS_DATABASE_NAME) { $env:COSMOS_DATABASE_NAME } else { 'voice-live-practice' } }
-      if (-not $cosmosEndpoint -and $databaseAccountName) {
-        $cosmosEndpoint = "https://$databaseAccountName.documents.azure.com:443/"
-      }
+    $scenariosContainer = if ($env:SCENARIOS_DATABASE_CONTAINER) { $env:SCENARIOS_DATABASE_CONTAINER } else { Get-AppConfigValue 'SCENARIOS_DATABASE_CONTAINER' }
+    $rubricsContainer   = if ($env:RUBRICS_DATABASE_CONTAINER)   { $env:RUBRICS_DATABASE_CONTAINER }   else { Get-AppConfigValue 'RUBRICS_DATABASE_CONTAINER' }
+    if (-not $scenariosContainer) { $scenariosContainer = 'scenarios' }
+    if (-not $rubricsContainer)   { $rubricsContainer   = 'rubrics' }
 
-      if (-not $databaseAccountName) {
-        Write-Host "[!] Cosmos account name could not be resolved from App Configuration. Skipping Cosmos sample seed."
-      } elseif (-not $databaseName) {
-        Write-Host "[!] Cosmos database name could not be resolved from App Configuration. Skipping Cosmos sample seed."
-      } elseif (-not $cosmosEndpoint) {
-        Write-Host "[!] Cosmos endpoint could not be resolved. Skipping Cosmos sample seed."
+    if (-not $databaseName) {
+      Write-Host "[!] DATABASE_NAME not found in App Configuration. Cannot seed Cosmos. (App Config endpoint: $appConfigEndpoint)"
+    } elseif (-not $cosmosEndpoint) {
+      Write-Host "[!] COSMOS_DB_ENDPOINT not found in App Configuration and DATABASE_ACCOUNT_NAME unavailable. Cannot seed Cosmos."
+    } else {
+      Write-Host "[>] Cosmos endpoint:  $cosmosEndpoint"
+      Write-Host "[>] Database:         $databaseName"
+      Write-Host "[>] Scenarios cont.:  $scenariosContainer"
+      Write-Host "[>] Rubrics cont.:    $rubricsContainer"
+
+      # Acquire AAD token for Cosmos data-plane.
+      $tokenJson = az account get-access-token --resource https://cosmos.azure.com -o json 2>&1 | Out-String
+      try {
+        $tokenObj = $tokenJson | ConvertFrom-Json
+        $aadToken = $tokenObj.accessToken
+      } catch {
+        $aadToken = $null
+      }
+      if (-not $aadToken) {
+        Write-Host "[!] Failed to acquire AAD token for https://cosmos.azure.com. Skipping Cosmos seed."
+        Write-Host "    az output: $tokenJson"
       } else {
-        # Auth: DefaultAzureCredential. Bicep grants the executor / jumpbox MI
-        # 'Cosmos DB Built-in Data Contributor' (data-plane) on the account.
-        $env:COSMOS_ENDPOINT = $cosmosEndpoint
-        $env:COSMOS_DATABASE_NAME = $databaseName
-        $env:COSMOS_SCENARIOS_CONTAINER = if ($env:SCENARIOS_DATABASE_CONTAINER) { $env:SCENARIOS_DATABASE_CONTAINER } else { 'scenarios' }
-        $env:COSMOS_RUBRICS_CONTAINER = if ($env:RUBRICS_DATABASE_CONTAINER) { $env:RUBRICS_DATABASE_CONTAINER } else { 'rubrics' }
-        & $pythonExe scripts/seed_cosmos_samples.py --mode upsert
+        $cosmosBase = $cosmosEndpoint.TrimEnd('/')
+
+        function Invoke-CosmosUpsertItem {
+          param(
+            [string]$Base,
+            [string]$Db,
+            [string]$Container,
+            [string]$Token,
+            [string]$PartitionKeyValue,
+            [hashtable]$Item
+          )
+          $url = "$Base/dbs/$Db/colls/$Container/docs"
+          # Partition key header MUST be a JSON array as a string.
+          $pkHeader = '["' + $PartitionKeyValue + '"]'
+          $headers = @{
+            'Authorization'                   = "type=aad&ver=1.0&sig=$Token"
+            'x-ms-version'                    = '2018-12-31'
+            'x-ms-date'                       = ([DateTime]::UtcNow.ToString('R'))
+            'x-ms-documentdb-is-upsert'       = 'true'
+            'x-ms-documentdb-partitionkey'    = $pkHeader
+            'Content-Type'                    = 'application/json'
+            'Accept'                          = 'application/json'
+          }
+          $body = $Item | ConvertTo-Json -Depth 50 -Compress
+          return Invoke-RestMethod -Method Post -Uri $url -Headers $headers -Body $body -ErrorAction Stop
+        }
+
+        function Invoke-CosmosSeedFolder {
+          param(
+            [string]$Base,
+            [string]$Db,
+            [string]$Container,
+            [string]$Token,
+            [string]$Folder,
+            [string]$IdSourceKey
+          )
+          $stats = [ordered]@{ attempted = 0; upserted = 0; failed = 0 }
+          if (-not (Test-Path $Folder)) {
+            Write-Host "[-] $Folder does not exist; skipping container '$Container'."
+            return $stats
+          }
+          $files = Get-ChildItem -Path $Folder -Filter *.json -File -ErrorAction SilentlyContinue
+          if (-not $files) {
+            Write-Host "[-] No *.json files under $Folder; skipping container '$Container'."
+            return $stats
+          }
+          foreach ($file in $files) {
+            $stats.attempted++
+            try {
+              $raw = Get-Content -Path $file.FullName -Raw -Encoding UTF8
+              $obj = $raw | ConvertFrom-Json
+              if (-not $obj.$IdSourceKey) {
+                throw "Missing required key '$IdSourceKey' in $($file.Name)"
+              }
+              $idValue = [string]$obj.$IdSourceKey
+              # Convert PSCustomObject to hashtable so we can add 'id' without
+              # mutating the original parsed structure.
+              $itemHt = @{}
+              foreach ($prop in $obj.PSObject.Properties) {
+                $itemHt[$prop.Name] = $prop.Value
+              }
+              $itemHt['id'] = $idValue
+
+              Invoke-CosmosUpsertItem -Base $Base -Db $Db -Container $Container -Token $Token -PartitionKeyValue $idValue -Item $itemHt | Out-Null
+              $stats.upserted++
+              Write-Host "[upserted] $Container : $idValue (from $($file.Name))"
+            } catch {
+              $stats.failed++
+              Write-Host "[failed]   $Container : $($file.Name) -> $_"
+            }
+          }
+          return $stats
+        }
+
+        $scenariosFolder = Join-Path (Get-Location) 'samples/scenarios'
+        $rubricsFolder   = Join-Path (Get-Location) 'samples/rubrics'
+
+        $scenarioStats = Invoke-CosmosSeedFolder -Base $cosmosBase -Db $databaseName -Container $scenariosContainer -Token $aadToken -Folder $scenariosFolder -IdSourceKey 'scenarioId'
+        $rubricStats   = Invoke-CosmosSeedFolder -Base $cosmosBase -Db $databaseName -Container $rubricsContainer   -Token $aadToken -Folder $rubricsFolder   -IdSourceKey 'rubricId'
+
+        Write-Host ""
+        Write-Host "Scenarios summary: attempted=$($scenarioStats.attempted) upserted=$($scenarioStats.upserted) failed=$($scenarioStats.failed)"
+        Write-Host "Rubrics   summary: attempted=$($rubricStats.attempted)   upserted=$($rubricStats.upserted)   failed=$($rubricStats.failed)"
+        if (($scenarioStats.failed + $rubricStats.failed) -gt 0) {
+          Write-Host "[!] Some Cosmos seed operations failed. See log above."
+        }
       }
     }
   }
