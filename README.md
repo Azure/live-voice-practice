@@ -37,13 +37,15 @@ This project supports two deployment modes:
   azd up
   ```
 
-- **Network-isolated** (private endpoints + jumpbox + Azure Firewall) — production-grade:
+- **Network-isolated** (private endpoints + jumpbox + Azure Firewall + Application Gateway WAF v2) — production-grade:
 
   ```bash
   azd env set NETWORK_ISOLATION true
   azd provision   # from your workstation
   # then connect to the jumpbox via Bastion and run azd deploy + postProvision there
   ```
+
+  Network isolation now also provisions an **Application Gateway WAF v2 in skeleton mode** in front of the internally posted Container App (since AILZ `v1.1.6` adopted upstream issue [`#49`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49)). The gateway is inert until you complete a deployer-side BYO domain + certificate step. Follow [docs/manual-testing/public-ingress-runbook.md](docs/manual-testing/public-ingress-runbook.md) to promote it to live mode and reach the app from a real workstation with a real microphone.
 
 See **[docs/deployment.md](docs/deployment.md)** for the full step-by-step guide covering both modes (prerequisites, env variables, the workstation/jumpbox split for network isolation, post-provision hook, image build via the in-VNet ACR Tasks agent pool, validation, and teardown).
 

@@ -153,6 +153,8 @@ azd env set DEPLOY_SPEECH_SERVICE                true                # default t
 
 > The Bastion + Azure Firewall + jumpbox VM are part of the Bicep template (`deployVM=true`, default). The firewall policy is pre-configured with the FQDN allow-list needed to bootstrap the jumpbox (`azd`, Bicep CLI, GitHub, Speech, Foundry, ACR, …).
 
+> Since `infra/` ≥ `v1.1.6`, network isolation also provisions an **Application Gateway WAF v2 in skeleton mode** (gateway + Public IP + WAF policy + deny-all NSG, no listener cert, no allowed sources). It exists so testers can later reach the app from a real workstation with a real microphone after you complete a deployer-side BYO domain + certificate step. See [docs/manual-testing/public-ingress-runbook.md](manual-testing/public-ingress-runbook.md). To skip the gateway entirely, set `azd env set PUBLIC_INGRESS_ENABLED false` before `azd provision`.
+
 #### A.2. Run provision
 
 ```powershell
