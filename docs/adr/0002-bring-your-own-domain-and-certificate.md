@@ -175,10 +175,11 @@ This ADR records the *boundary* between the accelerator and the deployer. It doe
 - A DNS provider.
 - A certification authority.
 - An ACME client (or no ACME client).
+- The environment in which the deployer runs any certificate-acquisition tooling (local workstation, Cloud Shell, CI runner, jumpbox, etc.).
 - A renewal cadence.
 - A naming convention for hostnames.
 
-Each of those is a deployer-side choice. The accelerator's runbook may list options to help a deployer evaluate, but the runbook does not endorse one over another, and the Bicep does not depend on any of them.
+Each of those is a deployer-side choice.The accelerator's runbook may list options to help a deployer evaluate, but the runbook does not endorse one over another, and the Bicep does not depend on any of them.
 
 ---
 
