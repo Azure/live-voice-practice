@@ -1,4 +1,4 @@
-# Optional public ingress (Application Gateway) for ACA-internal scenarios that require browser-side device capabilities
+# Optional public ingress (Application Gateway WAF v2) for internal Container Apps workloads
 
 > **Target repository:** `Azure/bicep-ptn-aiml-landing-zone`
 > **Type:** Feature request
@@ -11,15 +11,31 @@
 
 ## Summary
 
-When an Azure AI Landing Zone deployment uses a Container Apps environment with `vnetConfiguration.internal = true`, the application is reachable only from inside the VNet. For workloads whose validation requires browser-side device capabilities — most notably **microphone capture** for voice-driven workloads — the operator path through Azure Bastion is insufficient: Azure Bastion does not redirect audio input ([documented Microsoft limitation](https://learn.microsoft.com/en-us/azure/bastion/vm-about#remote-audio)). There is no VM-side configuration that recovers the redirected audio capture channel; the limitation is at the gateway protocol layer.
+When an Azure AI Landing Zone deployment uses a Container Apps environment with `vnetConfiguration.internal = true`, the application is reachable only from inside the VNet. The blueprint currently offers two operator-side paths to the application: an Azure Bastion session into the jumpbox VM, or VPN/peering into the VNet. Both are appropriate for some scenarios and inappropriate for others.
 
-This issue proposes adding an **optional, opt-in, secure-by-default public ingress** to the Azure AI Landing Zones blueprint, implemented as an Application Gateway (WAF v2) in front of the existing internal Container Apps environment. The ingress is disabled by default; deployments that do not require browser-side device capabilities are unaffected.
+This issue proposes adding an **optional, opt-in, secure-by-default public ingress** to the blueprint, implemented as an Application Gateway (WAF v2) in front of the existing internal Container Apps environment. The ingress is disabled by default; deployments that do not opt in are unaffected. When enabled, the deployment exposes the application's HTTP surface — and only that surface — to a deployer-controlled set of source IPs, behind TLS termination and an OWASP rule set.
+
+The application's network posture is unchanged. The Container Apps environment remains `internal = true`. Backend services (Cosmos, Search, App Configuration, Foundry, Speech, Storage, ACR) remain behind their private endpoints. The "network-isolated" claim of the deployment is preserved; the public ingress is an explicit, reversible, time-bounded addition to the operator surface, not a removal of the internal posture.
 
 ## Motivating scenarios
 
-The pattern is generic. Any workload deployed on an internal Container Apps environment that needs browser-side capabilities — microphone, camera, geolocation, file system access, push notifications — is gated by the same Bastion limitation and benefits from the same solution.
+This pattern is **not** specific to any single category of workload. It applies wherever a deployer of the AI Landing Zone needs a controlled set of external endpoints (testers, stakeholders, demo audiences, third-party services) to reach the application's HTTP surface, while keeping the rest of the deployment internal.
 
-A concrete motivating workload is [`Azure/live-voice-practice`](https://github.com/Azure/live-voice-practice), an accelerator that exercises real-time voice interaction against synthesized avatars. End-to-end validation of that workload requires a real microphone connected to a real workstation. Other plausible consumers include any voice-AI demo, video-call applications, or applications that probe local hardware.
+Representative scenarios — none of which are independently sufficient to motivate the feature, but which together describe its audience:
+
+1. **Manual testing that exercises browser-side device capabilities.** Microphone, camera, geolocation, push notifications, file system access, WebRTC, and similar APIs require a secure context (HTTPS) on a real workstation. Azure Bastion does not redirect audio input ([documented Microsoft limitation](https://learn.microsoft.com/en-us/azure/bastion/vm-about#remote-audio)) and does not satisfy the secure-context requirement for browser device APIs in general. A VPN connection from each tester's workstation is operationally heavy for time-bounded testing windows. A deployer-controlled public ingress, restricted to known tester IPs, removes the friction without changing the application's network posture.
+
+2. **Demos and stakeholder reviews to non-VPN audiences.** A product owner, a customer, an auditor, or an external reviewer needs to see the running application during a scheduled window. Provisioning VPN access for a one-hour demo is disproportionate. A public ingress restricted to that audience's source IPs and torn down afterward is the right shape.
+
+3. **Time-bounded UAT with external testers.** A consulting team, a partner organization, or an outsourced QA team needs access to a deployed environment for a defined acceptance window. They are not employees and do not get VPN. A public ingress restricted to their source IPs, with WAF logs auditable in the deployment's Log Analytics workspace, is operationally lighter than provisioning identities.
+
+4. **Receiving inbound webhooks from third-party SaaS.** Some third-party services (payment, identity, observability vendors) publish events as outbound HTTPS calls from their own egress IPs. The application under test needs a stable public endpoint to receive those calls. The egress IPs of the SaaS vendor are the allow-list.
+
+5. **Public-facing demo environments and showcase deployments.** Some deployments of the landing zone exist specifically to be reachable. The application's network posture (internal) is correct for the backend; the front door is a deliberate, audited surface in front of it.
+
+6. **Workloads that probe local hardware, in general.** This is a generalization of scenario 1. Any application whose validation requires the user agent to be on a real workstation — not a remote desktop session, not a forwarded port — fits this pattern. A concrete current example is [`Azure/live-voice-practice`](https://github.com/Azure/live-voice-practice), which is the accelerator that motivated this issue. Future workloads in the same class will need the same shape.
+
+The common thread is not the workload category. The common thread is the **operator pattern**: an internal-by-default deployment with a controlled, reversible, audited public surface placed in front of the application's HTTP entry point on demand.
 
 ## Why an Application Gateway, in front of the existing internal environment
 

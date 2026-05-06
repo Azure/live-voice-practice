@@ -19,4 +19,4 @@ The infrastructure of this accelerator is consumed from upstream repositories (n
 
 | Seq | Target repository | Title | Status |
 |----:|-------------------|-------|--------|
-| 001 | `Azure/bicep-ptn-aiml-landing-zone` | Optional public ingress (Application Gateway) for ACA-internal scenarios that require browser-side device capabilities | Filed as [#49](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49) |
+| 001 | `Azure/bicep-ptn-aiml-landing-zone` | Optional public ingress (Application Gateway WAF v2) for internal Container Apps workloads | Filed as [#49](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49) |
