@@ -19,4 +19,4 @@ The infrastructure of this accelerator is consumed from upstream repositories (n
 
 | Seq | Target repository | Title | Status |
 |----:|-------------------|-------|--------|
-| 001 | `Azure/AI-Landing-Zones` | Optional public ingress (Application Gateway) for ACA-internal scenarios that require browser-side device capabilities | Draft, not yet filed |
+| 001 | `Azure/AI-Landing-Zones` | Optional public ingress (Application Gateway) for ACA-internal scenarios that require browser-side device capabilities | Filed as [#104](https://github.com/Azure/AI-Landing-Zones/issues/104) |

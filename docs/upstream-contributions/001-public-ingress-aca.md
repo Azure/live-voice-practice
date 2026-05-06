@@ -2,7 +2,7 @@
 
 > **Target repository:** `Azure/AI-Landing-Zones`
 > **Type:** Feature request
-> **Status:** Draft, not yet filed
+> **Status:** Filed as [Azure/AI-Landing-Zones#104](https://github.com/Azure/AI-Landing-Zones/issues/104)
 > **Suggested labels:** `enhancement`, `networking`, `application-gateway`, `container-apps`
 
 ---
