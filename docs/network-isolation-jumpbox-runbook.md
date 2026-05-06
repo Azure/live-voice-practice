@@ -87,6 +87,25 @@ Idempotent. Re-run any time you need to re-apply data-plane steps (e.g. after Co
 
 ---
 
+## Manual UI testing (microphone limitation)
+
+The jumpbox is intended for **bootstrap and admin tasks**, not as a workstation for exercising the app's voice features. **Azure Bastion does not redirect audio input** — neither the HTML5 client nor the native client (`az network bastion rdp`) forward the local microphone into the VM. The Bastion gateway drops the audio capture virtual channel before it reaches the RDP host. Source: [Azure Bastion - Remote audio](https://learn.microsoft.com/en-us/azure/bastion/vm-about#remote-audio) — *"Audio input is not supported at the moment."*
+
+Practical consequence: the **avatar renders correctly** inside an Edge session on the jumpbox (audio output works), but **`Start Recording` reports "Microphone unavailable"** — no VM-side or `.rdp` configuration changes this.
+
+For end-to-end manual testing with a real microphone, use one of:
+
+| Option | Approach | Notes |
+|--------|----------|-------|
+| **Point-to-Site VPN** *(recommended)* | Add a P2S VPN gateway to the hub VNet; connect from your local PC; resolve the Container App's private FQDN via the VNet's private DNS; use the local browser (with local mic) to reach the app. | Preserves network isolation. One-time gateway cost. |
+| **Public ingress with IP allowlist** | Temporarily change Container Apps ingress from `internal: true` to public + add an IP restriction limited to your egress IP. | Fastest. Loosens the network posture only for the testing window. Revert when done. |
+| **Direct RDP via temporary public IP on the VM** | Attach a public IP to the jumpbox, lock the NSG to your egress IP on 3389, RDP with `mstsc` directly (not through Bastion). Native RDP forwards mic normally. | Cheapest. Exposes RDP — keep the window short and remove the public IP afterwards. |
+| **Azure Virtual Desktop** | Replace the jumpbox with an AVD session host. AVD supports full audio I/O redirection. | Heavier. Use only if you need ongoing manual UI testing in an isolated environment. |
+
+The avatar (audio output) requires no special action beyond what Bicep already provisions — it works inside Bastion sessions because only the playback channel is needed.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
