@@ -70,6 +70,37 @@ for FILE_NAME in manifest.json main.parameters.json; do
     fi
 done
 
+# ARM rejects string -> bool coercion inside aggregate object properties, so
+# we cannot use "${VAR=...}" substitution for publicIngress.enabled. Read the
+# desired value from the azd environment and rewrite the field as a raw JSON
+# boolean before azd performs its own ${VAR} substitution pass.
+INFRA_PARAMS="$INFRA_DIR/main.parameters.json"
+if [ -f "$INFRA_PARAMS" ]; then
+    PUBLIC_INGRESS_RAW="${PUBLIC_INGRESS_ENABLED:-}"
+    NETWORK_ISOLATION_RAW="${NETWORK_ISOLATION:-}"
+    if [ -z "$PUBLIC_INGRESS_RAW" ] && [ -n "${AZURE_ENV_NAME:-}" ]; then
+        ENV_FILE="$PROJECT_ROOT/.azure/$AZURE_ENV_NAME/.env"
+        if [ -f "$ENV_FILE" ]; then
+            line=$(grep '^PUBLIC_INGRESS_ENABLED=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"')
+            [ -n "$line" ] && PUBLIC_INGRESS_RAW="$line"
+            if [ -z "$NETWORK_ISOLATION_RAW" ]; then
+                line=$(grep '^NETWORK_ISOLATION=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"')
+                [ -n "$line" ] && NETWORK_ISOLATION_RAW="$line"
+            fi
+        fi
+    fi
+    EFFECTIVE="${PUBLIC_INGRESS_RAW:-$NETWORK_ISOLATION_RAW}"
+    case "$EFFECTIVE" in
+        1|true|t|TRUE|True) BOOL_LITERAL="true" ;;
+        *) BOOL_LITERAL="false" ;;
+    esac
+    if grep -q '"enabled":[[:space:]]*"\${PUBLIC_INGRESS_ENABLED' "$INFRA_PARAMS"; then
+        # Use perl for in-place portable across BSD/GNU sed
+        perl -i -pe 's|"enabled":\s*"\$\{PUBLIC_INGRESS_ENABLED[^"]*\}"|"enabled": '"$BOOL_LITERAL"'|' "$INFRA_PARAMS"
+        echo "${CYAN}Set publicIngress.enabled = $BOOL_LITERAL in infra parameters.${NC}"
+    fi
+fi
+
 if [ "${AZURE_SKIP_NETWORK_ISOLATION_WARNING:-}" = "1" ] || [ "${AZURE_SKIP_NETWORK_ISOLATION_WARNING:-}" = "true" ] || [ "${AZURE_SKIP_NETWORK_ISOLATION_WARNING:-}" = "t" ]; then
     exit 0
 fi

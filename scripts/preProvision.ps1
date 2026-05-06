@@ -73,6 +73,37 @@ foreach ($fileName in @("manifest.json", "main.parameters.json")) {
     }
 }
 
+# ARM rejects string -> bool coercion inside aggregate object properties, so
+# we cannot use "${VAR=...}" substitution for publicIngress.enabled. Instead,
+# we read the desired value from the azd environment (NETWORK_ISOLATION /
+# PUBLIC_INGRESS_ENABLED) and rewrite the field as a raw JSON boolean before
+# azd performs its own ${VAR} substitution pass.
+$infraParams = Join-Path $infraDir "main.parameters.json"
+if (Test-Path $infraParams) {
+    $networkIsolationRaw = $env:NETWORK_ISOLATION
+    $publicIngressRaw = $env:PUBLIC_INGRESS_ENABLED
+    if (-not $publicIngressRaw -and $env:AZURE_ENV_NAME) {
+        $envFile = Join-Path $projectRoot ".azure\$env:AZURE_ENV_NAME\.env"
+        if (Test-Path $envFile) {
+            $line = Get-Content $envFile | Where-Object { $_ -match '^PUBLIC_INGRESS_ENABLED=' } | Select-Object -First 1
+            if ($line) { $publicIngressRaw = ($line -split '=',2)[1].Trim('"') }
+            if (-not $networkIsolationRaw) {
+                $line = Get-Content $envFile | Where-Object { $_ -match '^NETWORK_ISOLATION=' } | Select-Object -First 1
+                if ($line) { $networkIsolationRaw = ($line -split '=',2)[1].Trim('"') }
+            }
+        }
+    }
+    $publicIngressEnabled = if ($publicIngressRaw) { $publicIngressRaw -match '^(1|true|t)$' } else { $networkIsolationRaw -match '^(1|true|t)$' }
+    $boolLiteral = if ($publicIngressEnabled) { 'true' } else { 'false' }
+    $content = Get-Content $infraParams -Raw
+    $pattern = '"enabled":\s*"\$\{PUBLIC_INGRESS_ENABLED[^"]*\}"'
+    if ($content -match $pattern) {
+        $content = $content -replace $pattern, "`"enabled`": $boolLiteral"
+        Set-Content -Path $infraParams -Value $content -NoNewline
+        Write-Host "Set publicIngress.enabled = $boolLiteral in infra parameters." -ForegroundColor Cyan
+    }
+}
+
 function Test-Truthy($value) {
     if (-not $value) { return $false }
     return $value -match '^(1|true|t)$'
