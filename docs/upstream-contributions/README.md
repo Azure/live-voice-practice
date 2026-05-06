@@ -13,10 +13,10 @@ This folder contains drafts of issues and pull requests intended for upstream re
 
 ## Why drafts live in this repo
 
-The infrastructure of this accelerator is consumed from upstream repositories (notably [`Azure/AI-Landing-Zones`](https://github.com/Azure/AI-Landing-Zones)). Modifications needed for this accelerator's scenarios are filed upstream rather than carried as patches in this repository's submodule. Drafting the proposal here, in the same repository where the motivating scenario lives, keeps the design discussion close to the evidence that motivates it.
+The infrastructure of this accelerator is consumed from upstream repositories (notably [`Azure/bicep-ptn-aiml-landing-zone`](https://github.com/Azure/bicep-ptn-aiml-landing-zone)). Modifications needed for this accelerator's scenarios are filed upstream rather than carried as patches in this repository's submodule. Drafting the proposal here, in the same repository where the motivating scenario lives, keeps the design discussion close to the evidence that motivates it.
 
 ## Index
 
 | Seq | Target repository | Title | Status |
 |----:|-------------------|-------|--------|
-| 001 | `Azure/AI-Landing-Zones` | Optional public ingress (Application Gateway) for ACA-internal scenarios that require browser-side device capabilities | Filed as [#104](https://github.com/Azure/AI-Landing-Zones/issues/104) |
+| 001 | `Azure/bicep-ptn-aiml-landing-zone` | Optional public ingress (Application Gateway) for ACA-internal scenarios that require browser-side device capabilities | Filed as [#49](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49) |

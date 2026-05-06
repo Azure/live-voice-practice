@@ -1,9 +1,11 @@
 # Optional public ingress (Application Gateway) for ACA-internal scenarios that require browser-side device capabilities
 
-> **Target repository:** `Azure/AI-Landing-Zones`
+> **Target repository:** `Azure/bicep-ptn-aiml-landing-zone`
 > **Type:** Feature request
-> **Status:** Filed as [Azure/AI-Landing-Zones#104](https://github.com/Azure/AI-Landing-Zones/issues/104)
+> **Status:** Filed as [Azure/bicep-ptn-aiml-landing-zone#49](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49)
 > **Suggested labels:** `enhancement`, `networking`, `application-gateway`, `container-apps`
+
+> **Note:** Initially filed in error at `Azure/AI-Landing-Zones#104`, which has been closed with a redirect comment. The correct target is `Azure/bicep-ptn-aiml-landing-zone` (the Bicep implementation of the AI Landing Zone).
 
 ---
 
