@@ -91,6 +91,102 @@ The runbook supplied with the module documents the following steps, all performe
 
 When the testing window closes, the inverse runbook removes the allow rules and re-deploys with `publicIngress.enabled = false`, which removes the gateway, the public IP, and the WAF policy in a single step.
 
+### Example walkthrough (illustrative, non-prescriptive)
+
+The runbook above is intentionally provider-agnostic — it does not name a registrar, a certification authority, or a tool. To make the contract concrete for a reader who has not gone through the loop before, this section walks through **one** worked example. It is not a recommendation. Any equivalent toolchain works the same way against the same outputs.
+
+In this example, the operator uses a domain registrar that supports DNS A and TXT records, an ACME client (`certbot`) running on the operator's local workstation in manual DNS-01 mode, and a publicly trusted certification authority that issues certificates via ACME. The operator could equally use a corporate-issued certificate from an internal CA whose root is in the testers' browser trust store, a portal-driven ACME flow, a paid commercial CA with a CSR they generate themselves, or any other path that ends with a valid PFX they can import into Key Vault.
+
+```text
+Step 1. Read the deployment outputs.
+
+  $ az deployment group show -g <rg> -n <deployment> \
+      --query properties.outputs.publicIngressOutputs.value -o json
+
+  → { "publicIp": "20.x.x.x", ... }
+
+Step 2. Configure DNS at the operator's chosen registrar.
+
+  In the registrar's DNS panel, create an A record:
+    name:  voicelab    (or whatever subdomain the operator chose)
+    value: 20.x.x.x    (the publicIp from step 1)
+    TTL:   300
+
+  Wait for propagation (usually under five minutes for fresh records).
+  Validate from the operator's workstation:
+    PS> Resolve-DnsName voicelab.example.com
+    bash$ dig +short voicelab.example.com
+
+Step 3. Obtain a TLS certificate for the chosen hostname.
+
+  Run an ACME client of the operator's choice from any environment the
+  operator prefers (local workstation, Cloud Shell, CI runner, jumpbox).
+  Example with certbot in manual DNS-01 mode:
+
+    certbot certonly --manual --preferred-challenges dns \
+                     -d voicelab.example.com
+
+  Certbot prints a TXT record name and value. The operator publishes
+  that record at their registrar (same panel as step 2), waits for
+  propagation, then continues. Certbot writes:
+    fullchain.pem
+    privkey.pem
+
+  The operator converts to PFX (Application Gateway and Key Vault
+  consume PFX):
+
+    openssl pkcs12 -export -out voicelab.pfx \
+                   -inkey privkey.pem -in fullchain.pem \
+                   -passout pass:<pfx-password>
+
+Step 4. Import the certificate into the deployment's Key Vault.
+
+  $ az keyvault certificate import \
+      --vault-name <kv-name-from-landingZoneOutputs> \
+      --name voicelab-cert \
+      --file voicelab.pfx \
+      --password <pfx-password>
+
+Step 5. Update the HTTPS listener.
+
+  Portal: Application Gateway → Listeners → edit the HTTPS listener.
+    Hostname:   voicelab.example.com
+    Certificate: select the imported Key Vault certificate
+                 voicelab-cert.
+
+  CLI equivalent:
+    az network application-gateway ssl-cert update \
+       -g <rg> --gateway-name <agw-name> \
+       --name voicelab-cert \
+       --key-vault-secret-id <secretId-from-step-4>
+
+Step 6. Add the testers' source CIDRs as allow rules on the NSG.
+
+  Portal: NSG (publicIngressOutputs.nsgResourceId) → Inbound rules →
+    Add rule:
+      source: IP Addresses
+      source CIDRs: <tester-1>/32, <tester-2>/32, ...
+      destination: Any
+      port: 443
+      action: Allow
+      priority: 100
+
+Step 7. Validate end-to-end.
+
+  From a tester's workstation:
+    https://voicelab.example.com
+  → TLS green, application loads, browser device APIs work.
+```
+
+The substitutions a different operator might make:
+
+- **Different registrar** — same A/TXT mechanics, different UI.
+- **Different ACME client** — `acme.sh`, `lego`, the portal's built-in ACME flow if available, or a managed-by-PaaS path. Same Key Vault import in step 4.
+- **Different CA** — including a corporate internal CA. Skip the ACME steps, generate a CSR locally with `openssl req`, submit it to the CA, receive the signed cert, build the PFX, import to Key Vault. Steps 4 onward are unchanged.
+- **Different cert format pipeline** — operators with existing PFX assets skip the OpenSSL conversion and import directly.
+
+What the module guarantees, regardless of the operator's choices: **steps 4 through 7 are the same**. The contract between the module and the operator is the Key Vault certificate reference and the listener hostname.
+
 ### Outputs
 
 The module exposes the artifacts an operator needs to complete configuration and the artifacts a deployer needs to wire into other tooling:
