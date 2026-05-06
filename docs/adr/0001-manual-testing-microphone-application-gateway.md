@@ -1,9 +1,10 @@
 # ADR-0001: Use Application Gateway with WAF and IP allow-list to enable manual end-user testing of voice features
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-05-06
 - **Deciders:** Platform engineering owners of `Azure/live-voice-practice`
 - **Scope:** Network-isolated deployments (`enableNetworkIsolation = true`) where the app must be exercised by a real human with a microphone connected to their local machine
+- **Related:** [ADR-0002](0002-bring-your-own-domain-and-certificate.md) — Bring Your Own Domain and Bring Your Own Certificate for the public ingress
 
 ---
 
@@ -114,7 +115,7 @@ The pattern is bounded as follows.
 
 - **Lifecycle.** The Application Gateway is provisioned at the start of a testing window and deleted at its end. It is not part of the steady-state Bicep for the deployment. Implementation will live in an opt-in module that is invoked manually, not from `azd provision`.
 - **Access.** The WAF policy and Application Gateway listener restrict source IP to the operator's egress IP only. The IP is a parameter of the opt-in module and is set at deployment time.
-- **TLS.** A managed certificate via the existing Key Vault (preferred) or a self-signed certificate (fallback) is used on the listener. No certificate is reused across testing windows.
+- **TLS.** A certificate referenced from the existing Key Vault is used on the listener. The certificate is supplied by the deployer; the accelerator does not issue, renew, or own it. See [ADR-0002](0002-bring-your-own-domain-and-certificate.md) for the boundary between the accelerator and the deployer on domain and certificate ownership.
 - **Routing.** A single backend pool targets the existing internal ACA environment's default domain. The gateway forwards all paths to the same backend; no path-based routing is needed for this scope.
 - **WAF.** OWASP Core Rule Set in Detection mode for the first run, then Prevention mode once the app's request shape (WebRTC signaling, audio uploads) is known to pass.
 - **Logging.** The gateway is created with a Diagnostic Setting that ships access logs and firewall logs to the existing Log Analytics workspace.

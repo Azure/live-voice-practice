@@ -4,4 +4,5 @@ This folder uses the [MADR](https://adr.github.io/madr/) format. New ADRs are nu
 
 | ID | Title | Status |
 |----|-------|--------|
-| [0001](0001-manual-testing-microphone-application-gateway.md) | Use Application Gateway with WAF and IP allow-list to enable manual end-user testing of voice features | Proposed |
+| [0001](0001-manual-testing-microphone-application-gateway.md) | Use Application Gateway with WAF and IP allow-list to enable manual end-user testing of voice features | Accepted |
+| [0002](0002-bring-your-own-domain-and-certificate.md) | Bring Your Own Domain and Bring Your Own Certificate for the public ingress | Accepted |
