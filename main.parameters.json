@@ -54,7 +54,7 @@
 
     "publicIngress": {
       "value": {
-        "enabled": "${PUBLIC_INGRESS_ENABLED=${NETWORK_ISOLATION=false}}",
+        "enabled": ${PUBLIC_INGRESS_ENABLED=${NETWORK_ISOLATION=false}},
         "frontendHostName": "${PUBLIC_INGRESS_FRONTEND_HOSTNAME=}",
         "sslCertSecretId": "${PUBLIC_INGRESS_SSL_CERT_SECRET_ID=}"
       }
