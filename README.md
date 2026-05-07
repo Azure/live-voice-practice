@@ -47,6 +47,16 @@ This project supports two deployment modes:
 
   Network isolation now also provisions an **Application Gateway WAF v2 in skeleton mode** in front of the internally posted Container App (since AILZ `v1.1.6` adopted upstream issue [`#49`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49)). The gateway is inert until you complete a deployer-side BYO domain + certificate step. Follow [docs/manual-testing/public-ingress-runbook.md](docs/manual-testing/public-ingress-runbook.md) to promote it to live mode and reach the app from a real workstation with a real microphone.
 
+### Defaults at a glance
+
+| Parameter | Always | Only when `NETWORK_ISOLATION=true` |
+|---|---|---|
+| Container App identity (`useUAI=false`) | **System-assigned (default)** | (same) |
+| ACS media egress firewall rules (`enableAcsMediaEgress`) | n/a (no firewall) | **enabled (default)** — opens UDP 3478-3481 / TCP 443+3478-3481 to `AzureCloud` for Speech avatar / ACS Calling / Teams Media |
+| Application Gateway WAF v2 skeleton (`publicIngress.enabled`) | n/a (Container App ingress is public) | **enabled (default)** — inert until you complete BYO domain + cert in the public-ingress runbook |
+
+Override any of these with `azd env set` (e.g. `azd env set USE_UAI true`, `azd env set ENABLE_ACS_MEDIA_EGRESS false`, `azd env set PUBLIC_INGRESS_ENABLED false`) before `azd provision`.
+
 See **[docs/deployment.md](docs/deployment.md)** for the full step-by-step guide covering both modes (prerequisites, env variables, the workstation/jumpbox split for network isolation, post-provision hook, image build via the in-VNet ACR Tasks agent pool, validation, and teardown).
 
 Quick reference for the jumpbox split (subnets, firewall allow-list, troubleshooting): [docs/network-isolation-jumpbox-runbook.md](docs/network-isolation-jumpbox-runbook.md).

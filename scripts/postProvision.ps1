@@ -201,67 +201,6 @@ if ($useUai -and ($useUai.ToLower() -in @('true','1','yes'))) {
   }
 }
 
-# Workaround for upstream regression in `enableAcsMediaEgress` rule
-# (Azure/bicep-ptn-aiml-landing-zone v1.1.5+): the rule's destinationAddresses
-# is pinned to the service tag `AzureCommunicationServices`, which DOES NOT
-# EXIST in the Azure service-tag namespace (verified: `az network list-service-tags`
-# returns 1465 tags, none named `AzureCommunicationServices`). The shipped rule
-# therefore resolves to an empty IP set and effectively blocks all TURN media
-# traffic. The Speech real-time avatar TURN backend resolves to Skype-prefixed
-# hostnames (a-tr-skysc-<region>-NN.<region>.cloudapp.azure.com -> 20.202.x.x)
-# whose IPs are in `AzureCloud`/`AzureCloud.<region>`. Symptom: avatar stays at
-# "Getting your avatar ready" and ICE goes checking->failed.
-# Tracked upstream: https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/50
-# Self-healing PUT below switches the destination to `AzureCloud` (ports
-# unchanged: UDP 3478-3481, TCP 443+3478-3481). Remove this block once the
-# upstream issue is resolved and submodule pin is bumped.
-$networkIsolationOn = $networkIsolationEnabled
-$enableAcsMediaEgress = $env:ENABLE_ACS_MEDIA_EGRESS
-if ($networkIsolationOn -and ($enableAcsMediaEgress -match '^(true|True|1|yes|YES)$')) {
-  $fwPolicyName = az network firewall policy list -g $resourceGroup --query "[?starts_with(name,'afwp-')] | [0].name" -o tsv 2>$null
-  if ($fwPolicyName) {
-    $rcgName = 'AcsMediaRuleCollectionGroup'
-    $currentDest = az network firewall policy rule-collection-group show -g $resourceGroup --policy-name $fwPolicyName --name $rcgName --query "ruleCollections[0].rules[0].destinationAddresses[0]" -o tsv 2>$null
-    if ($currentDest -and $currentDest -ne 'AzureCloud') {
-      Write-Host "[>] Patching ACS media firewall rule destination from '$currentDest' -> 'AzureCloud' (Speech avatar TURN fix)..."
-      $rcgId = az network firewall policy rule-collection-group show -g $resourceGroup --policy-name $fwPolicyName --name $rcgName --query "id" -o tsv 2>$null
-      if ($rcgId) {
-        $existing = az network firewall policy rule-collection-group show -g $resourceGroup --policy-name $fwPolicyName --name $rcgName -o json 2>$null | ConvertFrom-Json
-        $sources = $existing.ruleCollections[0].rules[0].sourceAddresses
-        $patchBody = @{
-          properties = @{
-            priority = 300
-            ruleCollections = @(
-              @{
-                ruleCollectionType = 'FirewallPolicyFilterRuleCollection'
-                name = 'AllowAcsMedia'
-                priority = 100
-                action = @{ type = 'Allow' }
-                rules = @(
-                  @{ ruleType='NetworkRule'; name='AllowAcsMediaUdp'; ipProtocols=@('UDP'); sourceAddresses=$sources; destinationAddresses=@('AzureCloud'); destinationPorts=@('3478-3481') },
-                  @{ ruleType='NetworkRule'; name='AllowAcsMediaTcp'; ipProtocols=@('TCP'); sourceAddresses=$sources; destinationAddresses=@('AzureCloud'); destinationPorts=@('443','3478-3481') }
-                )
-              }
-            )
-          }
-        } | ConvertTo-Json -Depth 10 -Compress
-        $tmpFile = [System.IO.Path]::Combine($env:TEMP, "fwp-acs-patch-$([guid]::NewGuid().ToString('N')).json")
-        $patchBody | Out-File -FilePath $tmpFile -Encoding utf8
-        az rest --method PUT --uri "https://management.azure.com${rcgId}?api-version=2024-07-01" --body "@$tmpFile" -o none 2>$null
-        $rc = $LASTEXITCODE
-        Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
-        if ($rc -eq 0) {
-          Write-Host "[OK] ACS media rule patched to AzureCloud (avatar TURN egress unblocked)."
-        } else {
-          Write-Host "[!] Failed to patch ACS media rule (exit=$rc); avatar may show 'Getting your avatar ready' indefinitely."
-        }
-      }
-    } elseif ($currentDest -eq 'AzureCloud') {
-      Write-Host "[OK] ACS media rule already pinned to AzureCloud."
-    }
-  }
-}
-
 if ($appConfigEndpoint -and (Test-DataplaneShouldRun)) {
   Write-Host "[>] Writing app-specific settings to App Configuration..."
 

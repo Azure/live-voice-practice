@@ -50,7 +50,7 @@
 
     "bastionSkuName": { "value": "${BASTION_SKU_NAME=Standard}" },
     "bastionEnableTunneling": { "value": "${BASTION_ENABLE_TUNNELING=false}" },
-    "enableAcsMediaEgress": { "value": "${ENABLE_ACS_MEDIA_EGRESS=true}" },
+    "enableAcsMediaEgress": { "value": "${ENABLE_ACS_MEDIA_EGRESS=${NETWORK_ISOLATION=false}}" },
 
     "publicIngress": {
       "value": {
