@@ -74,6 +74,11 @@ if (-not $aiServicesName) {
 $embeddingDeploymentName = if ($env:EMBEDDING_DEPLOYMENT_NAME) { $env:EMBEDDING_DEPLOYMENT_NAME } else { 'text-embedding-3-small' }
 $searchEndpoint = "https://$searchServiceName.search.windows.net"
 $apiVersion = '2024-07-01'
+# Datasource PUTs use a preview API version because the stable 2024-07-01 schema
+# does not include the top-level `identity` property required for User-Assigned MI
+# (per https://learn.microsoft.com/azure/search/search-howto-managed-identities-data-sources).
+# Only used for datasource calls; everything else stays on the stable version.
+$dsApiVersion = '2024-05-01-preview'
 
 # The embedding deployment is created by Bicep via the modelDeploymentList parameter
 # in main.parameters.json. Do not (re)create it here — doing so masks parameter
@@ -287,8 +292,8 @@ $transcriptsIndexerBody = '@' + (Join-Path $tmpDir 'transcripts-indexer.json')
 $searchResource = 'https://search.azure.com'
 az rest --resource $searchResource --method put --url "$searchEndpoint/indexes/support-materials?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $supportIndexBody | Out-Null
 az rest --resource $searchResource --method put --url "$searchEndpoint/indexes/transcripts?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $transcriptsIndexBody | Out-Null
-az rest --resource $searchResource --method put --url "$searchEndpoint/datasources/datasource-support-materials?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $supportDsBody | Out-Null
-az rest --resource $searchResource --method put --url "$searchEndpoint/datasources/datasource-transcripts?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $transcriptsDsBody | Out-Null
+az rest --resource $searchResource --method put --url "$searchEndpoint/datasources/datasource-support-materials?api-version=$dsApiVersion" --headers 'Content-Type=application/json' --body $supportDsBody | Out-Null
+az rest --resource $searchResource --method put --url "$searchEndpoint/datasources/datasource-transcripts?api-version=$dsApiVersion" --headers 'Content-Type=application/json' --body $transcriptsDsBody | Out-Null
 az rest --resource $searchResource --method put --url "$searchEndpoint/skillsets/skillset-support-materials?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $supportSkillsetBody | Out-Null
 az rest --resource $searchResource --method put --url "$searchEndpoint/skillsets/skillset-transcripts?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $transcriptsSkillsetBody | Out-Null
 az rest --resource $searchResource --method put --url "$searchEndpoint/indexers/support-materials-indexer?api-version=$apiVersion" --headers 'Content-Type=application/json' --body $supportIndexerBody | Out-Null
