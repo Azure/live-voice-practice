@@ -96,8 +96,22 @@ if (Test-Path "samples/transcripts") {
   az storage blob upload-batch --account-name $storageAccountName --auth-mode login --destination transcripts-src --source samples/transcripts --pattern "*.txt" --overwrite | Out-Null
 }
 
-# Datasource connection uses ResourceId form so Search authenticates to Storage via its system-assigned MI (no keys)
+# Datasource connection uses ResourceId form so Search authenticates to Storage via its managed identity (no keys).
+# When the Search service is provisioned with a User-Assigned Identity (UAI), the data source must
+# explicitly reference that identity via an "identity" block; otherwise Search returns
+# "Ensure managed identity is enabled for your service." Detect identity type at runtime so this
+# script works for both SAI and UAI deployments.
 $conn = "ResourceId=$storageAccountId;"
+$searchIdentityType = az search service show -g $resourceGroup -n $searchServiceName --query "identity.type" -o tsv 2>$null
+$searchUaiResourceId = ''
+if ($searchIdentityType -and $searchIdentityType -match 'UserAssigned') {
+  $searchUaiResourceId = az search service show -g $resourceGroup -n $searchServiceName --query "identity.userAssignedIdentities | keys(@) | [0]" -o tsv 2>$null
+}
+$dsIdentityFragment = ''
+if ($searchUaiResourceId) {
+  $dsIdentityFragment = ',"identity":{"@odata.type":"#Microsoft.Azure.Search.DataUserAssignedIdentity","userAssignedIdentity":"' + $searchUaiResourceId + '"}'
+  Write-Host "[>] Search uses UAI; injecting userAssignedIdentity into datasources: $searchUaiResourceId"
+}
 $tmpDir = Join-Path $PSScriptRoot '.tmp-search'
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
 
@@ -160,7 +174,7 @@ New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
   "name": "datasource-support-materials",
   "type": "azureblob",
   "credentials": {"connectionString": "$conn"},
-  "container": {"name": "support-materials-src"}
+  "container": {"name": "support-materials-src"}$dsIdentityFragment
 }
 "@ | Set-Content -Path (Join-Path $tmpDir 'support-ds.json') -Encoding UTF8
 
@@ -169,7 +183,7 @@ New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
   "name": "datasource-transcripts",
   "type": "azureblob",
   "credentials": {"connectionString": "$conn"},
-  "container": {"name": "transcripts-src"}
+  "container": {"name": "transcripts-src"}$dsIdentityFragment
 }
 "@ | Set-Content -Path (Join-Path $tmpDir 'transcripts-ds.json') -Encoding UTF8
 
