@@ -461,8 +461,12 @@ if (-not ($env:ENABLE_COSMOS_SAMPLE_SEED -match '^(false|False|0|no|NO)$')) {
           $url = "$Base/dbs/$Db/colls/$Container/docs"
           # Partition key header MUST be a JSON array as a string.
           $pkHeader = '["' + $PartitionKeyValue + '"]'
+          # Cosmos REST API requires the Authorization header value to be URL-encoded
+          # (per https://learn.microsoft.com/rest/api/cosmos-db/access-control-on-cosmosdb-resources).
+          # Without encoding, the server returns "The format of value 'type=aad&ver=1.0&sig=...' is invalid."
+          $authValue = 'type%3Daad%26ver%3D1.0%26sig%3D' + $Token
           $headers = @{
-            'Authorization'                   = "type=aad&ver=1.0&sig=$Token"
+            'Authorization'                   = $authValue
             'x-ms-version'                    = '2018-12-31'
             'x-ms-date'                       = ([DateTime]::UtcNow.ToString('R'))
             'x-ms-documentdb-is-upsert'       = 'true'
