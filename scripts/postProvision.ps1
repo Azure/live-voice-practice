@@ -103,6 +103,10 @@ if ($networkIsolationEnabled) {
   if ($env:RUN_FROM_JUMPBOX -match '^(true|True|1|yes|YES)$') {
     $runFromJumpboxEnabled = $true
     Write-Host "[OK] RUN_FROM_JUMPBOX=true detected; continuing with data-plane post-provisioning non-interactively."
+  } elseif ($env:RUN_FROM_JUMPBOX -match '^(false|False|0|no|NO|skip|SKIP)$') {
+    $runFromJumpboxEnabled = $false
+    Write-Host "[-] RUN_FROM_JUMPBOX=$($env:RUN_FROM_JUMPBOX) detected; data-plane steps will be skipped (no prompt)."
+    Write-Host "   Re-run interactively from the jumpbox/Bastion, OR set RUN_FROM_JUMPBOX=true to apply them."
   } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
     $answer = Read-Host "[?] Are you running this script from inside the VNet or via VPN? [Y/n]"
     if ([string]::IsNullOrWhiteSpace($answer) -or $answer -match '^(y|Y|yes|YES|true|True|1)$') {
