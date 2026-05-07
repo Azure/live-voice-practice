@@ -201,6 +201,65 @@ if ($useUai -and ($useUai.ToLower() -in @('true','1','yes'))) {
   }
 }
 
+# Workaround for upstream limitation in `enableAcsMediaEgress` rule
+# (Azure/bicep-ptn-aiml-landing-zone): the rule's destinationAddresses is
+# pinned to the `AzureCommunicationServices` service tag, but the Speech
+# real-time avatar TURN backend resolves to Skype-prefixed hostnames
+# (a-tr-skysc-<region>-NN.<region>.cloudapp.azure.com) whose IPs are NOT
+# in that service tag. Result: ICE candidate gathering fails with STUN/TURN
+# 701 host lookup errors and the avatar is stuck on "Getting your avatar
+# ready". Validated end-to-end that switching the destination to the broad
+# `AzureCloud` tag (scoped down by ports 3478-3481/443) unblocks TURN
+# allocation. The fix is applied here imperatively so every fresh provision
+# self-heals; remove this block once the upstream rule accepts a parameter
+# or is widened to AzureCloud by default.
+$networkIsolationOn = $networkIsolationEnabled
+$enableAcsMediaEgress = $env:ENABLE_ACS_MEDIA_EGRESS
+if ($networkIsolationOn -and ($enableAcsMediaEgress -match '^(true|True|1|yes|YES)$')) {
+  $fwPolicyName = az network firewall policy list -g $resourceGroup --query "[?starts_with(name,'afwp-')] | [0].name" -o tsv 2>$null
+  if ($fwPolicyName) {
+    $rcgName = 'AcsMediaRuleCollectionGroup'
+    $currentDest = az network firewall policy rule-collection-group show -g $resourceGroup --policy-name $fwPolicyName --name $rcgName --query "ruleCollections[0].rules[0].destinationAddresses[0]" -o tsv 2>$null
+    if ($currentDest -and $currentDest -ne 'AzureCloud') {
+      Write-Host "[>] Patching ACS media firewall rule destination from '$currentDest' -> 'AzureCloud' (Speech avatar TURN fix)..."
+      $rcgId = az network firewall policy rule-collection-group show -g $resourceGroup --policy-name $fwPolicyName --name $rcgName --query "id" -o tsv 2>$null
+      if ($rcgId) {
+        $existing = az network firewall policy rule-collection-group show -g $resourceGroup --policy-name $fwPolicyName --name $rcgName -o json 2>$null | ConvertFrom-Json
+        $sources = $existing.ruleCollections[0].rules[0].sourceAddresses
+        $patchBody = @{
+          properties = @{
+            priority = 300
+            ruleCollections = @(
+              @{
+                ruleCollectionType = 'FirewallPolicyFilterRuleCollection'
+                name = 'AllowAcsMedia'
+                priority = 100
+                action = @{ type = 'Allow' }
+                rules = @(
+                  @{ ruleType='NetworkRule'; name='AllowAcsMediaUdp'; ipProtocols=@('UDP'); sourceAddresses=$sources; destinationAddresses=@('AzureCloud'); destinationPorts=@('3478-3481') },
+                  @{ ruleType='NetworkRule'; name='AllowAcsMediaTcp'; ipProtocols=@('TCP'); sourceAddresses=$sources; destinationAddresses=@('AzureCloud'); destinationPorts=@('443','3478-3481') }
+                )
+              }
+            )
+          }
+        } | ConvertTo-Json -Depth 10 -Compress
+        $tmpFile = [System.IO.Path]::Combine($env:TEMP, "fwp-acs-patch-$([guid]::NewGuid().ToString('N')).json")
+        $patchBody | Out-File -FilePath $tmpFile -Encoding utf8
+        az rest --method PUT --uri "https://management.azure.com${rcgId}?api-version=2024-07-01" --body "@$tmpFile" -o none 2>$null
+        $rc = $LASTEXITCODE
+        Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+        if ($rc -eq 0) {
+          Write-Host "[OK] ACS media rule patched to AzureCloud (avatar TURN egress unblocked)."
+        } else {
+          Write-Host "[!] Failed to patch ACS media rule (exit=$rc); avatar may show 'Getting your avatar ready' indefinitely."
+        }
+      }
+    } elseif ($currentDest -eq 'AzureCloud') {
+      Write-Host "[OK] ACS media rule already pinned to AzureCloud."
+    }
+  }
+}
+
 if ($appConfigEndpoint -and (Test-DataplaneShouldRun)) {
   Write-Host "[>] Writing app-specific settings to App Configuration..."
 
