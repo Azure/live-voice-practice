@@ -201,18 +201,20 @@ if ($useUai -and ($useUai.ToLower() -in @('true','1','yes'))) {
   }
 }
 
-# Workaround for upstream limitation in `enableAcsMediaEgress` rule
-# (Azure/bicep-ptn-aiml-landing-zone): the rule's destinationAddresses is
-# pinned to the `AzureCommunicationServices` service tag, but the Speech
-# real-time avatar TURN backend resolves to Skype-prefixed hostnames
-# (a-tr-skysc-<region>-NN.<region>.cloudapp.azure.com) whose IPs are NOT
-# in that service tag. Result: ICE candidate gathering fails with STUN/TURN
-# 701 host lookup errors and the avatar is stuck on "Getting your avatar
-# ready". Validated end-to-end that switching the destination to the broad
-# `AzureCloud` tag (scoped down by ports 3478-3481/443) unblocks TURN
-# allocation. The fix is applied here imperatively so every fresh provision
-# self-heals; remove this block once the upstream rule accepts a parameter
-# or is widened to AzureCloud by default.
+# Workaround for upstream regression in `enableAcsMediaEgress` rule
+# (Azure/bicep-ptn-aiml-landing-zone v1.1.5+): the rule's destinationAddresses
+# is pinned to the service tag `AzureCommunicationServices`, which DOES NOT
+# EXIST in the Azure service-tag namespace (verified: `az network list-service-tags`
+# returns 1465 tags, none named `AzureCommunicationServices`). The shipped rule
+# therefore resolves to an empty IP set and effectively blocks all TURN media
+# traffic. The Speech real-time avatar TURN backend resolves to Skype-prefixed
+# hostnames (a-tr-skysc-<region>-NN.<region>.cloudapp.azure.com -> 20.202.x.x)
+# whose IPs are in `AzureCloud`/`AzureCloud.<region>`. Symptom: avatar stays at
+# "Getting your avatar ready" and ICE goes checking->failed.
+# Tracked upstream: https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/50
+# Self-healing PUT below switches the destination to `AzureCloud` (ports
+# unchanged: UDP 3478-3481, TCP 443+3478-3481). Remove this block once the
+# upstream issue is resolved and submodule pin is bumped.
 $networkIsolationOn = $networkIsolationEnabled
 $enableAcsMediaEgress = $env:ENABLE_ACS_MEDIA_EGRESS
 if ($networkIsolationOn -and ($enableAcsMediaEgress -match '^(true|True|1|yes|YES)$')) {
