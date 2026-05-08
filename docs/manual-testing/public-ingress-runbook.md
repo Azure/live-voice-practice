@@ -24,30 +24,30 @@ This runbook does **not** prescribe a domain registrar, a DNS provider, or a cer
 
 ## 0. Read the deployment outputs
 
-After `azd provision` completes, capture the values the rest of the runbook depends on:
+Run this one-liner from your workstation **or** from the jumpbox — it queries Azure directly and prints every value the rest of the runbook needs:
 
 ```powershell
 cd C:\path\to\live-voice-practice
-azd env get-values |
-  Select-String -Pattern 'PUBLIC_INGRESS_|KEY_VAULT_NAME|AZURE_RESOURCE_GROUP'
+pwsh -File ./scripts/show-public-ingress-outputs.ps1
 ```
 
-You should see at least:
+You should see something like:
 
 ```text
-AZURE_RESOURCE_GROUP="rg-<env>"
-KEY_VAULT_NAME="kv-<token>"
-PUBLIC_INGRESS_ENABLED="true"
-PUBLIC_INGRESS_PUBLIC_IP="20.x.x.x"
-PUBLIC_INGRESS_GATEWAY_RESOURCE_ID="/subscriptions/.../applicationGateways/agw-<token>"
-PUBLIC_INGRESS_NSG_RESOURCE_ID="/subscriptions/.../networkSecurityGroups/nsg-agw-<token>"
-PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID="<guid>"
-PUBLIC_INGRESS_LIVE="false"
+AZURE_RESOURCE_GROUP                 = rg-<env>
+KEY_VAULT_NAME                       = kv-<token>
+PUBLIC_INGRESS_PUBLIC_IP             = 20.x.x.x
+PUBLIC_INGRESS_GATEWAY_RESOURCE_ID   = /subscriptions/.../applicationGateways/agw-<token>
+PUBLIC_INGRESS_NSG_RESOURCE_ID       = /subscriptions/.../networkSecurityGroups/nsg-agw-<token>
+PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID = <guid>
+PUBLIC_INGRESS_LIVE                  = false
 ```
 
 `PUBLIC_INGRESS_LIVE=false` confirms the deployment is in skeleton mode.
 
-If `PUBLIC_INGRESS_PUBLIC_IP` is empty, the deployment did not enable the public ingress. Check that `NETWORK_ISOLATION=true` (or set `PUBLIC_INGRESS_ENABLED=true` explicitly) and re-run `azd provision`.
+If `PUBLIC_INGRESS_PUBLIC_IP` is empty or the script reports "No Application Gateway found", the deployment did not enable the public ingress. Check that `NETWORK_ISOLATION=true` (or set `PUBLIC_INGRESS_ENABLED=true` explicitly) and re-run `azd provision`.
+
+> **Why a script and not `azd env get-values`?** `azd env refresh` requires interactive `azd auth login`, which does not work cleanly from headless contexts (e.g., the jumpbox under managed identity). The helper script above only needs `az login` (or `az login --identity` on the jumpbox) and works everywhere.
 
 ---
 
