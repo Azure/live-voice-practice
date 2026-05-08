@@ -49,8 +49,7 @@ function buildMicErrorMessage(err: unknown): string {
     case 'OverconstrainedError':
       return (
         'No microphone was detected on this device. ' +
-        'If you are connected through Azure Bastion HTML5, mic redirection is not supported — ' +
-        'connect with the Bastion native client (`az network bastion rdp`) or from a device with a microphone.'
+        'If you are connected through Azure Bastion, audio input is not supported.'
       )
     case 'NotAllowedError':
     case 'SecurityError':
