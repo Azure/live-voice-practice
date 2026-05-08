@@ -36,18 +36,27 @@ if (-not $agw) {
     exit 1
 }
 
-$gwId    = az network application-gateway show -g $rg -n $agw --query id -o tsv
-$pipId   = az network application-gateway show -g $rg -n $agw --query "frontendIPConfigurations[0].publicIPAddress.id" -o tsv
+$agwJson = az network application-gateway show -g $rg -n $agw -o json | ConvertFrom-Json
+
+$gwId    = $agwJson.id
+$pipId   = $agwJson.frontendIPConfigurations[0].publicIPAddress.id
 $pipName = Split-Path $pipId -Leaf
 $ip      = az network public-ip show -g $rg -n $pipName --query ipAddress -o tsv
-$miId    = az network application-gateway show -g $rg -n $agw --query "identity.userAssignedIdentities | keys(@) | [0]" -o tsv
+$miId    = $agwJson.identity.userAssignedIdentities.PSObject.Properties.Name | Select-Object -First 1
 $miPid   = az identity show --ids $miId --query principalId -o tsv
 
-$nsgId = az network nsg list -g $rg --query "[?contains(name,'agw')].id | [0]" -o tsv
+$nsgs = az network nsg list -g $rg -o json | ConvertFrom-Json
+$nsgId = @(
+    $nsgs | Where-Object {
+        $subnetIds = @($_.subnets | ForEach-Object { $_.id })
+        ($subnetIds -join ';') -match '(?i)/subnets/AppGatewaySubnet$'
+    } | Select-Object -ExpandProperty id -First 1
+)
 $kv    = az keyvault list -g $rg --query "[?!contains(name,'-ai-')].name | [0]" -o tsv
 
-$listenerCount = az network application-gateway http-listener list -g $rg --gateway-name $agw --query "length(@)" -o tsv
-$live = if ([int]$listenerCount -gt 0) { 'true' } else { 'false' }
+$sslCertificateCount = @($agwJson.sslCertificates).Count
+$httpsListenerCount = @($agwJson.httpListeners | Where-Object { $_.name -eq 'https-listener' }).Count
+$live = if ($sslCertificateCount -gt 0 -and $httpsListenerCount -gt 0) { 'true' } else { 'false' }
 
 Write-Host ""
 Write-Host "Copy these into your runbook session:" -ForegroundColor Green
