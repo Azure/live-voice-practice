@@ -31,7 +31,7 @@ cd C:\path\to\live-voice-practice
 pwsh -File ./scripts/show-public-ingress-outputs.ps1
 ```
 
-You should see something like:
+The script prints both the raw outputs and ready-to-copy PowerShell variables. Keep the variables in your session because later steps use them:
 
 ```text
 AZURE_RESOURCE_GROUP                 = rg-<env>
@@ -41,6 +41,14 @@ PUBLIC_INGRESS_GATEWAY_RESOURCE_ID   = /subscriptions/.../applicationGateways/ag
 PUBLIC_INGRESS_NSG_RESOURCE_ID       = /subscriptions/.../networkSecurityGroups/nsg-agw-<token>
 PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID = <guid>
 PUBLIC_INGRESS_LIVE                  = false
+
+$rg     = 'rg-<env>'
+$kv     = 'kv-<token>'
+$ip     = '20.x.x.x'
+$miPid  = '<guid>'
+$gwId   = '/subscriptions/.../applicationGateways/agw-<token>'
+$nsgId  = '/subscriptions/.../networkSecurityGroups/nsg-<token>'
+$agw    = 'agw-<token>'
 ```
 
 `PUBLIC_INGRESS_LIVE=false` confirms the deployment is in skeleton mode.
@@ -182,7 +190,6 @@ You now have `voicelab.pfx` on disk.
 Use the Key Vault provisioned by the landing zone (`KEY_VAULT_NAME` from step 0). The Application Gateway's user-assigned identity has already been granted `Key Vault Secrets User` on this vault by the upstream module ([infra/modules/networking/public-ingress.bicep](../../infra/modules/networking/public-ingress.bicep) lines around RBAC), so no extra role assignment is required.
 
 ```powershell
-$kv          = (azd env get-value KEY_VAULT_NAME)
 $certName    = 'voicelab-cert'
 $pfxPassword = 'temporary-pfx-password'   # the one used in 3.c
 
@@ -206,7 +213,7 @@ Write-Host $secretId
 > ```powershell
 > az role assignment create `
 >   --role 'Key Vault Secrets User' `
->   --assignee $(azd env get-value PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID) `
+>   --assignee $miPid `
 >   --scope /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<external-kv>
 > ```
 
@@ -250,7 +257,7 @@ azd provision
 The reconcile is fast (only the gateway listener, redirect rule, NSG rule, and the cert reference change). Validate the transition:
 
 ```powershell
-azd env get-value PUBLIC_INGRESS_LIVE
+pwsh -File ./scripts/show-public-ingress-outputs.ps1
 # expected: true
 ```
 
@@ -305,10 +312,9 @@ azd provision
 > **Caveat documented upstream.** `azd`/ARM incremental deployments will **not** delete public-ingress resources when `publicIngress.enabled` flips back to `false` after a previous deploy. The upstream module documents this explicitly. To actually remove the resources without `azd down`, you must delete them manually:
 >
 > ```powershell
-> $rg  = azd env get-value AZURE_RESOURCE_GROUP
-> $agw = (azd env get-value PUBLIC_INGRESS_GATEWAY_RESOURCE_ID).Split('/')[-1]
 > az network application-gateway delete -g $rg -n $agw
-> # also delete the corresponding PIP, WAF policy, and NSG by reading their resource IDs from azd env
+> # also delete the corresponding PIP, WAF policy, and NSG by reading their resource IDs
+> # from the helper script output.
 > ```
 
 In either case, the application's internal posture (Container Apps environment with `internal=true`, private endpoints) is preserved across teardown and re-provision of the public ingress. You can flip the public ingress on and off without touching the workload.
@@ -349,9 +355,8 @@ Manual DNS-01 ACME challenges (the example in step 3) do not auto-renew. Most pu
 3. Re-run step 4 against the same `KEY_VAULT_NAME` and the same `voicelab-cert` name. The import creates a **new version**; the versionless `sslCertSecretId` automatically points at the latest version, so no Bicep change is required.
 4. Restart the gateway listener so it picks up the new cert version:
    ```powershell
-   az network application-gateway start `
-     --name $(azd env get-value PUBLIC_INGRESS_GATEWAY_RESOURCE_ID).Split('/')[-1] `
-     --resource-group $(azd env env get-value AZURE_RESOURCE_GROUP)
+   az network application-gateway stop  --resource-group $rg --name $agw
+   az network application-gateway start --resource-group $rg --name $agw
    ```
    In practice, AGW polls Key Vault every ~4 hours and rotates the cert without a restart; the explicit restart above only matters if you need the rotation immediately.
 
@@ -364,13 +369,13 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `PUBLIC_INGRESS_ENABLED` is `false` after provision | `NETWORK_ISOLATION=false` or `PUBLIC_INGRESS_ENABLED=false`. | `azd env set NETWORK_ISOLATION true` or `azd env set PUBLIC_INGRESS_ENABLED true` and re-provision. |
-| `PUBLIC_INGRESS_LIVE` stays `false` after step 5 | Either `frontendHostName` or `sslCertSecretId` is still empty on the gateway. | Re-check that both values were captured in `main.parameters.json` and that `azd provision` re-ran. `azd env get-values` should show non-empty values. |
+| `PUBLIC_INGRESS_LIVE` stays `false` after step 5 | Either `frontendHostName` or `sslCertSecretId` is still empty on the gateway. | Re-check the two `azd env set` commands from step 5 and confirm `azd provision` re-ran. Then run `pwsh -File ./scripts/show-public-ingress-outputs.ps1` again. |
 | `curl https://voicelab.example.com/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName voicelab.example.com` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
 | Browser shows certificate name mismatch | The cert was issued for a different hostname, or the listener was configured with a different hostname than the cert covers. | Re-issue the cert for the exact `frontendHostName`, or change `frontendHostName` to match. |
 | Browser shows `NET::ERR_CERT_AUTHORITY_INVALID` | The CA root is not in this browser's trust store. | Use a publicly trusted CA, or import the corporate root CA on the tester's workstation. |
 | `az keyvault certificate import` fails with `BadParameter: Could not parse` | The PFX is encrypted with an unsupported algorithm or the password is wrong. | Re-export the PFX with a known password and standard algorithms: `openssl pkcs12 -export -legacy -keypbe AES-256-CBC -certpbe AES-256-CBC -macalg SHA256 ...` |
 | `azd provision` fails with `KeyVault user is not authorized` on the gateway | The cert is in an external KV and the AGW UAI was not granted `Key Vault Secrets User` on it. | Run the role assignment from step 4 with the external KV's resource ID. |
-| `curl https://voicelab.example.com/` returns `502 Bad Gateway` from an allow-listed IP | The backend pool resolved correctly but the Container App isn't responding on `/`, or the Container App's own ingress is misconfigured. | Verify with `azd env get-value VOICELAB_APP_FQDN` + a test from inside the VNet. The backend pool wiring itself is correct by construction (Bicep). |
+| `curl https://voicelab.example.com/` returns `502 Bad Gateway` from an allow-listed IP | The backend pool resolved correctly but the Container App isn't responding on `/`, or the Container App's own ingress is misconfigured. | Test the Container App FQDN from inside the VNet/jumpbox. The backend pool wiring itself is correct by construction (Bicep). |
 
 ---
 
