@@ -102,19 +102,30 @@ DNS propagation for a fresh record is typically under 5 minutes in modern provid
 
 ## 3. Obtain a TLS certificate for the chosen hostname
 
-Obtain a certificate from any certification authority your audience's browsers trust by default. The accelerator does not endorse one CA over another. Three illustrative paths are listed in [§ Variations](#variations); the walkthrough below uses **Posh-ACME in manual DNS-01 mode** because it works from Windows PowerShell without `winget`, Docker, WSL, or a discontinued Certbot Windows installer.
+Obtain a certificate from any certification authority your audience's browsers trust by default. The accelerator does not endorse one CA over another. Three illustrative paths are listed in [§ Variations](#variations); the walkthrough below uses **win-acme** with Let's Encrypt and manual DNS-01 validation because it is a mature ACME client built specifically for Windows servers and does not require `winget`, WSL, Linux, or Docker.
 
-### 3.a. Install Posh-ACME (one-time, Windows PowerShell)
+### 3.a. Install win-acme (one-time, Windows PowerShell)
 
-Run this from a normal PowerShell session:
+Run this from a normal PowerShell session. It downloads the latest x64 trimmed win-acme release from GitHub and extracts it to `C:\tools\win-acme`:
 
 ```powershell
-Install-Module -Name Posh-ACME -Scope CurrentUser -Force
-Import-Module Posh-ACME
-Get-Module Posh-ACME
-```
+$wacsDir = 'C:\tools\win-acme'
+$release = Invoke-RestMethod 'https://api.github.com/repos/win-acme/win-acme/releases/latest'
+$asset = $release.assets |
+  Where-Object { $_.name -like 'win-acme.*.x64.trimmed.zip' } |
+  Select-Object -First 1
 
-If PowerShell prompts to trust PSGallery / install NuGet, answer `Y`.
+if (-not $asset) {
+  throw 'Could not find the latest win-acme x64 trimmed release asset.'
+}
+
+$zip = Join-Path $env:TEMP $asset.name
+Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+New-Item -ItemType Directory -Path $wacsDir -Force | Out-Null
+Expand-Archive -Path $zip -DestinationPath $wacsDir -Force
+
+& "$wacsDir\wacs.exe" --version
+```
 
 ### 3.b. Run the manual DNS-01 challenge
 
@@ -129,15 +140,22 @@ $pfxPassword = 'temporary-pfx-password'
 Request the certificate:
 
 ```powershell
-$cert = New-PACertificate `
-  -Domain $hostName `
-  -Contact $contactEmail `
-  -AcceptTOS `
-  -PfxPass $pfxPassword `
-  -DnsSleep 30
+$wacsDir = 'C:\tools\win-acme'
+
+& "$wacsDir\wacs.exe" `
+  --source manual `
+  --host $hostName `
+  --validation manual `
+  --validationmode dns-01 `
+  --store pfxfile `
+  --pfxfilepath (Get-Location).Path `
+  --pfxfilename 'voicelab' `
+  --pfxpassword $pfxPassword `
+  --accepttos `
+  --emailaddress $contactEmail
 ```
 
-Posh-ACME will pause and print the DNS TXT record you must create. Example:
+win-acme will pause and print the DNS TXT record you must create. Example:
 
 ```text
 Please create the following TXT record:
@@ -165,14 +183,13 @@ Resolve-DnsName _acme-challenge.voicelab.example.com -Type TXT
 # expected answer: the abc123XYZdef456... value
 ```
 
-Press Enter in the Posh-ACME terminal. On success, Posh-ACME returns a certificate object and writes the generated PFX to `$cert.PfxFullChain`.
+Press Enter in the win-acme terminal. On success, win-acme writes the generated PFX to `.\voicelab.pfx`.
 
-### 3.c. Copy the generated PFX to the runbook working directory
+### 3.c. Confirm the generated PFX
 
-Application Gateway and Key Vault consume the certificate in PKCS#12 (PFX) form. Posh-ACME already generated that file:
+Application Gateway and Key Vault consume the certificate in PKCS#12 (PFX) form. win-acme already generated that file:
 
 ```powershell
-Copy-Item -Path $cert.PfxFullChain -Destination .\voicelab.pfx -Force
 Get-Item .\voicelab.pfx
 ```
 
@@ -347,8 +364,8 @@ The walkthrough above uses one concrete toolchain. Each step has equivalent subs
 | Step | Walkthrough used | Equivalent alternatives |
 |------|------------------|-------------------------|
 | Domain | A registrar's DNS panel | Azure DNS zone (cheap if you already use Azure DNS); a corporate DNS zone if you control one. |
-| Certificate | `Posh-ACME` manual DNS-01 + a publicly trusted free CA | `certbot` from WSL/Linux, `acme.sh` or `lego` from any environment; the certificate authority of your organization (skip ACME, generate a CSR, submit, receive, build PFX); a paid commercial CA with their portal-driven flow. |
-| Cert format pipeline | Posh-ACME generated PFX | `openssl pkcs12 -export` when starting from PEM files; `New-PfxCertificate` (Windows) when the source is already a Windows cert store entry; the CA's portal if it issues PFX directly. |
+| Certificate | `win-acme` manual DNS-01 + a publicly trusted free CA | `certbot` from WSL/Linux, `Posh-ACME`, `acme.sh` or `lego` from any environment; the certificate authority of your organization (skip ACME, generate a CSR, submit, receive, build PFX); a paid commercial CA with their portal-driven flow. |
+| Cert format pipeline | win-acme generated PFX | `openssl pkcs12 -export` when starting from PEM files; `New-PfxCertificate` (Windows) when the source is already a Windows cert store entry; the CA's portal if it issues PFX directly. |
 | Where the ACME client runs | Local PowerShell | Azure Cloud Shell, a CI runner, the jumpbox VM, a Linux laptop, a Docker container — any environment with outbound DNS and HTTP. |
 | KV import | `az keyvault certificate import` | Portal: Key Vault → Certificates → Generate/Import → Import. |
 | Listener config | `azd env set` + `azd provision` (Bicep is the source of truth) | **Do not** configure the listener directly in the portal — portal edits will be overwritten by the next `azd provision`. |
@@ -370,7 +387,7 @@ That stable contract is the point of [ADR-0002](../adr/0002-bring-your-own-domai
 Manual DNS-01 ACME challenges (the example in step 3) do not auto-renew. Most public CAs that issue via ACME issue 90-day certs. When a renewal is due:
 
 1. Re-run step 3 with the same `$hostName` value.
-2. Re-run step 3.c to copy the fresh Posh-ACME PFX to `voicelab.pfx`.
+2. Re-run step 3.c to confirm the fresh win-acme PFX exists at `voicelab.pfx`.
 3. Re-run step 4 against the same `KEY_VAULT_NAME` and the same `voicelab-cert` name. The import creates a **new version**; the versionless `sslCertSecretId` automatically points at the latest version, so no Bicep change is required.
 4. Restart the gateway listener so it picks up the new cert version:
    ```powershell
@@ -392,7 +409,7 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 | `curl https://voicelab.example.com/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName voicelab.example.com` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
 | Browser shows certificate name mismatch | The cert was issued for a different hostname, or the listener was configured with a different hostname than the cert covers. | Re-issue the cert for the exact `frontendHostName`, or change `frontendHostName` to match. |
 | Browser shows `NET::ERR_CERT_AUTHORITY_INVALID` | The CA root is not in this browser's trust store. | Use a publicly trusted CA, or import the corporate root CA on the tester's workstation. |
-| `az keyvault certificate import` fails with `BadParameter: Could not parse` | The PFX password is wrong, or the PFX was produced by an incompatible toolchain. | If using Posh-ACME, confirm the import uses the same `-PfxPass` value from step 3.b. If using OpenSSL, re-export with a known password and standard algorithms: `openssl pkcs12 -export -legacy -keypbe AES-256-CBC -certpbe AES-256-CBC -macalg SHA256 ...` |
+| `az keyvault certificate import` fails with `BadParameter: Could not parse` | The PFX password is wrong, or the PFX was produced by an incompatible toolchain. | If using win-acme, confirm the import uses the same `--pfxpassword` value from step 3.b. If using OpenSSL, re-export with a known password and standard algorithms: `openssl pkcs12 -export -legacy -keypbe AES-256-CBC -certpbe AES-256-CBC -macalg SHA256 ...` |
 | `azd provision` fails with `KeyVault user is not authorized` on the gateway | The cert is in an external KV and the AGW UAI was not granted `Key Vault Secrets User` on it. | Run the role assignment from step 4 with the external KV's resource ID. |
 | `curl https://voicelab.example.com/` returns `502 Bad Gateway` from an allow-listed IP | The backend pool resolved correctly but the Container App isn't responding on `/`, or the Container App's own ingress is misconfigured. | Test the Container App FQDN from inside the VNet/jumpbox. The backend pool wiring itself is correct by construction (Bicep). |
 
