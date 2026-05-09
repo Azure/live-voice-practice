@@ -252,9 +252,9 @@ Get-Item .\voicelab.pfx
 
 You now have `voicelab.pfx` on disk. Use the same `$pfxPassword` value in the Key Vault import step.
 
-### 3.d. Alternative: use Certbot from WSL/Linux
+### 3.d. Optional alternative only: use Certbot from WSL/Linux
 
-If you prefer Certbot, run it from WSL or any Linux machine. The native Windows Certbot installer is no longer a reliable path.
+Skip this section if step 3.c produced `voicelab.pfx` with win-acme. It is only an alternative path for operators who choose not to use win-acme and instead want to run Certbot from WSL or a Linux machine. The native Windows Certbot installer is no longer a reliable path.
 
 ```bash
 sudo apt-get install certbot
