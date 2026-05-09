@@ -59,6 +59,23 @@ If `PUBLIC_INGRESS_PUBLIC_IP` is empty or the script reports "No Application Gat
 
 ---
 
+## Workflow overview: where each step runs
+
+Because the Key Vault has **public network access disabled**, the workflow is split:
+
+| Step | Location | Why |
+|------|----------|-----|
+| **0** (read outputs) | Your workstation or jumpbox | Either works; just needs Azure CLI |
+| **1** (choose domain) | Your workstation | No Azure resources needed |
+| **2** (create DNS A record) | Your workstation | Edit DNS provider UI |
+| **3** (obtain TLS cert) | **Jumpbox recommended** | If firewall blocks egress, you need jumpbox's private network path |
+| **4** (import to Key Vault) | **Jumpbox only** | Key Vault is not reachable from your workstation (public access disabled) |
+| **5** (promote to live) | Your workstation or jumpbox | Just needs `az provision` |
+
+**Bottom line:** Steps 3–4 are easiest when you do them together **on the jumpbox**. The Key Vault import (step 4) *must* run from the jumpbox; step 3 can run from your workstation if firewall permits, but it's more convenient on the jumpbox if you're already connected there.
+
+---
+
 ## 1. Choose and register a domain
 
 Choose a hostname you will publish to your testers. The hostname must be resolvable from the public Internet so that DNS-01 ACME challenges and the testers' browsers can both reach it. A subdomain of a domain you already own is sufficient and is the cheapest option (no registration cost, just a DNS record).
@@ -280,12 +297,48 @@ openssl pkcs12 -export \
 
 ## 4. Import the certificate into the deployment's Key Vault
 
-Use the Key Vault provisioned by the landing zone (`KEY_VAULT_NAME` from step 0). The Application Gateway's user-assigned identity has already been granted `Key Vault Secrets User` on this vault by the upstream module ([infra/modules/networking/public-ingress.bicep](../../infra/modules/networking/public-ingress.bicep) lines around RBAC), so no extra role assignment is required.
+> ⚠️ **Important:** This step **must be executed from the jumpbox** (or another resource within the same virtual network), **not from your workstation**. The Key Vault has `Public network access = Disabled`, meaning only resources inside the Azure network can access it. Your workstation cannot reach it directly.
+
+### 4.a. Transfer the PFX to the jumpbox
+
+If you generated the PFX on your workstation (step 3), transfer it to the jumpbox first. You have several options:
+
+**Option 1: Azure Bastion file transfer (recommended)**
+Use Azure Bastion's native file transfer feature:
+
+1. In the Azure Portal, go to your resource group → `testvm7guer4i32` (or your jumpbox VM)
+2. Click **Bastion** (top menu)
+3. In Bastion, use the **Upload / Download** file transfer feature to upload `voicelab.pfx`
+
+**Option 2: Copy via Bastion connection**
+Connect to the jumpbox via RDP/SSH through Bastion and copy the file manually.
+
+**Option 3: Regenerate on jumpbox (if firewall allows)**
+If you prefer, you can re-run steps 3.a–3.c on the jumpbox itself. First, verify connectivity from the jumpbox:
 
 ```powershell
-$certName    = 'voicelab-cert'
-$pfxPassword = 'temporary-pfx-password'   # the one used in 3.c
+# From jumpbox PowerShell:
+Resolve-DnsName letsencrypt.org
+Resolve-DnsName api.github.com
+Invoke-WebRequest 'https://api.letsencrypt.org/directory' -UseBasicParsing
+```
 
+If all succeed, win-acme will work on the jumpbox. If any fail, the firewall is blocking egress, and you must use **Option 1** or **2** to transfer the pre-generated PFX.
+
+### 4.b. Import from the jumpbox
+
+Once `voicelab.pfx` is on the jumpbox, open PowerShell on the jumpbox and run:
+
+```powershell
+# Use managed identity to authenticate (no interactive login needed on jumpbox)
+az login --identity
+
+# Set variables (copy from step 0)
+$kv          = 'kv-<token>'              # KEY_VAULT_NAME from step 0
+$certName    = 'voicelab-cert'
+$pfxPassword = 'temporary-pfx-password'   # the one used in step 3.b
+
+# Import the certificate
 az keyvault certificate import `
   --vault-name $kv `
   --name       $certName `
@@ -293,7 +346,31 @@ az keyvault certificate import `
   --password   $pfxPassword
 ```
 
-Capture the **versionless** secret URI for the next step:
+If the import succeeds, you will see JSON output with the certificate details. If it fails with a permission error, you may need to assign `Key Vault Certificates Officer` role to the jumpbox's managed identity:
+
+```powershell
+# If import failed due to permissions, run this first:
+$jumpboxMiId = (az vm identity show -n testvm7guer4i32 -g rg-paulolacerda-0507261031 --query 'principalId' -o tsv)
+az role assignment create `
+  --role 'Key Vault Certificates Officer' `
+  --assignee-object-id $jumpboxMiId `
+  --scope /subscriptions/4c7ae2e2-8d3e-4712-9b7d-04ccbdcc7e70/resourceGroups/rg-paulolacerda-0507261031/providers/Microsoft.KeyVault/vaults/$kv `
+  --assignee-principal-type ServicePrincipal
+
+# Wait 30 seconds for role propagation
+Start-Sleep -Seconds 30
+
+# Retry the import
+az keyvault certificate import `
+  --vault-name $kv `
+  --name       $certName `
+  --file       .\voicelab.pfx `
+  --password   $pfxPassword
+```
+
+### 4.c. Capture the certificate secret URI
+
+Once import succeeds, capture the **versionless** secret URI for the next step. Run this from the jumpbox:
 
 ```powershell
 $secretId = "https://$kv.vault.azure.net/secrets/$certName"
@@ -301,14 +378,7 @@ Write-Host $secretId
 # expected: https://kv-<token>.vault.azure.net/secrets/voicelab-cert
 ```
 
-> **External Key Vault?** If you imported the cert into a Key Vault that is *not* the one provisioned by the landing zone, grant `Key Vault Secrets User` to the gateway's identity manually:
->
-> ```powershell
-> az role assignment create `
->   --role 'Key Vault Secrets User' `
->   --assignee $miPid `
->   --scope /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<external-kv>
-> ```
+Record this value for step 5.
 
 ---
 
