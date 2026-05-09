@@ -232,7 +232,15 @@ If win-acme still says the local resolver found no TXT records after you press E
 2: Ignore and continue
 ```
 
-This skips win-acme's local pre-check and lets Let's Encrypt perform the authoritative DNS-01 validation. On success, win-acme writes the generated PFX to `.\voicelab.pfx`.
+This skips win-acme's local pre-check and lets Let's Encrypt perform the authoritative DNS-01 validation.
+
+After validation succeeds, win-acme may prompt you to delete the TXT record:
+
+```text
+Please press <Enter> after you've deleted the record
+```
+
+Return to your DNS provider and delete only the temporary TXT record you created for this challenge (`_acme-challenge...` with the token value from win-acme). Leave the application A record and any unrelated DNS records intact. After saving the DNS deletion in your provider UI, return to win-acme and press Enter. On success, win-acme writes the generated PFX to `.\voicelab.pfx`.
 
 ### 3.c. Confirm the generated PFX
 
