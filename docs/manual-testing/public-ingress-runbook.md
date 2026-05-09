@@ -199,7 +199,7 @@ abc123XYZdef456...
 
 Before you create the TXT record, confirm the `Domain:` line in win-acme output is the hostname you intend to publish. If it says a different hostname, press `Ctrl+C`, reset `$hostName`, and re-run the command.
 
-Open the DNS zone for your parent domain in your DNS provider and add the TXT record from win-acme. DNS providers differ in how they label the record-name field:
+Open the DNS zone for your parent domain in your DNS provider and add the TXT record from win-acme. DNS providers differ in how they label the record-name field, so translate the win-acme output carefully:
 
 ```text
 Type:  TXT
@@ -208,16 +208,31 @@ Value: abc123XYZdef456...
 TTL:   Automatic or 5 minutes
 ```
 
-If your provider asks for a **relative** name, omit the parent zone suffix. For example, for `_acme-challenge.voicelab.example.com` in the `example.com` zone, enter `_acme-challenge.voicelab`. If your provider asks for the **fully qualified** record name, enter the full `_acme-challenge.voicelab.example.com`. Use the quoted token from win-acme as the TXT value; if your DNS provider adds quotes automatically, do not add an extra set.
+Use these rules:
 
-Wait until the TXT record propagates:
+1. If your provider asks for a **relative** name, omit the parent zone suffix. For example, for `_acme-challenge.voicelab.example.com` in the `example.com` zone, enter `_acme-challenge.voicelab`.
+2. If your provider asks for the **fully qualified** record name, enter the full `_acme-challenge.voicelab.example.com`.
+3. Use the token from win-acme as the TXT value. If win-acme prints quotes around the value, copy the value without adding an extra set of quotes unless your DNS provider explicitly requires them.
+4. Save/apply the DNS change in the provider UI before testing propagation.
+
+Wait until the TXT record propagates. Test both public resolvers and your default resolver:
 
 ```powershell
 Resolve-DnsName _acme-challenge.voicelab.example.com -Type TXT
+Resolve-DnsName _acme-challenge.voicelab.example.com -Type TXT -Server 8.8.8.8
+Resolve-DnsName _acme-challenge.voicelab.example.com -Type TXT -Server 1.1.1.1
 # expected answer: the abc123XYZdef456... value
 ```
 
-Press Enter in the win-acme terminal. On success, win-acme writes the generated PFX to `.\voicelab.pfx`.
+Do **not** press Enter in the win-acme terminal until at least one public resolver returns the exact TXT value from win-acme.
+
+If win-acme still says the local resolver found no TXT records after you press Enter, but you already verified the TXT value with a public resolver such as `8.8.8.8` or `1.1.1.1`, choose:
+
+```text
+2: Ignore and continue
+```
+
+This skips win-acme's local pre-check and lets Let's Encrypt perform the authoritative DNS-01 validation. On success, win-acme writes the generated PFX to `.\voicelab.pfx`.
 
 ### 3.c. Confirm the generated PFX
 
