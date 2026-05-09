@@ -127,6 +127,19 @@ Expand-Archive -Path $zip -DestinationPath $wacsDir -Force
 & "$wacsDir\wacs.exe" --version
 ```
 
+In locked-down jumpbox environments, win-acme's DNS pre-validation may be unable to query external authoritative DNS servers directly. If a later DNS-01 run fails before showing the TXT value with an error such as `Unexpected DNS error while checking <domain>`, disable only win-acme's local DNS pre-validation and let Let's Encrypt perform the authoritative validation:
+
+```powershell
+$settingsPath = Join-Path $wacsDir 'settings.json'
+if (-not (Test-Path $settingsPath)) {
+  Copy-Item (Join-Path $wacsDir 'settings_default.json') $settingsPath
+}
+
+$settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+$settings.Validation.PreValidateDns = $false
+$settings | ConvertTo-Json -Depth 100 | Set-Content $settingsPath -Encoding utf8
+```
+
 ### 3.b. Run the manual DNS-01 challenge
 
 Set your hostname, contact email, and PFX password:
@@ -409,6 +422,7 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 | `curl https://voicelab.example.com/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName voicelab.example.com` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
 | Browser shows certificate name mismatch | The cert was issued for a different hostname, or the listener was configured with a different hostname than the cert covers. | Re-issue the cert for the exact `frontendHostName`, or change `frontendHostName` to match. |
 | Browser shows `NET::ERR_CERT_AUTHORITY_INVALID` | The CA root is not in this browser's trust store. | Use a publicly trusted CA, or import the corporate root CA on the tester's workstation. |
+| win-acme fails with `Unexpected DNS error while checking <domain>` before showing the TXT record | The jumpbox/firewall cannot perform win-acme's local DNS pre-validation against external authoritative DNS servers. | Disable `Validation.PreValidateDns` in win-acme `settings.json` as shown in step 3.a, then re-run step 3.b. Still verify the TXT record yourself with public DNS before pressing Enter. |
 | `az keyvault certificate import` fails with `BadParameter: Could not parse` | The PFX password is wrong, or the PFX was produced by an incompatible toolchain. | If using win-acme, confirm the import uses the same `--pfxpassword` value from step 3.b. If using OpenSSL, re-export with a known password and standard algorithms: `openssl pkcs12 -export -legacy -keypbe AES-256-CBC -certpbe AES-256-CBC -macalg SHA256 ...` |
 | `azd provision` fails with `KeyVault user is not authorized` on the gateway | The cert is in an external KV and the AGW UAI was not granted `Key Vault Secrets User` on it. | Run the role assignment from step 4 with the external KV's resource ID. |
 | `curl https://voicelab.example.com/` returns `502 Bad Gateway` from an allow-listed IP | The backend pool resolved correctly but the Container App isn't responding on `/`, or the Container App's own ingress is misconfigured. | Test the Container App FQDN from inside the VNet/jumpbox. The backend pool wiring itself is correct by construction (Bicep). |
