@@ -127,17 +127,31 @@ Expand-Archive -Path $zip -DestinationPath $wacsDir -Force
 & "$wacsDir\wacs.exe" --version
 ```
 
-In locked-down jumpbox environments, win-acme's DNS pre-validation may be unable to query external authoritative DNS servers directly. If a later DNS-01 run fails before showing the TXT value with an error such as `Unexpected DNS error while checking <domain>`, disable only win-acme's local DNS pre-validation and let Let's Encrypt perform the authoritative validation:
+In locked-down Windows environments (jumpbox or workstation behind restrictive DNS/egress), win-acme's local DNS pre-validation may be unable to query external authoritative DNS servers directly. If a later DNS-01 run fails before showing the TXT value with an error such as `Unexpected DNS error while checking <domain>` or `Unable to find any name servers for <domain>`, disable only win-acme's local DNS pre-validation and let Let's Encrypt perform the authoritative validation.
+
+Run this after installing win-acme. It updates both the xcopy install settings and any settings already created under `%ProgramData%\win-acme`:
 
 ```powershell
-$settingsPath = Join-Path $wacsDir 'settings.json'
-if (-not (Test-Path $settingsPath)) {
-  Copy-Item (Join-Path $wacsDir 'settings_default.json') $settingsPath
+$settingsPaths = @()
+
+$installSettings = Join-Path $wacsDir 'settings.json'
+if (-not (Test-Path $installSettings)) {
+  Copy-Item (Join-Path $wacsDir 'settings_default.json') $installSettings
+}
+$settingsPaths += $installSettings
+
+$programDataSettings = Join-Path $env:ProgramData 'win-acme'
+if (Test-Path $programDataSettings) {
+  $settingsPaths += Get-ChildItem $programDataSettings -Filter 'settings.json' -Recurse |
+    Select-Object -ExpandProperty FullName
 }
 
-$settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
-$settings.Validation.PreValidateDns = $false
-$settings | ConvertTo-Json -Depth 100 | Set-Content $settingsPath -Encoding utf8
+foreach ($settingsPath in ($settingsPaths | Select-Object -Unique)) {
+  $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+  $settings.Validation.PreValidateDns = $false
+  $settings | ConvertTo-Json -Depth 100 | Set-Content $settingsPath -Encoding utf8
+  Write-Host "Updated $settingsPath"
+}
 ```
 
 ### 3.b. Run the manual DNS-01 challenge
@@ -145,10 +159,13 @@ $settings | ConvertTo-Json -Depth 100 | Set-Content $settingsPath -Encoding utf8
 Set your hostname, contact email, and PFX password:
 
 ```powershell
-$hostName = 'voicelab.example.com'
+$hostName = 'voicelab.example.com'     # replace with your real hostname, e.g. livevoice.myailz.com
 $contactEmail = 'you@example.com'
 $pfxPassword = 'temporary-pfx-password'
+Write-Host "Requesting certificate for $hostName"
 ```
+
+Do not continue if this prints the wrong hostname. Stop and set `$hostName` again before running win-acme, because the issued certificate must exactly match the Application Gateway hostname.
 
 Request the certificate:
 
@@ -156,8 +173,10 @@ Request the certificate:
 $wacsDir = 'C:\tools\win-acme'
 
 & "$wacsDir\wacs.exe" `
+  --nocache `
   --source manual `
   --host $hostName `
+  --commonname $hostName `
   --validation manual `
   --validationmode dns-01 `
   --store pfxfile `
@@ -177,6 +196,8 @@ _acme-challenge.voicelab.example.com
 with value:
 abc123XYZdef456...
 ```
+
+Before you create the TXT record, confirm the `Domain:` line in win-acme output is the hostname you intend to publish. If it says a different hostname, press `Ctrl+C`, reset `$hostName`, and re-run the command.
 
 Open the same DNS panel from step 2 and add the TXT record exactly as printed:
 
@@ -423,6 +444,7 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 | Browser shows certificate name mismatch | The cert was issued for a different hostname, or the listener was configured with a different hostname than the cert covers. | Re-issue the cert for the exact `frontendHostName`, or change `frontendHostName` to match. |
 | Browser shows `NET::ERR_CERT_AUTHORITY_INVALID` | The CA root is not in this browser's trust store. | Use a publicly trusted CA, or import the corporate root CA on the tester's workstation. |
 | win-acme fails with `Unexpected DNS error while checking <domain>` before showing the TXT record | The jumpbox/firewall cannot perform win-acme's local DNS pre-validation against external authoritative DNS servers. | Disable `Validation.PreValidateDns` in win-acme `settings.json` as shown in step 3.a, then re-run step 3.b. Still verify the TXT record yourself with public DNS before pressing Enter. |
+| win-acme shows `Domain:` with the wrong hostname | `$hostName` still contains an old value from your PowerShell session. | Press `Ctrl+C`, set `$hostName` to the exact hostname you want, and re-run step 3.b. Do not issue/import a certificate for the wrong hostname. |
 | `az keyvault certificate import` fails with `BadParameter: Could not parse` | The PFX password is wrong, or the PFX was produced by an incompatible toolchain. | If using win-acme, confirm the import uses the same `--pfxpassword` value from step 3.b. If using OpenSSL, re-export with a known password and standard algorithms: `openssl pkcs12 -export -legacy -keypbe AES-256-CBC -certpbe AES-256-CBC -macalg SHA256 ...` |
 | `azd provision` fails with `KeyVault user is not authorized` on the gateway | The cert is in an external KV and the AGW UAI was not granted `Key Vault Secrets User` on it. | Run the role assignment from step 4 with the external KV's resource ID. |
 | `curl https://voicelab.example.com/` returns `502 Bad Gateway` from an allow-listed IP | The backend pool resolved correctly but the Container App isn't responding on `/`, or the Container App's own ingress is misconfigured. | Test the Container App FQDN from inside the VNet/jumpbox. The backend pool wiring itself is correct by construction (Bicep). |
