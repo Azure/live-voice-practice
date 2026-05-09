@@ -109,11 +109,19 @@ Obtain a certificate from any certification authority your audience's browsers t
 Choose any of:
 
 ```powershell
-# Option 1 — official Windows installer (https://dl.eff.org/certbot-beta-installer-win32.exe)
-winget install Certbot.Certbot
+# Option 1 — Windows: download and run the official Certbot installer.
+# This does not require winget, which is often absent on Windows Server / jumpbox VMs.
+$certbotInstaller = Join-Path $env:TEMP 'certbot-beta-installer-win32.exe'
+Invoke-WebRequest `
+  -Uri 'https://dl.eff.org/certbot-beta-installer-win32.exe' `
+  -OutFile $certbotInstaller
+Start-Process -FilePath $certbotInstaller -Wait
+
 # verify
 certbot --version
 ```
+
+If `certbot` is still not found after the installer finishes, open a new PowerShell session so the updated `PATH` is loaded, then run `certbot --version` again.
 
 ```bash
 # Option 2 — WSL or any Linux machine
@@ -174,7 +182,12 @@ Application Gateway and Key Vault consume the certificate in PKCS#12 (PFX) form.
 # pick any password; you will use it on the next step's import
 $pfxPassword = 'temporary-pfx-password'
 
-openssl pkcs12 -export `
+$openssl = 'openssl'
+if (-not (Get-Command $openssl -ErrorAction SilentlyContinue) -and (Test-Path 'C:\Program Files\Git\usr\bin\openssl.exe')) {
+  $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe'
+}
+
+& $openssl pkcs12 -export `
   -out voicelab.pfx `
   -inkey C:\Certbot\live\voicelab.example.com\privkey.pem `
   -in   C:\Certbot\live\voicelab.example.com\fullchain.pem `
