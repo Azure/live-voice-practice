@@ -199,16 +199,16 @@ abc123XYZdef456...
 
 Before you create the TXT record, confirm the `Domain:` line in win-acme output is the hostname you intend to publish. If it says a different hostname, press `Ctrl+C`, reset `$hostName`, and re-run the command.
 
-Open the same DNS panel from step 2 and add the TXT record exactly as printed:
+Open the DNS zone for your parent domain in your DNS provider and add the TXT record from win-acme. DNS providers differ in how they label the record-name field:
 
 ```text
 Type:  TXT
-Host:  _acme-challenge.voicelab
+Name/Host: _acme-challenge.voicelab
 Value: abc123XYZdef456...
 TTL:   Automatic or 5 minutes
 ```
 
-For Namecheap, the **Host** value is relative to the root domain, so use `_acme-challenge.voicelab` for `voicelab.example.com` rather than the full `_acme-challenge.voicelab.example.com`.
+If your provider asks for a **relative** name, omit the parent zone suffix. For example, for `_acme-challenge.voicelab.example.com` in the `example.com` zone, enter `_acme-challenge.voicelab`. If your provider asks for the **fully qualified** record name, enter the full `_acme-challenge.voicelab.example.com`. Use the quoted token from win-acme as the TXT value; if your DNS provider adds quotes automatically, do not add an extra set.
 
 Wait until the TXT record propagates:
 
