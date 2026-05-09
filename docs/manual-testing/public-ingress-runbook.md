@@ -102,99 +102,105 @@ DNS propagation for a fresh record is typically under 5 minutes in modern provid
 
 ## 3. Obtain a TLS certificate for the chosen hostname
 
-Obtain a certificate from any certification authority your audience's browsers trust by default. The accelerator does not endorse one CA over another. Three illustrative paths are listed in [§ Variations](#variations); the walkthrough below uses **certbot in manual DNS-01 mode** because it has zero per-cert cost, runs from any environment, and produces standard PEM artifacts.
+Obtain a certificate from any certification authority your audience's browsers trust by default. The accelerator does not endorse one CA over another. Three illustrative paths are listed in [§ Variations](#variations); the walkthrough below uses **Posh-ACME in manual DNS-01 mode** because it works from Windows PowerShell without `winget`, Docker, WSL, or a discontinued Certbot Windows installer.
 
-### 3.a. Install certbot (one-time)
+### 3.a. Install Posh-ACME (one-time, Windows PowerShell)
 
-Choose any of:
-
-```powershell
-# Option 1 — Windows: download and run the official Certbot installer.
-# This does not require winget, which is often absent on Windows Server / jumpbox VMs.
-$certbotInstaller = Join-Path $env:TEMP 'certbot-beta-installer-win32.exe'
-Invoke-WebRequest `
-  -Uri 'https://dl.eff.org/certbot-beta-installer-win32.exe' `
-  -OutFile $certbotInstaller
-Start-Process -FilePath $certbotInstaller -Wait
-
-# verify
-certbot --version
-```
-
-If `certbot` is still not found after the installer finishes, open a new PowerShell session so the updated `PATH` is loaded, then run `certbot --version` again.
-
-```bash
-# Option 2 — WSL or any Linux machine
-sudo apt-get install certbot
-```
+Run this from a normal PowerShell session:
 
 ```powershell
-# Option 3 — Docker (no install needed)
-docker run --rm -it `
-  -v ${PWD}/letsencrypt:/etc/letsencrypt `
-  certbot/certbot --version
+Install-Module -Name Posh-ACME -Scope CurrentUser -Force
+Import-Module Posh-ACME
+Get-Module Posh-ACME
 ```
+
+If PowerShell prompts to trust PSGallery / install NuGet, answer `Y`.
 
 ### 3.b. Run the manual DNS-01 challenge
 
+Set your hostname, contact email, and PFX password:
+
 ```powershell
-certbot certonly `
-  --manual `
-  --preferred-challenges dns `
-  --agree-tos `
-  --email you@example.com `
-  -d voicelab.example.com
+$hostName = 'voicelab.example.com'
+$contactEmail = 'you@example.com'
+$pfxPassword = 'temporary-pfx-password'
 ```
 
-Certbot will pause and print a TXT record name and value. Example:
+Request the certificate:
+
+```powershell
+$cert = New-PACertificate `
+  -Domain $hostName `
+  -Contact $contactEmail `
+  -AcceptTOS `
+  -PfxPass $pfxPassword `
+  -DnsSleep 30
+```
+
+Posh-ACME will pause and print the DNS TXT record you must create. Example:
 
 ```text
-Please deploy a DNS TXT record under the name:
-  _acme-challenge.voicelab.example.com
+Please create the following TXT record:
+_acme-challenge.voicelab.example.com
 
-with the following value:
-  abc123XYZdef456...
-
-Press Enter to Continue
+with value:
+abc123XYZdef456...
 ```
 
-Open the same DNS panel from step 2 and add the TXT record exactly as printed. Wait until it propagates:
+Open the same DNS panel from step 2 and add the TXT record exactly as printed:
+
+```text
+Type:  TXT
+Host:  _acme-challenge.voicelab
+Value: abc123XYZdef456...
+TTL:   Automatic or 5 minutes
+```
+
+For Namecheap, the **Host** value is relative to the root domain, so use `_acme-challenge.voicelab` for `voicelab.example.com` rather than the full `_acme-challenge.voicelab.example.com`.
+
+Wait until the TXT record propagates:
 
 ```powershell
 Resolve-DnsName _acme-challenge.voicelab.example.com -Type TXT
 # expected answer: the abc123XYZdef456... value
 ```
 
-Press Enter in the certbot terminal. On success, certbot writes (location depends on your install):
+Press Enter in the Posh-ACME terminal. On success, Posh-ACME returns a certificate object and writes the generated PFX to `$cert.PfxFullChain`.
 
-```text
-- /etc/letsencrypt/live/voicelab.example.com/fullchain.pem
-- /etc/letsencrypt/live/voicelab.example.com/privkey.pem
-```
+### 3.c. Copy the generated PFX to the runbook working directory
 
-On Windows the equivalent path is under `C:\Certbot\live\voicelab.example.com\`.
-
-### 3.c. Convert to PFX (Application Gateway requires PFX)
-
-Application Gateway and Key Vault consume the certificate in PKCS#12 (PFX) form. Convert from PEM:
+Application Gateway and Key Vault consume the certificate in PKCS#12 (PFX) form. Posh-ACME already generated that file:
 
 ```powershell
-# pick any password; you will use it on the next step's import
-$pfxPassword = 'temporary-pfx-password'
-
-$openssl = 'openssl'
-if (-not (Get-Command $openssl -ErrorAction SilentlyContinue) -and (Test-Path 'C:\Program Files\Git\usr\bin\openssl.exe')) {
-  $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe'
-}
-
-& $openssl pkcs12 -export `
-  -out voicelab.pfx `
-  -inkey C:\Certbot\live\voicelab.example.com\privkey.pem `
-  -in   C:\Certbot\live\voicelab.example.com\fullchain.pem `
-  -passout pass:$pfxPassword
+Copy-Item -Path $cert.PfxFullChain -Destination .\voicelab.pfx -Force
+Get-Item .\voicelab.pfx
 ```
 
-You now have `voicelab.pfx` on disk.
+You now have `voicelab.pfx` on disk. Use the same `$pfxPassword` value in the Key Vault import step.
+
+### 3.d. Alternative: use Certbot from WSL/Linux
+
+If you prefer Certbot, run it from WSL or any Linux machine. The native Windows Certbot installer is no longer a reliable path.
+
+```bash
+sudo apt-get install certbot
+certbot certonly \
+  --manual \
+  --preferred-challenges dns \
+  --agree-tos \
+  --email you@example.com \
+  -d voicelab.example.com
+```
+
+Then convert the PEM files to PFX:
+
+```bash
+openssl pkcs12 -export \
+  -out voicelab.pfx \
+  -inkey /etc/letsencrypt/live/voicelab.example.com/privkey.pem \
+  -in   /etc/letsencrypt/live/voicelab.example.com/fullchain.pem \
+  -passout pass:temporary-pfx-password
+```
 
 ---
 
@@ -341,8 +347,8 @@ The walkthrough above uses one concrete toolchain. Each step has equivalent subs
 | Step | Walkthrough used | Equivalent alternatives |
 |------|------------------|-------------------------|
 | Domain | A registrar's DNS panel | Azure DNS zone (cheap if you already use Azure DNS); a corporate DNS zone if you control one. |
-| Certificate | `certbot` manual DNS-01 + a publicly trusted free CA | `acme.sh` or `lego` from any environment; the certificate authority of your organization (skip ACME, generate a CSR, submit, receive, build PFX); a paid commercial CA with their portal-driven flow. |
-| Cert format pipeline | `openssl pkcs12 -export` | `New-PfxCertificate` (Windows) when the source is already a Windows cert store entry; the CA's portal if it issues PFX directly. |
+| Certificate | `Posh-ACME` manual DNS-01 + a publicly trusted free CA | `certbot` from WSL/Linux, `acme.sh` or `lego` from any environment; the certificate authority of your organization (skip ACME, generate a CSR, submit, receive, build PFX); a paid commercial CA with their portal-driven flow. |
+| Cert format pipeline | Posh-ACME generated PFX | `openssl pkcs12 -export` when starting from PEM files; `New-PfxCertificate` (Windows) when the source is already a Windows cert store entry; the CA's portal if it issues PFX directly. |
 | Where the ACME client runs | Local PowerShell | Azure Cloud Shell, a CI runner, the jumpbox VM, a Linux laptop, a Docker container — any environment with outbound DNS and HTTP. |
 | KV import | `az keyvault certificate import` | Portal: Key Vault → Certificates → Generate/Import → Import. |
 | Listener config | `azd env set` + `azd provision` (Bicep is the source of truth) | **Do not** configure the listener directly in the portal — portal edits will be overwritten by the next `azd provision`. |
@@ -363,8 +369,8 @@ That stable contract is the point of [ADR-0002](../adr/0002-bring-your-own-domai
 
 Manual DNS-01 ACME challenges (the example in step 3) do not auto-renew. Most public CAs that issue via ACME issue 90-day certs. When a renewal is due:
 
-1. Re-run step 3 with the same `-d voicelab.example.com`.
-2. Re-run step 3.c to produce a fresh `voicelab.pfx`.
+1. Re-run step 3 with the same `$hostName` value.
+2. Re-run step 3.c to copy the fresh Posh-ACME PFX to `voicelab.pfx`.
 3. Re-run step 4 against the same `KEY_VAULT_NAME` and the same `voicelab-cert` name. The import creates a **new version**; the versionless `sslCertSecretId` automatically points at the latest version, so no Bicep change is required.
 4. Restart the gateway listener so it picks up the new cert version:
    ```powershell
@@ -386,7 +392,7 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 | `curl https://voicelab.example.com/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName voicelab.example.com` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
 | Browser shows certificate name mismatch | The cert was issued for a different hostname, or the listener was configured with a different hostname than the cert covers. | Re-issue the cert for the exact `frontendHostName`, or change `frontendHostName` to match. |
 | Browser shows `NET::ERR_CERT_AUTHORITY_INVALID` | The CA root is not in this browser's trust store. | Use a publicly trusted CA, or import the corporate root CA on the tester's workstation. |
-| `az keyvault certificate import` fails with `BadParameter: Could not parse` | The PFX is encrypted with an unsupported algorithm or the password is wrong. | Re-export the PFX with a known password and standard algorithms: `openssl pkcs12 -export -legacy -keypbe AES-256-CBC -certpbe AES-256-CBC -macalg SHA256 ...` |
+| `az keyvault certificate import` fails with `BadParameter: Could not parse` | The PFX password is wrong, or the PFX was produced by an incompatible toolchain. | If using Posh-ACME, confirm the import uses the same `-PfxPass` value from step 3.b. If using OpenSSL, re-export with a known password and standard algorithms: `openssl pkcs12 -export -legacy -keypbe AES-256-CBC -certpbe AES-256-CBC -macalg SHA256 ...` |
 | `azd provision` fails with `KeyVault user is not authorized` on the gateway | The cert is in an external KV and the AGW UAI was not granted `Key Vault Secrets User` on it. | Run the role assignment from step 4 with the external KV's resource ID. |
 | `curl https://voicelab.example.com/` returns `502 Bad Gateway` from an allow-listed IP | The backend pool resolved correctly but the Container App isn't responding on `/`, or the Container App's own ingress is misconfigured. | Test the Container App FQDN from inside the VNet/jumpbox. The backend pool wiring itself is correct by construction (Bicep). |
 
