@@ -17,13 +17,17 @@ echo -e "${BLUE}[postDeploy] Running smoke test...${NC}"
 envValues="$(azd env get-values 2>/dev/null || true)"
 get_env_val() {
     local name="$1"
+    local env_val
+    env_val="$(echo "$envValues" | sed -n "s/^${name}=\"\\?\\([^\"]*\\)\"\\?.*/\\1/p" | head -n1)"
+    if [[ -n "$env_val" ]]; then
+        echo "$env_val" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+        return 0
+    fi
     local proc_val
     proc_val="$(printenv "$name" 2>/dev/null || true)"
     if [[ -n "$proc_val" ]]; then
-        echo "${proc_val%\"}" | sed 's/^"//'
-        return 0
+        echo "${proc_val%\"}" | sed 's/^"//;s/^[[:space:]]*//;s/[[:space:]]*$//'
     fi
-    echo "$envValues" | sed -n "s/^${name}=\"\\?\\([^\"]*\\)\"\\?.*/\\1/p" | head -n1
 }
 
 rg="$(get_env_val AZURE_RESOURCE_GROUP)"
@@ -164,9 +168,10 @@ jumpbox_probe() {
     probeScript=$(cat <<EOF
 for (\$i = 1; \$i -le 6; \$i++) {
     \$out = curl.exe -sS --ssl-no-revoke -m 30 -w '__HTTP__%{http_code}' 'https://${fqdn_}/api/health' 2>&1
-    if (\$out -match '__HTTP__([0-9]{3})$') {
+    \$raw = (\$out | Out-String).TrimEnd()
+    if (\$raw -match '(?s)__HTTP__([0-9]{3})\s*$') {
         \$code = \$Matches[1]
-        \$body = \$out -replace '__HTTP__[0-9]{3}$',''
+        \$body = \$raw -replace '(?s)__HTTP__[0-9]{3}\s*$',''
         if (\$code -match '^2[0-9][0-9]$') { Write-Output \$body; exit 0 }
     }
     Start-Sleep -Seconds 10

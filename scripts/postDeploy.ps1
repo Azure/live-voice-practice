@@ -41,11 +41,13 @@ Write-Blue "[postDeploy] Running smoke test..."
 $envValues = azd env get-values 2>$null
 function Get-EnvVal {
     param([string]$Name)
-    $procVal = [Environment]::GetEnvironmentVariable($Name)
-    if ($procVal) { return $procVal.Trim('"') }
     $line = $envValues | Select-String "^$Name=" | Select-Object -First 1
-    if (-not $line) { return $null }
-    return ($line.ToString() -replace "^$Name=`"?([^`"]*)`"?.*", '$1')
+    if ($line) {
+        return ($line.ToString() -replace "^$Name=`"?([^`"]*)`"?.*", '$1').Trim()
+    }
+    $procVal = [Environment]::GetEnvironmentVariable($Name)
+    if ($procVal) { return $procVal.Trim('"').Trim() }
+    return $null
 }
 
 $rg = Get-EnvVal 'AZURE_RESOURCE_GROUP'
@@ -203,9 +205,10 @@ function Invoke-JumpboxProbe {
         $probeScript = @"
 for (`$i = 1; `$i -le 6; `$i++) {
     `$out = curl.exe -sS --ssl-no-revoke -m 30 -w '__HTTP__%{http_code}' 'https://$Fqdn/api/health' 2>&1
-    if (`$out -match '__HTTP__([0-9]{3})$') {
+    `$raw = (`$out | Out-String).TrimEnd()
+    if (`$raw -match '(?s)__HTTP__([0-9]{3})\s*$') {
         `$code = `$Matches[1]
-        `$body = `$out -replace '__HTTP__[0-9]{3}$',''
+        `$body = `$raw -replace '(?s)__HTTP__[0-9]{3}\s*$',''
         if (`$code -match '^2[0-9][0-9]$') { Write-Output `$body; exit 0 }
     }
     Start-Sleep -Seconds 10
