@@ -45,7 +45,7 @@ This project supports two deployment modes:
   # then connect to the jumpbox via Bastion and run azd deploy + postProvision there
   ```
 
-  Network isolation now also provisions an **Application Gateway WAF v2 in skeleton mode** in front of the internally posted Container App (since AILZ `v1.1.6` adopted upstream issue [`#49`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49)). The gateway is inert until you complete a deployer-side BYO domain + certificate step. Follow [docs/manual-testing/public-ingress-runbook.md](docs/manual-testing/public-ingress-runbook.md) to promote it to live mode and reach the app from a real workstation with a real microphone.
+  Network isolation now also provisions an **Application Gateway WAF v2 in skeleton mode** in front of the internally posted Container App (since AILZ `v1.1.9`, including upstream issues [`#49`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49), [`#53`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/53), and [`#55`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/55)). The gateway is inert until you complete a deployer-side BYO domain + certificate step. Follow [docs/manual-testing/public-ingress-runbook.md](docs/manual-testing/public-ingress-runbook.md) to promote it to live mode and reach the app from a real workstation with a real microphone.
 
 ### Defaults at a glance
 

@@ -1,6 +1,6 @@
 # Public ingress runbook — domain + certificate completion
 
-> **Scope.** This runbook covers the operator-completed configuration of the optional **Application Gateway WAF v2 public ingress** introduced upstream by [`Azure/bicep-ptn-aiml-landing-zone#49`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49) and consumed by this accelerator from `infra/` ≥ `v1.1.6`.
+> **Scope.** This runbook covers the operator-completed configuration of the optional **Application Gateway WAF v2 public ingress** introduced upstream by [`Azure/bicep-ptn-aiml-landing-zone#49`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49), enhanced by [`#53`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/53), and hardened by [`#55`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/55), consumed by this accelerator from `infra/` ≥ `v1.1.9`.
 >
 > **Pre-requisites.** A successful `azd provision` run with `NETWORK_ISOLATION=true` (which now also enables `publicIngress` by default — see [`main.parameters.json`](../../main.parameters.json)). The deployment is in **skeleton mode**: the gateway, Public IP, WAF policy, and a deny-all NSG are provisioned, but the HTTPS listener has no certificate, no hostname, and the NSG does not yet allow any source.
 >
@@ -121,9 +121,16 @@ DNS propagation for a fresh record is typically under 5 minutes in modern provid
 
 Obtain a certificate from any certification authority your audience's browsers trust by default. The accelerator does not endorse one CA over another. Three illustrative paths are listed in [§ Variations](#variations); the walkthrough below uses **win-acme** with Let's Encrypt and manual DNS-01 validation because it is a mature ACME client built specifically for Windows servers and does not require `winget`, WSL, Linux, or Docker.
 
-### 3.a. Install win-acme (one-time, Windows PowerShell)
+### 3.a. Verify or install win-acme (one-time, Windows PowerShell)
 
-Run this from a normal PowerShell session. It downloads the latest x64 trimmed win-acme release from GitHub and extracts it to `C:\tools\win-acme`:
+If you are running on the jumpbox from `infra/` ≥ `v1.1.9`, win-acme is installed by bootstrap. Verify first:
+
+```powershell
+$wacsDir = 'C:\tools\win-acme'
+& "$wacsDir\wacs.exe" --version
+```
+
+If the command fails (older landing-zone tag or custom image), install manually with:
 
 ```powershell
 $wacsDir = 'C:\tools\win-acme'
@@ -306,21 +313,21 @@ If you generated the PFX on your workstation (step 3), transfer it to the jumpbo
 **Option 1: Azure Bastion file transfer (recommended)**
 Use Azure Bastion's native file transfer feature:
 
-1. In the Azure Portal, go to your resource group → `testvm7guer4i32` (or your jumpbox VM)
+1. In the Azure Portal, go to your resource group → `testvm<token>` (or your jumpbox VM)
 2. Click **Bastion** (top menu)
 3. In Bastion, use the **Upload / Download** file transfer feature to upload `voicelab.pfx`
 
 **Option 2: Copy via Bastion connection**
 Connect to the jumpbox via RDP/SSH through Bastion and copy the file manually.
 
-**Option 3: Regenerate on jumpbox (if firewall allows)**
+**Option 3: Regenerate on jumpbox (recommended on `infra/` ≥ `v1.1.9`)**
 If you prefer, you can re-run steps 3.a–3.c on the jumpbox itself. First, verify connectivity from the jumpbox:
 
 ```powershell
 # From jumpbox PowerShell:
-Resolve-DnsName letsencrypt.org
+Resolve-DnsName acme-v02.api.letsencrypt.org
 Resolve-DnsName api.github.com
-Invoke-WebRequest 'https://api.letsencrypt.org/directory' -UseBasicParsing
+Invoke-WebRequest 'https://acme-v02.api.letsencrypt.org/directory' -UseBasicParsing
 ```
 
 If all succeed, win-acme will work on the jumpbox. If any fail, the firewall is blocking egress, and you must use **Option 1** or **2** to transfer the pre-generated PFX.
@@ -346,15 +353,17 @@ az keyvault certificate import `
   --password   $pfxPassword
 ```
 
-If the import succeeds, you will see JSON output with the certificate details. If it fails with a permission error, you may need to assign `Key Vault Certificates Officer` role to the jumpbox's managed identity:
+If the import succeeds, you will see JSON output with the certificate details. On `infra/` ≥ `v1.1.9`, jumpbox MI already includes `Key Vault Certificates Officer`. If you are on an older landing-zone version and still receive a permission error, assign it manually:
 
 ```powershell
-# If import failed due to permissions, run this first:
-$jumpboxMiId = (az vm identity show -n testvm7guer4i32 -g rg-paulolacerda-0507261031 --query 'principalId' -o tsv)
+# If import failed due to permissions (older infra tag), run this first:
+$rg = 'rg-<env>'
+$jumpboxVm = 'testvm<token>'
+$jumpboxMiId = (az vm identity show -n $jumpboxVm -g $rg --query 'principalId' -o tsv)
 az role assignment create `
   --role 'Key Vault Certificates Officer' `
   --assignee-object-id $jumpboxMiId `
-  --scope /subscriptions/4c7ae2e2-8d3e-4712-9b7d-04ccbdcc7e70/resourceGroups/rg-paulolacerda-0507261031/providers/Microsoft.KeyVault/vaults/$kv `
+  --scope "/subscriptions/<subscription-id>/resourceGroups/$rg/providers/Microsoft.KeyVault/vaults/$kv" `
   --assignee-principal-type ServicePrincipal
 
 # Wait 30 seconds for role propagation

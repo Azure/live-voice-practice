@@ -13,6 +13,7 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 - Infra submodule bumped to `bicep-ptn-aiml-landing-zone` **v1.1.0** (ACR Task agent pool + complete jumpbox firewall allow-list). `.gitmodules` and `manifest.json` updated accordingly.
 - `scripts/deploy.ps1` and `scripts/deploy.sh` now build and push with `az acr build` instead of `docker buildx`. Under `NETWORK_ISOLATION=true` they use the VNet-attached ACR Tasks agent pool (`ACR_TASK_AGENT_POOL` azd output from v1.1.0); otherwise they use the shared Microsoft-managed pool. **No Docker is required on the workstation or jumpbox anymore.**
 - `scripts/postProvision.ps1` and `scripts/postProvision.sh` no longer invoke `add-jumpbox-fw-rules.ps1`. v1.1.0 ships the complete jumpbox bootstrap FQDN allow-list by default via the landing zone's `extendFirewallForJumpboxBootstrap` parameter.
+- Infra consumption updated to `bicep-ptn-aiml-landing-zone` **v1.1.9** (`.gitmodules` branch + `manifest.json` `ailz_tag`) and runbooks were refreshed for the upstream certificate-flow hardening: deterministic jumpbox win-acme bootstrap, ACME/firewall expectations, and pre-granted `Key Vault Certificates Officer` on jumpbox MI.
 
 ### Removed
 - Hard requirement for Docker / `docker buildx` on the machine running `azd deploy`. The network-isolation abort in both deploy scripts is gone — network-isolated deploys now run unchanged from any workstation with ARM egress.

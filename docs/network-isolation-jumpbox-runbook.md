@@ -95,13 +95,13 @@ Practical consequence: the **avatar renders correctly** inside an Edge session o
 
 ### Recommended path — Application Gateway public ingress (deployer-controlled, BYO domain + cert)
 
-Since [Azure/bicep-ptn-aiml-landing-zone#49](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49) shipped in the upstream landing zone (`v1.1.6`) and was adopted by this accelerator, the network-isolated deployment **automatically** provisions an Application Gateway WAF v2 in **skeleton mode** in front of the internally posted Container App: the gateway, Public IP, WAF policy, and a deny-all NSG are provisioned, but the HTTPS listener has no cert and the NSG allows no source. This is by design — the operator completes the security-relevant bits (domain + cert + IP allow-list) in a separate, fast, reversible step.
+Since [Azure/bicep-ptn-aiml-landing-zone#49](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49), [#53](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/53), and [#55](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/55) shipped upstream (consumed here in `v1.1.9`), the network-isolated deployment **automatically** provisions an Application Gateway WAF v2 in **skeleton mode** in front of the internally posted Container App: the gateway, Public IP, WAF policy, and a deny-all NSG are provisioned, but the HTTPS listener has no cert and the NSG allows no source. This is by design — the operator completes the security-relevant bits (domain + cert + IP allow-list) in a separate, fast, reversible step.
 
 To complete the configuration and reach the app from a real workstation with a real microphone, follow the deployer-side runbook:
 
 ➡ [`docs/manual-testing/public-ingress-runbook.md`](manual-testing/public-ingress-runbook.md)
 
-The runbook covers domain registration, certificate acquisition (illustrative path: certbot manual DNS-01 + a publicly trusted free CA), Key Vault import, the `azd env set` calls that promote the gateway from skeleton to live mode, validation, renewals, and teardown. The architectural rationale is captured in [ADR-0001](adr/0001-manual-testing-microphone-application-gateway.md) and [ADR-0002](adr/0002-bring-your-own-domain-and-certificate.md).
+The runbook covers domain registration, certificate acquisition (illustrative path: win-acme manual DNS-01 + a publicly trusted CA), Key Vault import, the `azd env set` calls that promote the gateway from skeleton to live mode, validation, renewals, and teardown. The architectural rationale is captured in [ADR-0001](adr/0001-manual-testing-microphone-application-gateway.md) and [ADR-0002](adr/0002-bring-your-own-domain-and-certificate.md).
 
 ### Alternative paths
 
