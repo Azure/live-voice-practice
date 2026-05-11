@@ -84,7 +84,7 @@ If you do not have a domain, register one with any registrar that lets you publi
 
 **Constraints.** None imposed by this accelerator. The accelerator does not register, route, or validate the domain. See [ADR-0002](../adr/0002-bring-your-own-domain-and-certificate.md).
 
-**Output of this step.** A hostname you control (call it `voicelab.example.com` for the rest of this runbook) and access to the DNS panel for the parent zone (`example.com`).
+**Output of this step.** A hostname you control and access to the DNS panel for its parent zone. In command examples below, set `$hostName` to your real hostname once and reuse it. Do not copy `voicelab.example.com` literally; it is only an example placeholder.
 
 ---
 
@@ -94,7 +94,7 @@ In the DNS panel of your chosen provider, create an A record pointing the chosen
 
 ```text
 Type:  A
-Name:  voicelab          (or whatever subdomain you chose, relative to the zone)
+Name:  <your-subdomain>  (for app.contoso.com in the contoso.com zone, use app)
 Value: 20.x.x.x          (the PUBLIC_INGRESS_PUBLIC_IP from step 0)
 TTL:   300               (5 minutes — short while you iterate; raise after you go live)
 ```
@@ -102,14 +102,15 @@ TTL:   300               (5 minutes — short while you iterate; raise after you
 Validate from your workstation:
 
 ```powershell
-Resolve-DnsName voicelab.example.com -Type A
+$hostName = '<your-hostname>'   # for example: app.contoso.com
+Resolve-DnsName $hostName -Type A
 # expected answer: 20.x.x.x with the TTL you configured
 ```
 
 Or with `dig` if you have it on WSL/Linux:
 
 ```bash
-dig +short voicelab.example.com
+dig +short <your-hostname>
 # expected answer: 20.x.x.x
 ```
 
@@ -183,13 +184,13 @@ foreach ($settingsPath in ($settingsPaths | Select-Object -Unique)) {
 Set your hostname, contact email, and PFX password:
 
 ```powershell
-$hostName = 'voicelab.example.com'     # replace with your real hostname, e.g. livevoice.myailz.com
+$hostName = '<your-hostname>'          # for example: app.contoso.com
 $contactEmail = 'you@example.com'
 $pfxPassword = 'temporary-pfx-password'
 Write-Host "Requesting certificate for $hostName"
 ```
 
-Do not continue if this prints the wrong hostname. Stop and set `$hostName` again before running win-acme, because the issued certificate must exactly match the Application Gateway hostname.
+Do not continue if this prints the wrong hostname. Stop and set `$hostName` again before running win-acme, because the issued certificate must exactly match the Application Gateway hostname. If you chose `app.contoso.com`, every DNS and certificate step must use `app.contoso.com` / `_acme-challenge.app.contoso.com`, not `voicelab.example.com` or any previous hostname.
 
 Request the certificate:
 
@@ -215,7 +216,7 @@ win-acme will pause and print the DNS TXT record you must create. Example:
 
 ```text
 Please create the following TXT record:
-_acme-challenge.voicelab.example.com
+_acme-challenge.<your-hostname>
 
 with value:
 abc123XYZdef456...
@@ -227,24 +228,25 @@ Open the DNS zone for your parent domain in your DNS provider and add the TXT re
 
 ```text
 Type:  TXT
-Name/Host: _acme-challenge.voicelab
+Name/Host: _acme-challenge.<your-subdomain>
 Value: abc123XYZdef456...
 TTL:   Automatic or 5 minutes
 ```
 
 Use these rules:
 
-1. If your provider asks for a **relative** name, omit the parent zone suffix. For example, for `_acme-challenge.voicelab.example.com` in the `example.com` zone, enter `_acme-challenge.voicelab`.
-2. If your provider asks for the **fully qualified** record name, enter the full `_acme-challenge.voicelab.example.com`.
+1. If your provider asks for a **relative** name, omit the parent zone suffix. For example, for `_acme-challenge.app.contoso.com` in the `contoso.com` zone, enter `_acme-challenge.app`.
+2. If your provider asks for the **fully qualified** record name, enter the full `_acme-challenge.<your-hostname>` value printed by win-acme.
 3. Use the token from win-acme as the TXT value. If win-acme prints quotes around the value, copy the value without adding an extra set of quotes unless your DNS provider explicitly requires them.
 4. Save/apply the DNS change in the provider UI before testing propagation.
 
 Wait until the TXT record propagates. Test both public resolvers and your default resolver:
 
 ```powershell
-Resolve-DnsName _acme-challenge.voicelab.example.com -Type TXT
-Resolve-DnsName _acme-challenge.voicelab.example.com -Type TXT -Server 8.8.8.8
-Resolve-DnsName _acme-challenge.voicelab.example.com -Type TXT -Server 1.1.1.1
+$txtRecord = "_acme-challenge.$hostName"
+Resolve-DnsName $txtRecord -Type TXT
+Resolve-DnsName $txtRecord -Type TXT -Server 8.8.8.8
+Resolve-DnsName $txtRecord -Type TXT -Server 1.1.1.1
 # expected answer: the abc123XYZdef456... value
 ```
 
@@ -287,7 +289,7 @@ certbot certonly \
   --preferred-challenges dns \
   --agree-tos \
   --email you@example.com \
-  -d voicelab.example.com
+  -d <your-hostname>
 ```
 
 Then convert the PEM files to PFX:
@@ -295,8 +297,8 @@ Then convert the PEM files to PFX:
 ```bash
 openssl pkcs12 -export \
   -out voicelab.pfx \
-  -inkey /etc/letsencrypt/live/voicelab.example.com/privkey.pem \
-  -in   /etc/letsencrypt/live/voicelab.example.com/fullchain.pem \
+  -inkey /etc/letsencrypt/live/<your-hostname>/privkey.pem \
+  -in   /etc/letsencrypt/live/<your-hostname>/fullchain.pem \
   -passout pass:temporary-pfx-password
 ```
 
@@ -398,7 +400,7 @@ The upstream module models live mode and skeleton mode **explicitly in Bicep**, 
 Set the three operator-controlled values via `azd env`:
 
 ```powershell
-azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   voicelab.example.com
+azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   $hostName
 azd env set PUBLIC_INGRESS_SSL_CERT_SECRET_ID  $secretId
 ```
 
@@ -441,12 +443,12 @@ From a workstation whose egress IP is in the allow-list:
 
 ```powershell
 # HTTPS reaches the app
-curl -v https://voicelab.example.com/
+curl -v "https://$hostName/"
 # expected: 200 OK from the Container App, valid TLS chain
 
 # HTTP redirects to HTTPS
-curl -v http://voicelab.example.com/
-# expected: 301 to https://voicelab.example.com/
+curl -v "http://$hostName/"
+# expected: 301 to https://<your-hostname>/
 
 # Browser test — open in Edge/Chrome on the same workstation
 # expected: TLS green padlock, app loads, "Start Recording" exposes the
@@ -456,7 +458,7 @@ curl -v http://voicelab.example.com/
 From a workstation whose egress IP is **not** in the allow-list:
 
 ```powershell
-curl -v --max-time 10 https://voicelab.example.com/
+curl -v --max-time 10 "https://$hostName/"
 # expected: connection times out (NSG drop). This is the deny-by-default posture working.
 ```
 
@@ -542,14 +544,14 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 |---------|--------------|-----|
 | `PUBLIC_INGRESS_ENABLED` is `false` after provision | `NETWORK_ISOLATION=false` or `PUBLIC_INGRESS_ENABLED=false`. | `azd env set NETWORK_ISOLATION true` or `azd env set PUBLIC_INGRESS_ENABLED true` and re-provision. |
 | `PUBLIC_INGRESS_LIVE` stays `false` after step 5 | Either `frontendHostName` or `sslCertSecretId` is still empty on the gateway. | Re-check the two `azd env set` commands from step 5 and confirm `azd provision` re-ran. Then run `pwsh -File ./scripts/show-public-ingress-outputs.ps1` again. |
-| `curl https://voicelab.example.com/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName voicelab.example.com` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
+| `curl https://<your-hostname>/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName $hostName` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
 | Browser shows certificate name mismatch | The cert was issued for a different hostname, or the listener was configured with a different hostname than the cert covers. | Re-issue the cert for the exact `frontendHostName`, or change `frontendHostName` to match. |
 | Browser shows `NET::ERR_CERT_AUTHORITY_INVALID` | The CA root is not in this browser's trust store. | Use a publicly trusted CA, or import the corporate root CA on the tester's workstation. |
 | win-acme fails with `Unexpected DNS error while checking <domain>` before showing the TXT record | The jumpbox/firewall cannot perform win-acme's local DNS pre-validation against external authoritative DNS servers. | Disable `Validation.PreValidateDns` in win-acme `settings.json` as shown in step 3.a, then re-run step 3.b. Still verify the TXT record yourself with public DNS before pressing Enter. |
 | win-acme shows `Domain:` with the wrong hostname | `$hostName` still contains an old value from your PowerShell session. | Press `Ctrl+C`, set `$hostName` to the exact hostname you want, and re-run step 3.b. Do not issue/import a certificate for the wrong hostname. |
 | `az keyvault certificate import` fails with `BadParameter: Could not parse` | The PFX password is wrong, or the PFX was produced by an incompatible toolchain. | If using win-acme, confirm the import uses the same `--pfxpassword` value from step 3.b. If using OpenSSL, re-export with a known password and standard algorithms: `openssl pkcs12 -export -legacy -keypbe AES-256-CBC -certpbe AES-256-CBC -macalg SHA256 ...` |
 | `azd provision` fails with `KeyVault user is not authorized` on the gateway | The cert is in an external KV and the AGW UAI was not granted `Key Vault Secrets User` on it. | Run the role assignment from step 4 with the external KV's resource ID. |
-| `curl https://voicelab.example.com/` returns `502 Bad Gateway` from an allow-listed IP | The backend pool resolved correctly but the Container App isn't responding on `/`, or the Container App's own ingress is misconfigured. | Test the Container App FQDN from inside the VNet/jumpbox. The backend pool wiring itself is correct by construction (Bicep). |
+| `curl https://<your-hostname>/` returns `502 Bad Gateway` from an allow-listed IP | The backend pool resolved correctly but the Container App isn't responding on `/`, or the Container App's own ingress is misconfigured. | Test the Container App FQDN from inside the VNet/jumpbox. The backend pool wiring itself is correct by construction (Bicep). |
 
 ---
 
