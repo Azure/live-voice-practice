@@ -43,17 +43,9 @@ cd C:\path\to\live-voice-practice
 pwsh -File ./scripts/show-public-ingress-outputs.ps1
 ```
 
-The script prints both the raw outputs and ready-to-copy PowerShell variables. Keep the variables in your session because later steps use them:
+The script prints one ready-to-copy PowerShell block. Keep the variables in your session because later steps use them:
 
 ```text
-AZURE_RESOURCE_GROUP                 = rg-<env>
-KEY_VAULT_NAME                       = kv-<token>
-PUBLIC_INGRESS_PUBLIC_IP             = 20.x.x.x
-PUBLIC_INGRESS_GATEWAY_RESOURCE_ID   = /subscriptions/.../applicationGateways/agw-<token>
-PUBLIC_INGRESS_NSG_RESOURCE_ID       = /subscriptions/.../networkSecurityGroups/nsg-agw-<token>
-PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID = <guid>
-PUBLIC_INGRESS_LIVE                  = false
-
 $rg     = 'rg-<env>'
 $kv     = 'kv-<token>'
 $ip     = '20.x.x.x'
@@ -61,9 +53,10 @@ $miPid  = '<guid>'
 $gwId   = '/subscriptions/.../applicationGateways/agw-<token>'
 $nsgId  = '/subscriptions/.../networkSecurityGroups/nsg-<token>'
 $agw    = 'agw-<token>'
+$publicIngressLive = $false
 ```
 
-`PUBLIC_INGRESS_LIVE=false` confirms the deployment is in skeleton mode.
+`$publicIngressLive = $false` confirms the deployment is in skeleton mode.
 
 If `PUBLIC_INGRESS_PUBLIC_IP` is empty or the script reports that it cannot read Application Gateway resources, first confirm Azure CLI login:
 

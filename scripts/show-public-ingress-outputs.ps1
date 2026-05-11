@@ -70,20 +70,10 @@ function Write-RunbookOutputs {
     )
 
     $agw = Split-Path $GatewayResourceId -Leaf
+    $liveLiteral = if ($Live -ieq 'true') { '$true' } else { '$false' }
 
     Write-Host ""
-    Write-Host "Copy these into your runbook session:" -ForegroundColor Green
-    Write-Host "----------------------------------------------------------------"
-    Write-Host "AZURE_RESOURCE_GROUP                 = $ResourceGroup"
-    Write-Host "KEY_VAULT_NAME                       = $KeyVaultName"
-    Write-Host "PUBLIC_INGRESS_PUBLIC_IP             = $PublicIp"
-    Write-Host "PUBLIC_INGRESS_GATEWAY_RESOURCE_ID   = $GatewayResourceId"
-    Write-Host "PUBLIC_INGRESS_NSG_RESOURCE_ID       = $NsgResourceId"
-    Write-Host "PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID = $IdentityPrincipalId"
-    Write-Host "PUBLIC_INGRESS_LIVE                  = $Live"
-    Write-Host "----------------------------------------------------------------"
-    Write-Host ""
-    Write-Host "PowerShell variables for direct use:" -ForegroundColor Green
+    Write-Host "Copy/paste these PowerShell variables:" -ForegroundColor Green
     Write-Host "----------------------------------------------------------------"
     Write-Host "`$rg     = '$ResourceGroup'"
     Write-Host "`$kv     = '$KeyVaultName'"
@@ -92,6 +82,7 @@ function Write-RunbookOutputs {
     Write-Host "`$gwId   = '$GatewayResourceId'"
     Write-Host "`$nsgId  = '$NsgResourceId'"
     Write-Host "`$agw    = '$agw'"
+    Write-Host "`$publicIngressLive = $liveLiteral"
     Write-Host "----------------------------------------------------------------"
 }
 
