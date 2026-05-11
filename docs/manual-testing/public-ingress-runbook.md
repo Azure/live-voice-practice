@@ -79,9 +79,9 @@ Because the Key Vault has **public network access disabled**, the workflow is sp
 | **2** (create DNS A record) | Your workstation | Edit DNS provider UI |
 | **3** (obtain TLS cert) | **Jumpbox recommended** | Run win-acme on the jumpbox; verify DNS propagation from your workstation or a public DNS checker |
 | **4** (import to Key Vault) | **Jumpbox only** | Key Vault is not reachable from your workstation (public access disabled) |
-| **5** (promote to live) | Workstation recommended | Use the same place you ran the initial `azd provision` |
+| **5** (promote to live) | **Your workstation** | Run `azd env set`, edit `main.parameters.json`, and run `azd provision` |
 
-**Bottom line:** After the initial `azd provision`, the operator work is jumpbox-first. Steps 3–4 are easiest when you do them together **on the jumpbox**, and the Key Vault import (step 4) *must* run from the jumpbox. You may also read the deployment outputs from the jumpbox after `az login --identity`. Use the workstation for public DNS/provider checks and for re-running `azd provision` if that is where your azd environment is set up. Do **not** use the jumpbox to test public DNS resolvers such as `8.8.8.8` or `1.1.1.1`; network-isolated firewall rules commonly block those DNS queries and produce timeouts even when the public TXT record is correct.
+**Bottom line:** Use the jumpbox for win-acme and Key Vault import. Use your workstation for DNS/provider checks and the final `azd env set` + `azd provision`. Do **not** use the jumpbox to test public DNS resolvers such as `8.8.8.8` or `1.1.1.1`; those queries can time out even when the public TXT record is correct.
 
 ---
 
@@ -391,11 +391,13 @@ After the file is on the jumpbox, return to step 4.a and import it into Key Vaul
 
 ---
 
-## 5. Promote the gateway to live mode (Bicep is the source of truth)
+## 5. Promote the gateway to live mode from your workstation
 
 Live mode and skeleton mode are modeled in Bicep, so re-running `azd provision` after this step will reconcile the configuration cleanly. Do not edit the Application Gateway directly in the portal; portal-side changes will be reverted by the next provision.
 
-Set the public hostname and certificate secret via `azd env` from the same workstation/session that ran the initial `azd provision`.
+Run every command in this section from **your workstation**, not from the jumpbox.
+
+Set the public hostname and certificate secret via `azd env`:
 
 `PUBLIC_INGRESS_FRONTEND_HOSTNAME` must be the **full public DNS hostname/FQDN** you chose in step 1 and used for the certificate in step 3. It is not the Container App hostname, and it is not the short DNS provider record name.
 
@@ -411,7 +413,7 @@ azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   'app.contoso.com'
 azd env set PUBLIC_INGRESS_SSL_CERT_SECRET_ID  'https://kv-<token>.vault.azure.net/secrets/voicelab-cert'
 ```
 
-For the IP allow-list (`allowedSourceAddressPrefixes`), this accelerator's [`main.parameters.json`](../../main.parameters.json) does not currently expose an env var because the value is a list. Set it directly in `main.parameters.json`:
+Still on your workstation, set the IP allow-list directly in [`main.parameters.json`](../../main.parameters.json):
 
 ```jsonc
 "publicIngress": {
@@ -429,13 +431,11 @@ For the IP allow-list (`allowedSourceAddressPrefixes`), this accelerator's [`mai
 
 Replace the example CIDRs with the public egress IPs of your testers. Use `/32` for a single workstation. To find a tester's egress IP they can visit `https://api.ipify.org` from their browser and read the response. Keep this list as small as possible.
 
-Then re-provision:
+Then re-provision from your workstation:
 
 ```powershell
 azd provision
 ```
-
-Run this final `azd provision` from the same environment you used for the initial provision.
 
 The reconcile is fast (only the gateway listener, redirect rule, NSG rule, and the cert reference change). Validate the transition:
 
