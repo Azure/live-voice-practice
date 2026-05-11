@@ -400,9 +400,15 @@ Set the public hostname and certificate secret via `azd env` from the same works
 `PUBLIC_INGRESS_FRONTEND_HOSTNAME` must be the **full public DNS hostname/FQDN** you chose in step 1 and used for the certificate in step 3. It is not the Container App hostname, and it is not the short DNS provider record name.
 
 ```powershell
-# Example: $hostName = 'livevoice.myailz.com'
 azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   $hostName
 azd env set PUBLIC_INGRESS_SSL_CERT_SECRET_ID  $secretId
+```
+
+If you type the values directly instead of using variables, wrap them in single quotes in PowerShell:
+
+```powershell
+azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   'livevoice.myailz.com'
+azd env set PUBLIC_INGRESS_SSL_CERT_SECRET_ID  'https://kv-gnsz77ru5uckw.vault.azure.net/secrets/voicelab-cert'
 ```
 
 For the IP allow-list (`allowedSourceAddressPrefixes`), this accelerator's [`main.parameters.json`](../../main.parameters.json) does not currently expose an env var because the value is a list. Set it directly in `main.parameters.json`:
