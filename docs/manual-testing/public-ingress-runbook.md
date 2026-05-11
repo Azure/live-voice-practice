@@ -121,7 +121,7 @@ DNS propagation for a fresh record is typically under 5 minutes in modern provid
 
 Obtain a certificate from any certification authority your audience's browsers trust by default. The accelerator does not endorse one CA over another. Three illustrative paths are listed in [§ Variations](#variations); the walkthrough below uses **win-acme** with Let's Encrypt and manual DNS-01 validation because it is a mature ACME client built specifically for Windows servers and does not require `winget`, WSL, Linux, or Docker.
 
-### 3.a. Verify or install win-acme (one-time, Windows PowerShell)
+### 3.a. Verify or install win-acme, then patch DNS pre-validation (one-time, Windows PowerShell)
 
 If you are running on the jumpbox from `infra/` ≥ `v1.1.9`, win-acme is installed by bootstrap. Verify first:
 
@@ -151,9 +151,9 @@ Expand-Archive -Path $zip -DestinationPath $wacsDir -Force
 & "$wacsDir\wacs.exe" --version
 ```
 
-In locked-down Windows environments (jumpbox or workstation behind restrictive DNS/egress), win-acme's local DNS pre-validation may be unable to query external authoritative DNS servers directly. If a later DNS-01 run fails before showing the TXT value with an error such as `Unexpected DNS error while checking <domain>` or `Unable to find any name servers for <domain>`, disable only win-acme's local DNS pre-validation and let Let's Encrypt perform the authoritative validation.
+If you are using the jumpbox, run the settings patch below **now**, even when `wacs.exe --version` worked and DNS already resolves. This is not another win-acme install. It only disables win-acme's local DNS pre-validation (`Validation.PreValidateDns=false`), which can fail in locked-down Windows environments before win-acme prints the DNS TXT value. Let's Encrypt still performs the authoritative DNS-01 validation, and you will still verify the TXT record with public DNS before continuing.
 
-Run this after installing win-acme. It updates both the xcopy install settings and any settings already created under `%ProgramData%\win-acme`:
+Run this once after verifying or installing win-acme. It updates both the xcopy install settings and any settings already created under `%ProgramData%\win-acme`:
 
 ```powershell
 $settingsPaths = @()
