@@ -241,6 +241,8 @@ Use these rules:
 4. Save/apply the DNS change in the provider UI before testing propagation.
 
 > **Namecheap and similar DNS panels:** the **Host** field is relative to your zone. If your zone is `contoso.com` and win-acme asks for `_acme-challenge.app.contoso.com`, enter only `_acme-challenge.app`. If you enter the full `_acme-challenge.app.contoso.com`, the provider may create `_acme-challenge.app.contoso.com.contoso.com`, which Let's Encrypt will not find.
+>
+> **Do not reuse that short Host value in PowerShell.** The DNS provider's **Host** field may be relative, but `Resolve-DnsName` needs the full DNS name. For example, if the DNS panel Host is `_acme-challenge.app` in the `contoso.com` zone, test `_acme-challenge.app.contoso.com`, not `_acme-challenge.app`.
 
 Wait until the TXT record propagates. If you are running win-acme on the jumpbox, verify propagation from your **workstation** or from a browser-based public DNS checker, not from the jumpbox. Direct DNS queries from the jumpbox to public resolvers are expected to time out in network-isolated deployments.
 
@@ -248,6 +250,8 @@ From your workstation:
 
 ```powershell
 $txtRecord = "_acme-challenge.$hostName"
+# Example: if $hostName is app.contoso.com, this becomes
+# _acme-challenge.app.contoso.com. Do not shorten it.
 Resolve-DnsName $txtRecord -Type TXT
 Resolve-DnsName $txtRecord -Type TXT -Server 8.8.8.8
 Resolve-DnsName $txtRecord -Type TXT -Server 1.1.1.1
