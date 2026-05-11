@@ -117,7 +117,7 @@ export const api = {
   ): Promise<Assessment> {
     const referenceText = extractUserText(conversationMessages)
     const audioPayloadChars = estimateAudioPayloadChars(audioData)
-    const shouldSendMessages = !conversationId
+    const shouldSendMessages = !conversationId && !agentId
     const shouldSendLegacyAudio =
       !agentId && audioPayloadChars <= MAX_LEGACY_ANALYZE_AUDIO_PAYLOAD_CHARS
     const payload = {

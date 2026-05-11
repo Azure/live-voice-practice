@@ -329,6 +329,8 @@ def analyze_conversation():
     conversation_messages = cast(List[Dict[str, Any]], data.get("conversation_messages", []))
     if not conversation_messages:
         conversation_messages = _messages_from_saved_conversation(saved_conversation)
+    if not conversation_messages:
+        conversation_messages = session_audio_store.get_messages(agent_id)
     transcript = cast(
         str,
         data.get("transcript")

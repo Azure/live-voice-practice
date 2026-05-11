@@ -260,6 +260,7 @@ export default function App() {
     send,
     clearMessages,
     getRecordings,
+    getConversationId,
     saveConversationNow,
   } = useRealtime({
     agentId: currentAgent,
@@ -344,7 +345,9 @@ export default function App() {
       const transcript = recordings.conversation
         .map((m: any) => `${m.role}: ${m.content}`)
         .join('\n')
-      const conversationId = await saveConversationNow()
+      const conversationId = currentAgent
+        ? getConversationId()
+        : await saveConversationNow()
 
       const result = await api.analyzeConversation(
         selectedScenario,

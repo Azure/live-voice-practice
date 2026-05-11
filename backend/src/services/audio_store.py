@@ -12,7 +12,7 @@ import tempfile
 import time
 from pathlib import Path
 from threading import Lock
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ class SessionAudioStore:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
         self._metadata: Dict[str, Dict[str, int | float | str]] = {}
+        self._messages: Dict[str, List[Dict[str, str]]] = {}
 
     def append_user_audio(self, agent_id: str, base64_audio: str) -> None:
         """Append one base64-encoded PCM chunk for an agent."""
@@ -72,6 +73,28 @@ class SessionAudioStore:
         with self._lock:
             return dict(self._metadata.get(agent_id, {}))
 
+    def append_message(self, agent_id: str, role: str, content: str) -> None:
+        """Append a transcript message for an agent."""
+        if not agent_id or not role or not content:
+            return
+
+        with self._lock:
+            messages = self._messages.setdefault(agent_id, [])
+            messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                }
+            )
+
+    def get_messages(self, agent_id: Optional[str]) -> List[Dict[str, Any]]:
+        """Return transcript messages captured for an agent."""
+        if not agent_id:
+            return []
+
+        with self._lock:
+            return list(self._messages.get(agent_id, []))
+
     def clear(self, agent_id: str) -> None:
         """Delete stored audio for an agent."""
         if not agent_id:
@@ -80,6 +103,7 @@ class SessionAudioStore:
         path = self._path_for_agent(agent_id)
         with self._lock:
             self._metadata.pop(agent_id, None)
+            self._messages.pop(agent_id, None)
             path.unlink(missing_ok=True)
 
     def cleanup_old(self, max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS) -> None:
@@ -95,6 +119,7 @@ class SessionAudioStore:
             for agent_id in stale_agent_ids:
                 path = Path(str(self._metadata.get(agent_id, {}).get("path", "")))
                 self._metadata.pop(agent_id, None)
+                self._messages.pop(agent_id, None)
                 if path:
                     path.unlink(missing_ok=True)
 

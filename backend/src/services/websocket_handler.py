@@ -251,7 +251,7 @@ class VoiceProxyHandler:
         """Handle bidirectional message forwarding."""
         tasks = [
             asyncio.create_task(self._forward_client_to_azure(client_ws, azure_conn, current_agent_id)),
-            asyncio.create_task(self._forward_azure_to_client(azure_conn, client_ws)),
+            asyncio.create_task(self._forward_azure_to_client(azure_conn, client_ws, current_agent_id)),
         ]
 
         _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -297,11 +297,13 @@ class VoiceProxyHandler:
         self,
         azure_conn: VoiceLiveConnection,
         client_ws: simple_websocket.ws.Server,
+        current_agent_id: Optional[str],
     ) -> None:
         """Forward messages from Azure to client using SDK typed events."""
         try:
             async for event in azure_conn:
                 event_dict = event.as_dict() if hasattr(event, "as_dict") else dict(event)
+                self._store_transcript_event(current_agent_id, event_dict)
                 message = json.dumps(event_dict)
                 logger.debug("Azure->Client: %s", message[:LOG_MESSAGE_MAX_LENGTH])
 
@@ -322,6 +324,21 @@ class VoiceProxyHandler:
             logger.debug("Azure connection closed: code=%s, reason=%s", e.code, e.reason)
         except Exception as e:
             logger.debug("Error forwarding Azure messages: %s", e)
+
+    def _store_transcript_event(self, current_agent_id: Optional[str], event_dict: Dict[str, Any]) -> None:
+        """Store transcript turns server-side so analysis requests stay small."""
+        if not current_agent_id:
+            return
+
+        event_type = event_dict.get("type")
+        if event_type == "conversation.item.input_audio_transcription.completed":
+            transcript = str(event_dict.get("transcript", "")).strip()
+            if transcript:
+                session_audio_store.append_message(current_agent_id, "user", transcript)
+        elif event_type == "response.audio_transcript.done":
+            transcript = str(event_dict.get("transcript", "")).strip()
+            if transcript:
+                session_audio_store.append_message(current_agent_id, "assistant", transcript)
 
     async def _send_message(self, ws: simple_websocket.ws.Server, message: Dict[str, str | Dict[str, str]]) -> None:
         """Send a JSON message to a WebSocket."""
