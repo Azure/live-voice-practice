@@ -8,13 +8,10 @@
 
     Connectivity strategy:
       * NETWORK_ISOLATION=false -> probe the public ingress directly.
-      * NETWORK_ISOLATION=true  -> the ingress is internal, only reachable
-        from inside the VNet. The script:
-          1. Probes directly first (works when run on the jumpbox via
-             Bastion, since the jumpbox already lives inside the VNet
-             and resolves the FQDN to its private IP).
-          2. Falls back to `az vm run-command invoke` against the jumpbox
-             when we're not on the jumpbox ourselves.
+      * NETWORK_ISOLATION=true  -> the Container App FQDN is only reachable
+        from inside the VNet. From a workstation, the script uses jumpbox
+        Run-Command directly instead of printing noisy expected failures.
+        When run on the jumpbox itself, it probes directly.
 
     SSL: the AILZ Azure Firewall blocks revocation endpoints
     (oneocsp.microsoft.com, ocsp.digicert.com, crl{2,3}.microsoft.com,
@@ -180,25 +177,38 @@ function Invoke-DirectProbe {
 }
 
 # ---------- jumpbox fallback (only when running OUTSIDE the VNet with NI=true) ----
-function Invoke-JumpboxProbe {
-    param([string]$ResourceGroup, [string]$Fqdn)
+function Resolve-JumpboxName {
+    param([string]$ResourceGroup)
 
     $vmName = Get-EnvVal 'TEST_VM_NAME'
     if (-not $vmName) {
         $vmName = az vm list -g $ResourceGroup --query "[?contains(name, 'testvm') || contains(name, 'jumpbox')].name | [0]" -o tsv 2>$null
     }
+    return $vmName
+}
+
+function Test-RunningOnJumpbox {
+    param([string]$VmName)
+
+    return ($env:COMPUTERNAME -and $VmName -and $VmName -like "$($env:COMPUTERNAME)*")
+}
+
+function Invoke-JumpboxProbe {
+    param([string]$ResourceGroup, [string]$Fqdn)
+
+    $vmName = Resolve-JumpboxName -ResourceGroup $ResourceGroup
     if (-not $vmName) {
         Write-Yellow "[postDeploy] No jumpbox VM found in $ResourceGroup; cannot probe inside VNet."
         return $null
     }
 
     # Avoid run-command-on-self if we happen to BE the jumpbox.
-    if ($env:COMPUTERNAME -and $vmName -like "$($env:COMPUTERNAME)*") {
+    if (Test-RunningOnJumpbox -VmName $vmName) {
         Write-Yellow "[postDeploy] We appear to be the jumpbox itself ($($env:COMPUTERNAME)); direct probe should have worked."
         return $null
     }
 
-    Write-Blue "[postDeploy] Falling back to jumpbox Run-Command via $vmName"
+    Write-Blue "[postDeploy] Probing from inside the VNet via jumpbox Run-Command ($vmName)."
 
     $vmState = az vm get-instance-view -g $ResourceGroup -n $vmName --query "instanceView.statuses[?starts_with(code,'PowerState')].code | [0]" -o tsv 2>$null
     $startedByUs = $false
@@ -240,12 +250,13 @@ exit 1
 }
 
 # ---------- main ----------------------------------------------------------
-Write-Blue "[postDeploy] Probing $healthUrl ..."
-$body = Invoke-DirectProbe -Url $healthUrl
-
-if (-not $body -and $niEnabled) {
-    Write-Yellow "[postDeploy] Direct probe failed; trying jumpbox fallback (NETWORK_ISOLATION=true)."
+if ($niEnabled -and -not (Test-RunningOnJumpbox -VmName (Resolve-JumpboxName -ResourceGroup $rg))) {
+    Write-Blue "[postDeploy] NETWORK_ISOLATION=true; direct Container App probe from workstation is expected to be unreachable."
     $body = Invoke-JumpboxProbe -ResourceGroup $rg -Fqdn $fqdn
+}
+else {
+    Write-Blue "[postDeploy] Probing $healthUrl ..."
+    $body = Invoke-DirectProbe -Url $healthUrl
 }
 
 if (-not $body) {

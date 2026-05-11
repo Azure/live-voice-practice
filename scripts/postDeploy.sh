@@ -132,23 +132,35 @@ direct_probe() {
     return 1
 }
 
-jumpbox_probe() {
-    local rg_="$1" fqdn_="$2"
+resolve_jumpbox_name() {
+    local rg_="$1"
     local vmName
     vmName="$(get_env_val TEST_VM_NAME)"
     if [[ -z "$vmName" ]]; then
         vmName="$(az vm list -g "$rg_" --query "[?contains(name, 'testvm') || contains(name, 'jumpbox')].name | [0]" -o tsv 2>/dev/null || true)"
     fi
+    printf '%s' "$vmName"
+}
+
+is_jumpbox() {
+    local vmName="$1"
+    [[ -n "${HOSTNAME:-}" && -n "$vmName" && "$vmName" == "$HOSTNAME"* ]]
+}
+
+jumpbox_probe() {
+    local rg_="$1" fqdn_="$2"
+    local vmName
+    vmName="$(resolve_jumpbox_name "$rg_")"
     if [[ -z "$vmName" ]]; then
         echo -e "${YELLOW}[postDeploy] No jumpbox VM found; cannot probe inside VNet${NC}" 1>&2
         return 1
     fi
-    if [[ -n "${HOSTNAME:-}" ]] && [[ "$vmName" == "$HOSTNAME"* ]]; then
+    if is_jumpbox "$vmName"; then
         echo -e "${YELLOW}[postDeploy] We appear to be the jumpbox; direct probe should have worked${NC}" 1>&2
         return 1
     fi
 
-    echo -e "${BLUE}[postDeploy] Falling back to jumpbox Run-Command via $vmName${NC}" 1>&2
+    echo -e "${BLUE}[postDeploy] Probing from inside the VNet via jumpbox Run-Command ($vmName).${NC}" 1>&2
     local vmState startedByUs=false
     vmState="$(az vm get-instance-view -g "$rg_" -n "$vmName" --query "instanceView.statuses[?starts_with(code,'PowerState')].code | [0]" -o tsv 2>/dev/null || true)"
     if [[ "$vmState" != "PowerState/running" ]]; then
@@ -190,13 +202,13 @@ EOF
     return 0
 }
 
-echo -e "${BLUE}[postDeploy] Probing ${healthUrl} ...${NC}"
 body=""
-if body="$(direct_probe "$healthUrl")" && [[ -n "$body" ]]; then
-    :
-elif [[ "$niEnabled" == "true" ]]; then
-    echo -e "${YELLOW}[postDeploy] Direct probe failed; trying jumpbox fallback (NETWORK_ISOLATION=true)${NC}"
+if [[ "$niEnabled" == "true" ]] && ! is_jumpbox "$(resolve_jumpbox_name "$rg")"; then
+    echo -e "${BLUE}[postDeploy] NETWORK_ISOLATION=true; direct Container App probe from workstation is expected to be unreachable.${NC}"
     body="$(jumpbox_probe "$rg" "$fqdn" || true)"
+else
+    echo -e "${BLUE}[postDeploy] Probing ${healthUrl} ...${NC}"
+    body="$(direct_probe "$healthUrl" || true)"
 fi
 
 if [[ -z "$body" ]]; then
