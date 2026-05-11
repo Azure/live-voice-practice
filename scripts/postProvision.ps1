@@ -20,6 +20,15 @@ $ErrorActionPreference = 'Continue'
 
 Write-Host "[>] Running post-provision hook..."
 
+function Enable-AzCliNonInteractiveExtensions {
+  az config set extension.use_dynamic_install=yes_without_prompt 2>$null | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "[!] Could not configure Azure CLI dynamic extension install; az extension prompts may block non-interactive runs."
+  }
+}
+
+Enable-AzCliNonInteractiveExtensions
+
 & azd env get-values | ForEach-Object {
   if ($_ -match '^([^=]+)=(.*)$') {
     $k = $matches[1]

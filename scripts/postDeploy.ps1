@@ -37,6 +37,15 @@ function Write-Red($msg) { Write-Host $msg -ForegroundColor Red }
 Write-Host ""
 Write-Blue "[postDeploy] Running smoke test..."
 
+function Enable-AzCliNonInteractiveExtensions {
+    az config set extension.use_dynamic_install=yes_without_prompt 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Yellow "[postDeploy] Could not configure Azure CLI dynamic extension install; az extension prompts may block non-interactive runs."
+    }
+}
+
+Enable-AzCliNonInteractiveExtensions
+
 # ---------- env helpers --------------------------------------------------
 $envValues = azd env get-values 2>$null
 function Get-EnvVal {

@@ -3,6 +3,13 @@ set -euo pipefail
 
 echo "[>] Running Search data-plane setup..."
 
+configure_az_cli_noninteractive_extensions() {
+  az config set extension.use_dynamic_install=yes_without_prompt >/dev/null 2>&1 || \
+    echo "[!] Could not configure Azure CLI dynamic extension install; az extension prompts may block non-interactive runs."
+}
+
+configure_az_cli_noninteractive_extensions
+
 if [[ -z "${AZURE_RESOURCE_GROUP:-}" ]]; then
   while IFS='=' read -r key value; do
     [[ -z "${key:-}" ]] && continue

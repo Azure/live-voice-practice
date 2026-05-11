@@ -3,6 +3,15 @@ $ErrorActionPreference = 'Stop'
 
 Write-Host "[>] Running Search data-plane setup..."
 
+function Enable-AzCliNonInteractiveExtensions {
+  az config set extension.use_dynamic_install=yes_without_prompt 2>$null | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Could not configure Azure CLI dynamic extension install; az extension prompts may block non-interactive runs."
+  }
+}
+
+Enable-AzCliNonInteractiveExtensions
+
 if (-not $env:AZURE_RESOURCE_GROUP) {
   & azd env get-values | ForEach-Object {
     if ($_ -match '^([^=]+)=(.*)$') {

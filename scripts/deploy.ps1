@@ -23,6 +23,15 @@ function Write-ErrorColored($msg) { Write-Host $msg -ForegroundColor Red }
 
 Write-Host ""
 
+function Enable-AzCliNonInteractiveExtensions {
+    az config set extension.use_dynamic_install=yes_without_prompt 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Yellow "Could not configure Azure CLI dynamic extension install; az extension prompts may block non-interactive runs."
+    }
+}
+
+Enable-AzCliNonInteractiveExtensions
+
 #region Load azd env
 # When invoked as an azd hook, azd injects env values as process env vars
 # (e.g. NETWORK_ISOLATION, ACR_TASK_AGENT_POOL). Recursive `azd env get-values`

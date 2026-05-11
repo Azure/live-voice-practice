@@ -20,6 +20,13 @@ set -uo pipefail
 
 echo "[>] Running post-provision hook..."
 
+configure_az_cli_noninteractive_extensions() {
+  az config set extension.use_dynamic_install=yes_without_prompt >/dev/null 2>&1 || \
+    echo "[!] Could not configure Azure CLI dynamic extension install; az extension prompts may block non-interactive runs."
+}
+
+configure_az_cli_noninteractive_extensions
+
 while IFS='=' read -r key value; do
   [[ -z "${key:-}" ]] && continue
   value="${value%\"}"
@@ -54,7 +61,13 @@ if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
   echo "   require connectivity to the VNet private endpoints."
   echo "   Ensure you run scripts/postProvision.sh from within the VNet (jumpbox via"
   echo "   Bastion or VPN). Otherwise these steps will be skipped."
-  if [[ -t 0 ]]; then
+  if [[ "${RUN_FROM_JUMPBOX:-}" =~ ^(true|True|1|yes|YES)$ ]]; then
+    RUN_FROM_JUMPBOX_ENABLED=true
+    echo "[OK] RUN_FROM_JUMPBOX=true detected; continuing with data-plane post-provisioning non-interactively."
+  elif [[ "${RUN_FROM_JUMPBOX:-}" =~ ^(false|False|0|no|NO|skip|SKIP)$ ]]; then
+    echo "[-] RUN_FROM_JUMPBOX=${RUN_FROM_JUMPBOX} detected; data-plane steps will be skipped (no prompt)."
+    echo "   Re-run interactively from the jumpbox/Bastion, OR set RUN_FROM_JUMPBOX=true to apply them."
+  elif [[ -t 0 ]]; then
     read -r -p "[?] Are you running this script from inside the VNet or via VPN? [Y/n]: " _ni_answer
     if [[ -z "${_ni_answer:-}" || "${_ni_answer:-}" =~ ^(y|Y|yes|YES|true|True|1)$ ]]; then
       RUN_FROM_JUMPBOX_ENABLED=true
@@ -64,7 +77,7 @@ if [[ "$NETWORK_ISOLATION_ENABLED" == true ]]; then
     fi
   else
     echo "[-] Non-interactive shell detected; data-plane steps will be skipped."
-    echo "   Re-run interactively from the jumpbox/Bastion to apply them."
+    echo "   Re-run interactively from the jumpbox/Bastion, OR set RUN_FROM_JUMPBOX=true to bypass the prompt."
   fi
 fi
 
