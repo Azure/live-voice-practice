@@ -93,7 +93,7 @@ If you do not have a domain, register one with any registrar that lets you publi
 
 **Constraints.** None imposed by this accelerator. The accelerator does not register, route, or validate the domain. See [ADR-0002](../adr/0002-bring-your-own-domain-and-certificate.md).
 
-**Output of this step.** A full public DNS hostname/FQDN you control, plus access to the DNS panel for its parent zone. In command examples below, set `$hostName` to that full hostname once and reuse it everywhere. For example, use `livevoice.myailz.com`, not the short DNS provider host value `livevoice`, and not the Container App's internal/default hostname. Do not copy `voicelab.example.com` literally; it is only an example placeholder.
+**Output of this step.** A full public DNS hostname/FQDN you control, plus access to the DNS panel for its parent zone. In command examples below, set `$hostName` to that full hostname once and reuse it everywhere. For example, use `app.contoso.com`, not the short DNS provider host value `app`, and not the Container App's internal/default hostname. Do not copy example hostnames literally; replace them with your own public hostname.
 
 ---
 
@@ -407,8 +407,8 @@ azd env set PUBLIC_INGRESS_SSL_CERT_SECRET_ID  $secretId
 If you type the values directly instead of using variables, wrap them in single quotes in PowerShell:
 
 ```powershell
-azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   'livevoice.myailz.com'
-azd env set PUBLIC_INGRESS_SSL_CERT_SECRET_ID  'https://kv-gnsz77ru5uckw.vault.azure.net/secrets/voicelab-cert'
+azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   'app.contoso.com'
+azd env set PUBLIC_INGRESS_SSL_CERT_SECRET_ID  'https://kv-<token>.vault.azure.net/secrets/voicelab-cert'
 ```
 
 For the IP allow-list (`allowedSourceAddressPrefixes`), this accelerator's [`main.parameters.json`](../../main.parameters.json) does not currently expose an env var because the value is a list. Set it directly in `main.parameters.json`:
