@@ -22,9 +22,13 @@ This runbook does **not** prescribe a domain registrar, a DNS provider, or a cer
 
 ---
 
-## 0. Read the deployment outputs
+## 0. Read or carry forward the deployment outputs
 
-Run this one-liner from your workstation with your Azure user login. It queries Azure directly and prints every value the rest of the runbook needs:
+This is a **management-plane lookup**, not a jumpbox/private-network operation.
+
+If you just ran `azd provision` from your workstation, keep the output values from that session and continue the rest of the runbook from the jumpbox. You do **not** need to leave the jumpbox for the certificate and Key Vault steps.
+
+If you need to rediscover the values later, run this helper from your workstation with your Azure user login:
 
 ```powershell
 cd C:\path\to\live-voice-practice
@@ -56,9 +60,9 @@ $agw    = 'agw-<token>'
 If `PUBLIC_INGRESS_PUBLIC_IP` is empty or the script reports that it cannot read Application Gateway resources, first confirm where you ran it:
 
 - **Workstation with your Azure user login:** check that `NETWORK_ISOLATION=true` (or set `PUBLIC_INGRESS_ENABLED=true` explicitly) and re-run `azd provision`.
-- **Jumpbox with `az login --identity`:** this is usually an ARM Reader permission limitation of the jumpbox managed identity. It does not mean the Application Gateway is missing. Run the helper from your workstation or use the output values you already copied from this step.
+- **Jumpbox with `az login --identity`:** stop using this helper there. This is usually an ARM Reader permission limitation of the jumpbox managed identity. It does **not** mean the Application Gateway is missing. Continue on the jumpbox using the output values from your `azd provision` session, or rediscover those values once from the workstation.
 
-> **Why a script and not `azd env get-values`?** `azd env refresh` requires interactive `azd auth login`, which does not work cleanly from headless contexts. The helper script reads deployment outputs first and falls back to resource lookups. On the jumpbox, the managed identity may not have ARM Reader on network resources, so prefer the workstation for this output-reading step.
+> **Why not run this helper on the jumpbox?** The jumpbox is the right place for private data-plane work such as win-acme and Key Vault import, but its managed identity is intentionally limited and may not be able to read ARM deployment outputs or network resources. Treat output discovery as a one-time workstation step; treat certificate generation and Key Vault import as jumpbox steps.
 
 ---
 
@@ -68,14 +72,14 @@ Because the Key Vault has **public network access disabled**, the workflow is sp
 
 | Step | Location | Why |
 |------|----------|-----|
-| **0** (read outputs) | Your workstation | Requires ARM read access to deployment outputs/network resources |
+| **0** (read/carry outputs) | Workstation once, then carry values into jumpbox | Requires ARM read access to deployment outputs/network resources; not a private-network step |
 | **1** (choose domain) | Your workstation | No Azure resources needed |
 | **2** (create DNS A record) | Your workstation | Edit DNS provider UI |
 | **3** (obtain TLS cert) | **Jumpbox recommended** | Run win-acme on the jumpbox; verify DNS propagation from your workstation or a public DNS checker |
 | **4** (import to Key Vault) | **Jumpbox only** | Key Vault is not reachable from your workstation (public access disabled) |
-| **5** (promote to live) | Your workstation or jumpbox | Just needs `az provision` |
+| **5** (promote to live) | Workstation recommended | Use the same place you ran the initial `azd provision`; jumpbox MI may not have enough ARM permissions |
 
-**Bottom line:** Steps 3–4 are easiest when you do them together **on the jumpbox**. The Key Vault import (step 4) *must* run from the jumpbox; step 3 can run from your workstation if firewall permits, but it's more convenient on the jumpbox if you're already connected there. However, do **not** use the jumpbox to test public DNS resolvers such as `8.8.8.8` or `1.1.1.1`; network-isolated firewall rules commonly block those DNS queries and produce timeouts even when the public TXT record is correct.
+**Bottom line:** After the initial `azd provision`, the operator work is jumpbox-first. Steps 3–4 are easiest when you do them together **on the jumpbox**, and the Key Vault import (step 4) *must* run from the jumpbox. Use the workstation only for public DNS/provider checks and ARM management-plane actions such as reading deployment outputs or re-running `azd provision`. Do **not** use the jumpbox to test public DNS resolvers such as `8.8.8.8` or `1.1.1.1`; network-isolated firewall rules commonly block those DNS queries and produce timeouts even when the public TXT record is correct.
 
 ---
 
