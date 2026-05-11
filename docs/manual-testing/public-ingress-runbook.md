@@ -451,6 +451,9 @@ pwsh -File ./scripts/show-public-ingress-outputs.ps1
 From a workstation whose egress IP is in the allow-list:
 
 ```powershell
+# If you are connected to an Azure VPN, make sure the browser is not routing
+# the gateway public IP through the VPN tunnel.
+
 # HTTPS reaches the app
 curl -v "https://$hostName/"
 # expected: 200 OK from the Container App, valid TLS chain
@@ -556,6 +559,7 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 | `PUBLIC_INGRESS_ENABLED` is `false` after provision | `NETWORK_ISOLATION=false` or `PUBLIC_INGRESS_ENABLED=false`. | `azd env set NETWORK_ISOLATION true` or `azd env set PUBLIC_INGRESS_ENABLED true` and re-provision. |
 | `PUBLIC_INGRESS_LIVE` stays `false` after step 5 | Either `frontendHostName` or `sslCertSecretId` is still empty on the gateway. | Re-check the two `azd env set` commands from step 5 and confirm `azd provision` re-ran. Then run `pwsh -File ./scripts/show-public-ingress-outputs.ps1` again. |
 | `curl https://<your-hostname>/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName $hostName` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
+| Browser or `curl` times out while Azure VPN is connected, but `PUBLIC_INGRESS_LIVE=true` | The workstation may be routing the gateway public IP through the VPN tunnel instead of normal Internet. | Disconnect the VPN for the browser test, or add a local route exception so the gateway public IP uses the workstation's normal Internet gateway. Confirm with `Find-NetRoute -RemoteIPAddress <gateway-public-ip>`. |
 | Browser shows certificate name mismatch | The cert was issued for a different hostname, or the listener was configured with a different hostname than the cert covers. | Re-issue the cert for the exact `frontendHostName`, or change `frontendHostName` to match. |
 | Browser shows `NET::ERR_CERT_AUTHORITY_INVALID` | The CA root is not in this browser's trust store. | Use a publicly trusted CA, or import the corporate root CA on the tester's workstation. |
 | win-acme fails with `Unexpected DNS error while checking <domain>` before showing the TXT record | The jumpbox/firewall cannot perform win-acme's local DNS pre-validation against external authoritative DNS servers. | Disable `Validation.PreValidateDns` in win-acme `settings.json` as shown in step 3.a, then re-run step 3.b. Still verify the TXT record yourself with public DNS before pressing Enter. |
