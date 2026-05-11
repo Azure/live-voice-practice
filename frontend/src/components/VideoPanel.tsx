@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
+  Button,
   Card,
   ProgressBar,
   Spinner,
@@ -118,9 +119,16 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
+  diagnosticsToggle: {
+    width: '100%',
+    justifyContent: 'space-between',
+    padding: 0,
+    minWidth: 0,
+  },
   diagnosticsHeader: {
     display: 'flex',
     justifyContent: 'space-between',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   diagnosticsTitle: {
@@ -130,6 +138,11 @@ const useStyles = makeStyles({
   },
   diagnosticsStatus: {
     color: tokens.colorNeutralForeground1,
+  },
+  diagnosticsBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
   },
   diagnosticsGrid: {
     display: 'grid',
@@ -182,6 +195,7 @@ export function VideoPanel({
     ready: boolean
   }>({ ready: false })
   const [now, setNow] = useState(() => Date.now())
+  const [detailsExpanded, setDetailsExpanded] = useState(false)
 
   const handlePlaying = useCallback(() => {
     setVideoReady({ startedAt: diagnostics?.startedAt, ready: true })
@@ -264,18 +278,25 @@ export function VideoPanel({
               })}
             </div>
             <div className={styles.diagnostics}>
-              <div className={styles.diagnosticsHeader}>
-                <Text
-                  size={100}
-                  weight="semibold"
-                  className={styles.diagnosticsTitle}
-                >
-                  Connection details
-                </Text>
-                <Text size={100} className={styles.diagnosticLabel}>
-                  {formatElapsed(elapsedSeconds)}
-                </Text>
-              </div>
+              <Button
+                appearance="transparent"
+                className={styles.diagnosticsToggle}
+                onClick={() => setDetailsExpanded(expanded => !expanded)}
+                aria-expanded={detailsExpanded}
+              >
+                <div className={styles.diagnosticsHeader}>
+                  <Text
+                    size={100}
+                    weight="semibold"
+                    className={styles.diagnosticsTitle}
+                  >
+                    {detailsExpanded ? '▾' : '▸'} Connection details
+                  </Text>
+                  <Text size={100} className={styles.diagnosticLabel}>
+                    {formatElapsed(elapsedSeconds)}
+                  </Text>
+                </div>
+              </Button>
               <Text
                 size={200}
                 weight="semibold"
@@ -283,48 +304,52 @@ export function VideoPanel({
               >
                 {diagnostics?.message ?? stageInfo.label}
               </Text>
-              <div className={styles.diagnosticsGrid}>
-                <Text size={100} className={styles.diagnosticLabel}>
-                  Voice
-                </Text>
-                <Text size={100} className={styles.diagnosticValue}>
-                  {formatValue(diagnostics?.voiceSocket)}
-                </Text>
-                <Text size={100} className={styles.diagnosticLabel}>
-                  Browser
-                </Text>
-                <Text size={100} className={styles.diagnosticValue}>
-                  {formatValue(diagnostics?.browserConnection)}
-                </Text>
-                <Text size={100} className={styles.diagnosticLabel}>
-                  Relay
-                </Text>
-                <Text size={100} className={styles.diagnosticValue}>
-                  {formatValue(diagnostics?.networkRelay)}
-                </Text>
-                <Text size={100} className={styles.diagnosticLabel}>
-                  ICE
-                </Text>
-                <Text size={100} className={styles.diagnosticValue}>
-                  {formatValue(diagnostics?.gathering)}
-                </Text>
-                <Text size={100} className={styles.diagnosticLabel}>
-                  Candidates
-                </Text>
-                <Text size={100} className={styles.diagnosticValue}>
-                  {candidateText}
-                </Text>
-                <Text size={100} className={styles.diagnosticLabel}>
-                  Media
-                </Text>
-                <Text size={100} className={styles.diagnosticValue}>
-                  {mediaText || 'waiting'}
-                </Text>
-              </div>
-              {lastUpdateSeconds !== undefined && (
-                <Text size={100} className={styles.diagnosticLabel}>
-                  Last update {formatElapsed(lastUpdateSeconds)} ago
-                </Text>
+              {detailsExpanded && (
+                <div className={styles.diagnosticsBody}>
+                  <div className={styles.diagnosticsGrid}>
+                    <Text size={100} className={styles.diagnosticLabel}>
+                      Voice
+                    </Text>
+                    <Text size={100} className={styles.diagnosticValue}>
+                      {formatValue(diagnostics?.voiceSocket)}
+                    </Text>
+                    <Text size={100} className={styles.diagnosticLabel}>
+                      Browser
+                    </Text>
+                    <Text size={100} className={styles.diagnosticValue}>
+                      {formatValue(diagnostics?.browserConnection)}
+                    </Text>
+                    <Text size={100} className={styles.diagnosticLabel}>
+                      Relay
+                    </Text>
+                    <Text size={100} className={styles.diagnosticValue}>
+                      {formatValue(diagnostics?.networkRelay)}
+                    </Text>
+                    <Text size={100} className={styles.diagnosticLabel}>
+                      ICE
+                    </Text>
+                    <Text size={100} className={styles.diagnosticValue}>
+                      {formatValue(diagnostics?.gathering)}
+                    </Text>
+                    <Text size={100} className={styles.diagnosticLabel}>
+                      Candidates
+                    </Text>
+                    <Text size={100} className={styles.diagnosticValue}>
+                      {candidateText}
+                    </Text>
+                    <Text size={100} className={styles.diagnosticLabel}>
+                      Media
+                    </Text>
+                    <Text size={100} className={styles.diagnosticValue}>
+                      {mediaText || 'waiting'}
+                    </Text>
+                  </div>
+                  {lastUpdateSeconds !== undefined && (
+                    <Text size={100} className={styles.diagnosticLabel}>
+                      Last update {formatElapsed(lastUpdateSeconds)} ago
+                    </Text>
+                  )}
+                </div>
               )}
               {waitWarning && (
                 <Text size={200} className={styles.warning}>

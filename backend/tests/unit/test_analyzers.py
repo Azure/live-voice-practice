@@ -258,6 +258,7 @@ class TestConversationAnalyzer:
         assert "Empathy" in prompt
         assert "1-5" in prompt
         assert "3.5" in prompt
+        assert "evidence snippets" in prompt
         assert "Test transcript" in prompt
 
     def test_get_rubric_response_format(self):
@@ -284,6 +285,8 @@ class TestConversationAnalyzer:
         assert "clarity" in criteria_props
         assert criteria_props["empathy"]["properties"]["score"]["type"] == "integer"
         assert criteria_props["empathy"]["properties"]["justification"]["type"] == "string"
+        assert criteria_props["empathy"]["properties"]["evidence"]["type"] == "array"
+        assert "evidence" in criteria_props["empathy"]["required"]
 
     def test_process_rubric_evaluation_result(self):
         """Test rubric evaluation result processing and scoring."""
@@ -300,8 +303,8 @@ class TestConversationAnalyzer:
         # Passing result — clarity has perfect score (5), empathy (4) has improvement provided by LLM
         result = {
             "criteria_scores": {
-                "empathy": {"score": 4, "justification": "Good empathy."},
-                "clarity": {"score": 5, "justification": "Very clear."},
+                "empathy": {"score": 4, "justification": "Good empathy.", "evidence": ["I understand."]},
+                "clarity": {"score": 5, "justification": "Very clear.", "evidence": ["Here is the next step."]},
             },
             "overall_score": 0,
             "passed": False,
@@ -318,17 +321,20 @@ class TestConversationAnalyzer:
         assert processed["rubricId"] == "test-rubric"
         assert processed["evaluation_type"] == "rubric"
         assert processed["pass_threshold"] == 3.5
+        assert processed["scale_min"] == 1
         assert processed["scale_max"] == 5
+        assert processed["criteria_metadata"]["empathy"]["name"] == "Empathy"
         # max_score in improvements must be normalized to the rubric scale
         assert processed["improvements"][0]["max_score"] == 5
+        assert processed["improvements"][0]["criterion_id"] == "empathy"
         # clarity scored 5/5 (perfect) so no backfill; only 1 improvement
         assert len(processed["improvements"]) == 1
 
         # Failing result — LLM only returned empathy improvement, clarity (3/5) should be backfilled
         result2 = {
             "criteria_scores": {
-                "empathy": {"score": 2, "justification": "Needs work."},
-                "clarity": {"score": 3, "justification": "OK."},
+                "empathy": {"score": 2, "justification": "Needs work.", "evidence": ["No acknowledgement."]},
+                "clarity": {"score": 3, "justification": "OK.", "evidence": ["Some explanation."]},
             },
             "overall_score": 0,
             "passed": True,
@@ -375,15 +381,14 @@ class TestConversationAnalyzer:
 
     def test_criteria_mention_support_materials(self):
         """Test detection of support material keywords in criteria."""
-        assert ConversationAnalyzer._criteria_mention_support_materials(
-            ["Check if agent followed company policy"]
-        ) is True
-        assert ConversationAnalyzer._criteria_mention_support_materials(
-            ["Use compliance guidelines for evaluation"]
-        ) is True
-        assert ConversationAnalyzer._criteria_mention_support_materials(
-            ["Check tone and empathy"]
-        ) is False
+        assert (
+            ConversationAnalyzer._criteria_mention_support_materials(["Check if agent followed company policy"]) is True
+        )
+        assert (
+            ConversationAnalyzer._criteria_mention_support_materials(["Use compliance guidelines for evaluation"])
+            is True
+        )
+        assert ConversationAnalyzer._criteria_mention_support_materials(["Check tone and empathy"]) is False
 
     def test_init_with_search_service(self):
         """Test analyzer can be initialized with a search service."""

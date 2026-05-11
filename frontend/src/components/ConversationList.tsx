@@ -4,25 +4,25 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-    Button,
-    Card,
-    Spinner,
-    Table,
-    TableBody,
-    TableCell,
-    TableHeader,
-    TableHeaderCell,
-    TableRow,
-    Text,
-    makeStyles,
-    tokens,
+  Button,
+  Card,
+  Spinner,
+  Table,
+  TableBody,
+  TableCell,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+  Text,
+  makeStyles,
+  tokens,
 } from '@fluentui/react-components'
 import {
-    ArrowLeft24Regular,
-    ArrowSortDownRegular,
-    ArrowSortUpRegular,
-    ChartMultipleRegular,
-    DeleteRegular,
+  ArrowLeft24Regular,
+  ArrowSortDownRegular,
+  ArrowSortUpRegular,
+  ChartMultipleRegular,
+  DeleteRegular,
 } from '@fluentui/react-icons'
 import { useConversations } from '../hooks/useConversations'
 import { api } from '../services/api'
@@ -103,6 +103,19 @@ interface Props {
 
 type SortableColumn = 'created_at' | 'updated_at' | 'scenario_id'
 
+function renderSortIcon(
+  column: SortableColumn,
+  sortBy: string,
+  sortOrder: string
+) {
+  if (sortBy !== column) return null
+  return sortOrder === 'asc' ? (
+    <ArrowSortUpRegular fontSize={12} />
+  ) : (
+    <ArrowSortDownRegular fontSize={12} />
+  )
+}
+
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr)
   return date.toLocaleDateString(undefined, {
@@ -139,15 +152,6 @@ export function ConversationList({
     } else {
       setSort(column, column === 'created_at' ? 'desc' : 'asc')
     }
-  }
-
-  const SortIcon = ({ column }: { column: SortableColumn }) => {
-    if (sortBy !== column) return null
-    return sortOrder === 'asc' ? (
-      <ArrowSortUpRegular fontSize={12} />
-    ) : (
-      <ArrowSortDownRegular fontSize={12} />
-    )
   }
 
   const handleAssessmentClick = (
@@ -192,9 +196,7 @@ export function ConversationList({
           <Text size={400} weight="semibold">
             No practices yet
           </Text>
-          <Text size={300}>
-            Start a new training to see your history here.
-          </Text>
+          <Text size={300}>Start a new training to see your history here.</Text>
         </div>
       ) : (
         <>
@@ -204,12 +206,13 @@ export function ConversationList({
                 <TableRow>
                   <TableHeaderCell onClick={() => handleSort('created_at')}>
                     <div className={styles.headerCell}>
-                      Date <SortIcon column="created_at" />
+                      Date {renderSortIcon('created_at', sortBy, sortOrder)}
                     </div>
                   </TableHeaderCell>
                   <TableHeaderCell onClick={() => handleSort('scenario_id')}>
                     <div className={styles.headerCell}>
-                      Scenario <SortIcon column="scenario_id" />
+                      Scenario{' '}
+                      {renderSortIcon('scenario_id', sortBy, sortOrder)}
                     </div>
                   </TableHeaderCell>
                   <TableHeaderCell>
@@ -237,9 +240,7 @@ export function ConversationList({
                       </Text>
                     </TableCell>
                     <TableCell>
-                      <Text size={300}>
-                        {conv.metadata?.user_name || '—'}
-                      </Text>
+                      <Text size={300}>{conv.metadata?.user_name || '—'}</Text>
                     </TableCell>
                     <TableCell>
                       {conv.assessment?.ai_assessment ? (

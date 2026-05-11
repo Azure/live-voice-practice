@@ -509,6 +509,9 @@ SCORING RULES:
 - A score >= {pass_threshold} is considered passing.
 - You are evaluating the conversation from the perspective of the user/trainee.
 - DO NOT rate the conversation of the 'assistant' (the customer avatar).
+- For every criterion, the justification must explain why this specific conversation received that score.
+- For every criterion, include 1-2 short evidence snippets from the transcript that support the score.
+  Use exact quotes when possible; otherwise use a concise paraphrase tied to what was said.
 
 Provide a maximum of {MAX_STRENGTHS_COUNT} strengths.
 For areas of improvement, provide a recommendation for EVERY criterion that did not receive a
@@ -532,8 +535,12 @@ CONVERSATION TO EVALUATE:
                 "properties": {
                     "score": {"type": "integer"},
                     "justification": {"type": "string"},
+                    "evidence": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
                 },
-                "required": ["score", "justification"],
+                "required": ["score", "justification", "evidence"],
                 "additionalProperties": False,
             }
             criterion_required.append(cid)
@@ -596,24 +603,36 @@ CONVERSATION TO EVALUATE:
         pass_threshold = scoring.get("passThreshold", 3.5)
         scale_str = scoring.get("scale", "1-5")
         try:
-            scale_max = int(scale_str.split("-")[-1])
+            scale_parts = scale_str.split("-")
+            scale_min = int(scale_parts[0])
+            scale_max = int(scale_parts[-1])
         except (ValueError, IndexError):
+            scale_min = 1
             scale_max = 5
 
         # Normalize max_score in improvements to match the rubric scale
-        for improvement in result.get("improvements", []):
-            if isinstance(improvement, dict):
-                improvement["max_score"] = scale_max
-
-        # Backfill missing improvements: every criterion with score < scale_max must have an entry
         rubric_criteria = {
             c.get("criterionId", ""): c.get("name", c.get("criterionId", "")) for c in rubric.get("criteria", [])
         }
+        rubric_criteria_by_name = {name.lower(): cid for cid, name in rubric_criteria.items()}
+        for improvement in result.get("improvements", []):
+            if isinstance(improvement, dict):
+                improvement["max_score"] = scale_max
+                criterion = improvement.get("criterion", "")
+                criterion_id = rubric_criteria_by_name.get(str(criterion).lower()) or str(criterion).lower().replace(
+                    " ", "_"
+                )
+                if criterion_id in criteria_scores:
+                    improvement["criterion_id"] = criterion_id
+
+        # Backfill missing improvements: every criterion with score < scale_max must have an entry
         existing_criteria = set()
         for imp in result.get("improvements", []):
             if isinstance(imp, dict) and imp.get("criterion"):
                 existing_criteria.add(imp["criterion"].lower().replace(" ", "_"))
                 existing_criteria.add(imp["criterion"].lower())
+                if imp.get("criterion_id"):
+                    existing_criteria.add(imp["criterion_id"].lower())
 
         improvements = result.get("improvements", [])
         for cid, entry in criteria_scores.items():
@@ -630,6 +649,7 @@ CONVERSATION TO EVALUATE:
             improvements.append(
                 {
                     "criterion": name,
+                    "criterion_id": cid,
                     "score": score,
                     "max_score": scale_max,
                     "recommendation": entry.get("justification", "Review this criterion for improvement."),
@@ -639,7 +659,16 @@ CONVERSATION TO EVALUATE:
 
         result["passed"] = result["overall_score"] >= pass_threshold
         result["pass_threshold"] = pass_threshold
+        result["scale_min"] = scale_min
         result["scale_max"] = scale_max
+        result["criteria_metadata"] = {
+            c.get("criterionId", ""): {
+                "name": c.get("name", c.get("criterionId", "")),
+                "description": c.get("description", ""),
+            }
+            for c in rubric.get("criteria", [])
+            if c.get("criterionId")
+        }
         result["rubricId"] = rubric.get("rubricId")
         result["evaluation_type"] = "rubric"
 

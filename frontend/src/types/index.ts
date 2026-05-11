@@ -30,6 +30,7 @@ export interface Message {
 export interface CriterionScore {
   score: number
   justification: string
+  evidence?: string[]
 }
 
 /** Scored criterion with explanation (new format) or plain number (legacy stored data). */
@@ -38,6 +39,7 @@ export type ScoredCriterion = { score: number; explanation: string } | number
 /** Structured improvement recommendation tied to a specific criterion. */
 export interface Improvement {
   criterion: string
+  criterion_id?: string
   score: number
   max_score: number
   recommendation: string
@@ -64,7 +66,15 @@ export interface Assessment {
     overall_score: number
     passed?: boolean
     pass_threshold?: number
+    scale_min?: number
     scale_max?: number
+    criteria_metadata?: Record<
+      string,
+      {
+        name: string
+        description?: string
+      }
+    >
     strengths: string[]
     improvements: ImprovementEntry[]
     specific_feedback?: string
@@ -80,6 +90,13 @@ export interface Assessment {
       accuracy: number
       error_type: string
     }>
+  }
+  diagnostics?: {
+    audio_source?: string
+    session_audio_bytes?: number
+    request_audio_chunks?: number
+    ai_assessment_available?: boolean
+    pronunciation_assessment_available?: boolean
   }
 }
 

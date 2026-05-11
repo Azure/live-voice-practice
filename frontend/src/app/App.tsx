@@ -35,6 +35,7 @@ import { api, AvatarConfig, parseAvatarValue } from '../services/api'
 import { Assessment } from '../types'
 
 type AppView = 'setup' | 'practice' | 'conversations' | 'conversationDetail'
+const RELEASE_VERSION = 'v0.0.1'
 
 const useStyles = makeStyles({
   container: {
@@ -67,6 +68,9 @@ const useStyles = makeStyles({
     display: 'flex',
     gap: tokens.spacingHorizontalL,
   },
+  hiddenAvatarPanel: {
+    display: 'none',
+  },
   setupDialog: {
     maxWidth: '600px',
     width: '90vw',
@@ -79,6 +83,14 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     textAlign: 'center',
     width: '100%',
+  },
+  releaseBadge: {
+    position: 'fixed',
+    right: tokens.spacingHorizontalM,
+    bottom: tokens.spacingVerticalS,
+    color: tokens.colorNeutralForeground4,
+    zIndex: 1000,
+    userSelect: 'none',
   },
 })
 
@@ -96,6 +108,7 @@ export default function App() {
   const [avatarDiagnostics, setAvatarDiagnostics] =
     useState<AvatarConnectionDiagnostics>({})
   const [avatarEnabled, setAvatarEnabled] = useState(true)
+  const [showAvatar, setShowAvatar] = useState(true)
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<
     string | null
@@ -173,7 +186,7 @@ export default function App() {
 
   const handleWebRTCMessage = useCallback(
     (msg: any) => {
-      if (!avatarEnabled) return
+      if (!avatarConfig) return
 
       api.clientLog('debug', 'app.webrtc_msg_received', {
         type: msg?.type,
@@ -251,7 +264,7 @@ export default function App() {
         })
       }
     },
-    [avatarEnabled, handleAnswer, setupWebRTC, updateAvatarDiagnostics]
+    [avatarConfig, handleAnswer, setupWebRTC, updateAvatarDiagnostics]
   )
 
   const {
@@ -296,6 +309,7 @@ export default function App() {
     const isAudioOnly = parsedAvatar === null
     setAvatarConfig(parsedAvatar)
     setAvatarEnabled(!isAudioOnly)
+    setShowAvatar(!isAudioOnly)
 
     setConnectionStage('creating')
     setAvatarDiagnostics({
@@ -502,11 +516,13 @@ export default function App() {
       {currentView === 'practice' && (
         <div className={styles.mainLayout}>
           {avatarEnabled && (
-            <VideoPanel
-              videoRef={videoRef}
-              connectionStage={connectionStage}
-              diagnostics={avatarDiagnostics}
-            />
+            <div className={showAvatar ? undefined : styles.hiddenAvatarPanel}>
+              <VideoPanel
+                videoRef={videoRef}
+                connectionStage={connectionStage}
+                diagnostics={avatarDiagnostics}
+              />
+            </div>
           )}
           <ChatPanel
             messages={messages}
@@ -519,9 +535,9 @@ export default function App() {
             onClear={clearMessages}
             onAnalyze={handleAnalyze}
             scenario={activeScenario}
-            avatarEnabled={avatarEnabled}
-            onToggleAvatar={() => setAvatarEnabled(prev => !prev)}
-            hasAvatarConfig={avatarConfig !== null}
+            avatarEnabled={showAvatar}
+            onToggleAvatar={() => setShowAvatar(prev => !prev)}
+            hasAvatarConfig={avatarEnabled}
             isAuthenticated={authenticated}
             onNavigateToConversations={navigateToConversations}
             isTrainer={isTrainer}
@@ -549,6 +565,9 @@ export default function App() {
           onShowAssessment={handleViewAssessment}
         />
       )}
+      <Text size={100} className={styles.releaseBadge}>
+        {RELEASE_VERSION}
+      </Text>
     </div>
   )
 }

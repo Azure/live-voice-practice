@@ -227,4 +227,7 @@ class TestConversationManager:
 
         assert items == []
         call_kwargs = mock_container.query_items.call_args
-        assert call_kwargs.kwargs.get("enable_cross_partition_query", call_kwargs[1].get("enable_cross_partition_query")) is True
+        assert (
+            call_kwargs.kwargs.get("enable_cross_partition_query", call_kwargs[1].get("enable_cross_partition_query"))
+            is True
+        )

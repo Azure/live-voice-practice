@@ -531,6 +531,8 @@ def _perform_conversation_analysis(
                 "audio_source": audio_source,
                 "session_audio_bytes": len(session_audio or b""),
                 "request_audio_chunks": len(audio_data or []),
+                "ai_assessment_available": isinstance(ai_assessment, dict),
+                "pronunciation_assessment_available": isinstance(pronunciation, dict),
             },
         }
 
