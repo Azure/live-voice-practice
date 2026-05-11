@@ -349,15 +349,14 @@ openssl pkcs12 -export \
 
 ### 4.a. Import from the jumpbox
 
-If you followed the default path in step 3, `voicelab.pfx` is already on the jumpbox. Stay in the same jumpbox PowerShell session and run:
+If you followed the default path in step 3, `voicelab.pfx` is already on the jumpbox. Stay in the same jumpbox PowerShell session and run the import using the `$kv` value you already copied from the helper output in step 0:
 
 ```powershell
 # Use managed identity to authenticate (no interactive login needed on jumpbox)
 az login --identity
 
-# Set variables from the azd provision/helper output you already have.
-# You do not need ARM Reader on the jumpbox managed identity for this import.
-$kv          = 'kv-<token>'              # KEY_VAULT_NAME, for example kv-gnsz77ru5uckw
+# Do not reset $kv here if you already copied it from step 0.
+# It should already look like: $kv = 'kv-<token>'
 $certName    = 'voicelab-cert'
 $pfxPassword = 'temporary-pfx-password'   # the one used in step 3.b
 
