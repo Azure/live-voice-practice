@@ -93,7 +93,7 @@ If you do not have a domain, register one with any registrar that lets you publi
 
 **Constraints.** None imposed by this accelerator. The accelerator does not register, route, or validate the domain. See [ADR-0002](../adr/0002-bring-your-own-domain-and-certificate.md).
 
-**Output of this step.** A hostname you control and access to the DNS panel for its parent zone. In command examples below, set `$hostName` to your real hostname once and reuse it. Do not copy `voicelab.example.com` literally; it is only an example placeholder.
+**Output of this step.** A full public DNS hostname/FQDN you control, plus access to the DNS panel for its parent zone. In command examples below, set `$hostName` to that full hostname once and reuse it everywhere. For example, use `livevoice.myailz.com`, not the short DNS provider host value `livevoice`, and not the Container App's internal/default hostname. Do not copy `voicelab.example.com` literally; it is only an example placeholder.
 
 ---
 
@@ -395,9 +395,12 @@ After the file is on the jumpbox, return to step 4.a and import it into Key Vaul
 
 Live mode and skeleton mode are modeled in Bicep, so re-running `azd provision` after this step will reconcile the configuration cleanly. Do not edit the Application Gateway directly in the portal; portal-side changes will be reverted by the next provision.
 
-Set the operator-controlled values via `azd env` from the same workstation/session that ran the initial `azd provision`:
+Set the public hostname and certificate secret via `azd env` from the same workstation/session that ran the initial `azd provision`.
+
+`PUBLIC_INGRESS_FRONTEND_HOSTNAME` must be the **full public DNS hostname/FQDN** you chose in step 1 and used for the certificate in step 3. It is not the Container App hostname, and it is not the short DNS provider record name.
 
 ```powershell
+# Example: $hostName = 'livevoice.myailz.com'
 azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   $hostName
 azd env set PUBLIC_INGRESS_SSL_CERT_SECRET_ID  $secretId
 ```
