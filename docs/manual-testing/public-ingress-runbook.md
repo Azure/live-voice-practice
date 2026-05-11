@@ -24,7 +24,7 @@ This runbook does **not** prescribe a domain registrar, a DNS provider, or a cer
 
 ## 0. Read the deployment outputs
 
-Run this one-liner from your workstation **or** from the jumpbox — it queries Azure directly and prints every value the rest of the runbook needs:
+Run this one-liner from your workstation with your Azure user login. It queries Azure directly and prints every value the rest of the runbook needs:
 
 ```powershell
 cd C:\path\to\live-voice-practice
@@ -53,9 +53,12 @@ $agw    = 'agw-<token>'
 
 `PUBLIC_INGRESS_LIVE=false` confirms the deployment is in skeleton mode.
 
-If `PUBLIC_INGRESS_PUBLIC_IP` is empty or the script reports "No Application Gateway found", the deployment did not enable the public ingress. Check that `NETWORK_ISOLATION=true` (or set `PUBLIC_INGRESS_ENABLED=true` explicitly) and re-run `azd provision`.
+If `PUBLIC_INGRESS_PUBLIC_IP` is empty or the script reports that it cannot read Application Gateway resources, first confirm where you ran it:
 
-> **Why a script and not `azd env get-values`?** `azd env refresh` requires interactive `azd auth login`, which does not work cleanly from headless contexts (e.g., the jumpbox under managed identity). The helper script above only needs `az login` (or `az login --identity` on the jumpbox) and works everywhere.
+- **Workstation with your Azure user login:** check that `NETWORK_ISOLATION=true` (or set `PUBLIC_INGRESS_ENABLED=true` explicitly) and re-run `azd provision`.
+- **Jumpbox with `az login --identity`:** this is usually an ARM Reader permission limitation of the jumpbox managed identity. It does not mean the Application Gateway is missing. Run the helper from your workstation or use the output values you already copied from this step.
+
+> **Why a script and not `azd env get-values`?** `azd env refresh` requires interactive `azd auth login`, which does not work cleanly from headless contexts. The helper script reads deployment outputs first and falls back to resource lookups. On the jumpbox, the managed identity may not have ARM Reader on network resources, so prefer the workstation for this output-reading step.
 
 ---
 
@@ -65,7 +68,7 @@ Because the Key Vault has **public network access disabled**, the workflow is sp
 
 | Step | Location | Why |
 |------|----------|-----|
-| **0** (read outputs) | Your workstation or jumpbox | Either works; just needs Azure CLI |
+| **0** (read outputs) | Your workstation | Requires ARM read access to deployment outputs/network resources |
 | **1** (choose domain) | Your workstation | No Azure resources needed |
 | **2** (create DNS A record) | Your workstation | Edit DNS provider UI |
 | **3** (obtain TLS cert) | **Jumpbox recommended** | Run win-acme on the jumpbox; verify DNS propagation from your workstation or a public DNS checker |

@@ -1,7 +1,9 @@
 #!/usr/bin/env pwsh
 # Prints the values needed by docs/manual-testing/public-ingress-runbook.md
-# Reads them straight from Azure resources so it works from anywhere that has
-# `az` logged in (including the jumpbox via `az login --identity`).
+# Reads them from deployment outputs first, then falls back to Azure resources.
+# The jumpbox managed identity may not have ARM Reader permissions for network
+# resources; in that case run this helper from your workstation with your user
+# login, or use the values already printed earlier in the runbook.
 #
 # Usage:
 #   pwsh -File ./scripts/show-public-ingress-outputs.ps1
@@ -30,12 +32,91 @@ function Resolve-ResourceGroup {
 $rg = Resolve-ResourceGroup
 Write-Host "[i] Reading public ingress outputs from resource group '$rg'..." -ForegroundColor Cyan
 
-$agw = az network application-gateway list -g $rg --query "[0].name" -o tsv 2>$null
-if (-not $agw) {
-    Write-Host "[!] No Application Gateway found in '$rg'. Public ingress not provisioned?" -ForegroundColor Yellow
+function Get-OutputValue {
+    param(
+        [Parameter(Mandatory)] $Outputs,
+        [Parameter(Mandatory)] [string] $Name
+    )
+    foreach ($property in $Outputs.PSObject.Properties) {
+        if ($property.Name -ieq $Name) {
+            return $property.Value.value
+        }
+    }
+    return $null
+}
+
+function Write-RunbookOutputs {
+    param(
+        [Parameter(Mandatory)] [string] $ResourceGroup,
+        [Parameter(Mandatory)] [string] $KeyVaultName,
+        [Parameter(Mandatory)] [string] $PublicIp,
+        [Parameter(Mandatory)] [string] $GatewayResourceId,
+        [Parameter(Mandatory)] [string] $NsgResourceId,
+        [Parameter(Mandatory)] [string] $IdentityPrincipalId,
+        [Parameter(Mandatory)] [string] $Live
+    )
+
+    $agw = Split-Path $GatewayResourceId -Leaf
+
+    Write-Host ""
+    Write-Host "Copy these into your runbook session:" -ForegroundColor Green
+    Write-Host "----------------------------------------------------------------"
+    Write-Host "AZURE_RESOURCE_GROUP                 = $ResourceGroup"
+    Write-Host "KEY_VAULT_NAME                       = $KeyVaultName"
+    Write-Host "PUBLIC_INGRESS_PUBLIC_IP             = $PublicIp"
+    Write-Host "PUBLIC_INGRESS_GATEWAY_RESOURCE_ID   = $GatewayResourceId"
+    Write-Host "PUBLIC_INGRESS_NSG_RESOURCE_ID       = $NsgResourceId"
+    Write-Host "PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID = $IdentityPrincipalId"
+    Write-Host "PUBLIC_INGRESS_LIVE                  = $Live"
+    Write-Host "----------------------------------------------------------------"
+    Write-Host ""
+    Write-Host "PowerShell variables for direct use:" -ForegroundColor Green
+    Write-Host "----------------------------------------------------------------"
+    Write-Host "`$rg     = '$ResourceGroup'"
+    Write-Host "`$kv     = '$KeyVaultName'"
+    Write-Host "`$ip     = '$PublicIp'"
+    Write-Host "`$miPid  = '$IdentityPrincipalId'"
+    Write-Host "`$gwId   = '$GatewayResourceId'"
+    Write-Host "`$nsgId  = '$NsgResourceId'"
+    Write-Host "`$agw    = '$agw'"
+    Write-Host "----------------------------------------------------------------"
+}
+
+$deploymentOutputs = $null
+try {
+    $deploymentName = az deployment group list -g $rg --query "sort_by([?properties.provisioningState=='Succeeded'], &properties.timestamp)[-1].name" -o tsv 2>$null
+    if ($deploymentName) {
+        $deploymentOutputs = az deployment group show -g $rg -n $deploymentName --query "properties.outputs" -o json 2>$null | ConvertFrom-Json
+    }
+} catch {
+    $deploymentOutputs = $null
+}
+
+$gwId = if ($deploymentOutputs) { Get-OutputValue $deploymentOutputs 'PUBLIC_INGRESS_GATEWAY_RESOURCE_ID' } else { $null }
+$ip = if ($deploymentOutputs) { Get-OutputValue $deploymentOutputs 'PUBLIC_INGRESS_PUBLIC_IP' } else { $null }
+$nsgId = if ($deploymentOutputs) { Get-OutputValue $deploymentOutputs 'PUBLIC_INGRESS_NSG_RESOURCE_ID' } else { $null }
+$miPid = if ($deploymentOutputs) { Get-OutputValue $deploymentOutputs 'PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID' } else { $null }
+$liveOutput = if ($deploymentOutputs) { Get-OutputValue $deploymentOutputs 'PUBLIC_INGRESS_LIVE' } else { $null }
+$kv = if ($deploymentOutputs) { Get-OutputValue $deploymentOutputs 'KEY_VAULT_NAME' } else { $null }
+
+if ($gwId -and $ip -and $nsgId -and $miPid -and $kv) {
+    $live = if ($liveOutput -is [bool]) { $liveOutput.ToString().ToLowerInvariant() } else { "$liveOutput".ToLowerInvariant() }
+    Write-RunbookOutputs -ResourceGroup $rg -KeyVaultName $kv -PublicIp $ip -GatewayResourceId $gwId -NsgResourceId $nsgId -IdentityPrincipalId $miPid -Live $live
+    exit 0
+}
+
+$agwListOutput = az network application-gateway list -g $rg --query "[0].name" -o tsv 2>&1
+if ($LASTEXITCODE -ne 0 -or -not $agwListOutput) {
+    Write-Host "[!] Could not read Application Gateway resources in '$rg'." -ForegroundColor Yellow
+    Write-Host "    If you are on the jumpbox with 'az login --identity', this is usually an ARM Reader permission limitation of the jumpbox managed identity, not proof that public ingress is missing." -ForegroundColor Yellow
+    Write-Host "    Run this helper from your workstation with your Azure user login, or copy the values printed earlier in the runbook/session." -ForegroundColor Yellow
+    if ($agwListOutput) {
+        Write-Host "    Azure CLI output: $agwListOutput" -ForegroundColor DarkYellow
+    }
     exit 1
 }
 
+$agw = ($agwListOutput | Select-Object -First 1).Trim()
 $agwJson = az network application-gateway show -g $rg -n $agw -o json | ConvertFrom-Json
 
 $gwId    = $agwJson.id
@@ -58,25 +139,4 @@ $sslCertificateCount = @($agwJson.sslCertificates).Count
 $httpsListenerCount = @($agwJson.httpListeners | Where-Object { $_.name -eq 'https-listener' }).Count
 $live = if ($sslCertificateCount -gt 0 -and $httpsListenerCount -gt 0) { 'true' } else { 'false' }
 
-Write-Host ""
-Write-Host "Copy these into your runbook session:" -ForegroundColor Green
-Write-Host "----------------------------------------------------------------"
-Write-Host "AZURE_RESOURCE_GROUP                 = $rg"
-Write-Host "KEY_VAULT_NAME                       = $kv"
-Write-Host "PUBLIC_INGRESS_PUBLIC_IP             = $ip"
-Write-Host "PUBLIC_INGRESS_GATEWAY_RESOURCE_ID   = $gwId"
-Write-Host "PUBLIC_INGRESS_NSG_RESOURCE_ID       = $nsgId"
-Write-Host "PUBLIC_INGRESS_IDENTITY_PRINCIPAL_ID = $miPid"
-Write-Host "PUBLIC_INGRESS_LIVE                  = $live"
-Write-Host "----------------------------------------------------------------"
-Write-Host ""
-Write-Host "PowerShell variables for direct use:" -ForegroundColor Green
-Write-Host "----------------------------------------------------------------"
-Write-Host "`$rg     = '$rg'"
-Write-Host "`$kv     = '$kv'"
-Write-Host "`$ip     = '$ip'"
-Write-Host "`$miPid  = '$miPid'"
-Write-Host "`$gwId   = '$gwId'"
-Write-Host "`$nsgId  = '$nsgId'"
-Write-Host "`$agw    = '$agw'"
-Write-Host "----------------------------------------------------------------"
+Write-RunbookOutputs -ResourceGroup $rg -KeyVaultName $kv -PublicIp $ip -GatewayResourceId $gwId -NsgResourceId $nsgId -IdentityPrincipalId $miPid -Live $live
