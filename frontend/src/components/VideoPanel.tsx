@@ -4,12 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-    Card,
-    ProgressBar,
-    Spinner,
-    Text,
-    makeStyles,
-    tokens,
+  Card,
+  ProgressBar,
+  Spinner,
+  Text,
+  makeStyles,
+  tokens,
 } from '@fluentui/react-components'
 import React, { useCallback, useEffect, useState } from 'react'
 
@@ -25,12 +25,29 @@ interface StageInfo {
   progress: number
 }
 
+export interface AvatarConnectionDiagnostics {
+  startedAt?: number
+  lastUpdatedAt?: number
+  message?: string
+  voiceSocket?: string
+  browserConnection?: string
+  networkRelay?: string
+  gathering?: string
+  candidateTypes?: string[]
+  media?: {
+    audio?: boolean
+    video?: boolean
+  }
+  warning?: string
+}
+
 const STAGES: Record<ConnectionStage, StageInfo> = {
   creating: { label: 'Creating session...', progress: 0.1 },
   connecting: { label: 'Connecting to voice service...', progress: 0.3 },
   configuring: { label: 'Configuring avatar...', progress: 0.5 },
   rendering: {
-    label: 'Getting your avatar ready. Thanks for your patience, this can take around 30 seconds...',
+    label:
+      'Getting your avatar ready. Thanks for your patience, this can take around 30 seconds...',
     progress: 0.7,
   },
   ready: { label: 'Ready!', progress: 1.0 },
@@ -88,6 +105,20 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
+  diagnostics: {
+    width: '100%',
+    maxWidth: '280px',
+    marginTop: tokens.spacingVerticalS,
+    padding: tokens.spacingVerticalS,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  warning: {
+    color: tokens.colorPaletteRedForeground1,
+  },
   progressBar: {
     width: '100%',
     maxWidth: '280px',
@@ -98,14 +129,39 @@ const useStyles = makeStyles({
 interface Props {
   videoRef: React.RefObject<HTMLVideoElement | null>
   connectionStage?: ConnectionStage
+  diagnostics?: AvatarConnectionDiagnostics
 }
 
-export function VideoPanel({ videoRef, connectionStage = 'creating' }: Props) {
+function formatElapsed(seconds: number) {
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return `${minutes}m ${remainingSeconds}s`
+}
+
+function formatValue(value?: string) {
+  return value ? value.split('-').join(' ') : 'waiting'
+}
+
+export function VideoPanel({
+  videoRef,
+  connectionStage = 'creating',
+  diagnostics,
+}: Props) {
   const styles = useStyles()
-  const [videoReady, setVideoReady] = useState(false)
+  const [videoReady, setVideoReady] = useState<{
+    startedAt?: number
+    ready: boolean
+  }>({ ready: false })
+  const [now, setNow] = useState(() => Date.now())
 
   const handlePlaying = useCallback(() => {
-    setVideoReady(true)
+    setVideoReady({ startedAt: diagnostics?.startedAt, ready: true })
+  }, [diagnostics?.startedAt])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
   }, [])
 
   useEffect(() => {
@@ -118,11 +174,34 @@ export function VideoPanel({ videoRef, connectionStage = 'creating' }: Props) {
 
   const currentStageIndex = STAGE_ORDER.indexOf(connectionStage)
   const stageInfo = STAGES[connectionStage]
+  const elapsedSeconds = diagnostics?.startedAt
+    ? Math.max(0, Math.floor((now - diagnostics.startedAt) / 1000))
+    : 0
+  const lastUpdateSeconds = diagnostics?.lastUpdatedAt
+    ? Math.max(0, Math.floor((now - diagnostics.lastUpdatedAt) / 1000))
+    : undefined
+  const candidateText = diagnostics?.candidateTypes?.length
+    ? diagnostics.candidateTypes.join(', ')
+    : 'waiting'
+  const mediaText = [
+    diagnostics?.media?.video ? 'video' : null,
+    diagnostics?.media?.audio ? 'audio' : null,
+  ]
+    .filter(Boolean)
+    .join(' + ')
+  const waitWarning =
+    !diagnostics?.warning &&
+    connectionStage === 'rendering' &&
+    elapsedSeconds >= 45
+      ? 'Still waiting for avatar media. If this does not finish, retry and share this status.'
+      : diagnostics?.warning
+  const isVideoReady =
+    videoReady.ready && videoReady.startedAt === diagnostics?.startedAt
 
   return (
     <Card className={styles.card}>
       <div className={styles.videoContainer}>
-        {!videoReady && (
+        {!isVideoReady && (
           <div className={styles.loadingOverlay}>
             <Spinner size="large" />
             <Text size={400} weight="semibold">
@@ -145,7 +224,9 @@ export function VideoPanel({ videoRef, connectionStage = 'creating' }: Props) {
                       weight={active ? 'semibold' : 'regular'}
                       style={{
                         opacity: done || active ? 1 : 0.5,
-                        color: done ? tokens.colorPaletteGreenForeground1 : undefined,
+                        color: done
+                          ? tokens.colorPaletteGreenForeground1
+                          : undefined,
                       }}
                     >
                       {STAGES[stage].label}
@@ -153,6 +234,36 @@ export function VideoPanel({ videoRef, connectionStage = 'creating' }: Props) {
                   </div>
                 )
               })}
+            </div>
+            <div className={styles.diagnostics}>
+              <Text size={200} weight="semibold">
+                Status: {diagnostics?.message ?? stageInfo.label}
+              </Text>
+              <Text size={200}>Elapsed: {formatElapsed(elapsedSeconds)}</Text>
+              {lastUpdateSeconds !== undefined && (
+                <Text size={200}>
+                  Last update: {formatElapsed(lastUpdateSeconds)} ago
+                </Text>
+              )}
+              <Text size={200}>
+                Voice socket: {formatValue(diagnostics?.voiceSocket)}
+              </Text>
+              <Text size={200}>
+                Browser link: {formatValue(diagnostics?.browserConnection)}
+              </Text>
+              <Text size={200}>
+                Network relay: {formatValue(diagnostics?.networkRelay)}
+              </Text>
+              <Text size={200}>
+                ICE gathering: {formatValue(diagnostics?.gathering)}
+              </Text>
+              <Text size={200}>Candidates: {candidateText}</Text>
+              <Text size={200}>Media received: {mediaText || 'waiting'}</Text>
+              {waitWarning && (
+                <Text size={200} className={styles.warning}>
+                  {waitWarning}
+                </Text>
+              )}
             </div>
           </div>
         )}

@@ -4,23 +4,27 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-    Button,
-    Dialog,
-    DialogBody,
-    DialogSurface,
-    makeStyles,
-    Spinner,
-    Text,
-    tokens,
+  Button,
+  Dialog,
+  DialogBody,
+  DialogSurface,
+  makeStyles,
+  Spinner,
+  Text,
+  tokens,
 } from '@fluentui/react-components'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AssessmentPanel } from '../components/AssessmentPanel'
 import { ChatPanel } from '../components/ChatPanel'
 import { ConversationDetail } from '../components/ConversationDetail'
 import { ConversationList } from '../components/ConversationList'
 import { ScenarioList } from '../components/ScenarioList'
 import { UserHeader } from '../components/UserHeader'
-import { ConnectionStage, VideoPanel } from '../components/VideoPanel'
+import {
+  AvatarConnectionDiagnostics,
+  ConnectionStage,
+  VideoPanel,
+} from '../components/VideoPanel'
 import { useAudioPlayer } from '../hooks/useAudioPlayer'
 import { useAuth } from '../hooks/useAuth'
 import { useRealtime } from '../hooks/useRealtime'
@@ -87,29 +91,33 @@ export default function App() {
   const [currentAgent, setCurrentAgent] = useState<string | null>(null)
   const [assessment, setAssessment] = useState<Assessment | null>(null)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
-  const [connectionStage, setConnectionStage] = useState<ConnectionStage>('creating')
+  const [connectionStage, setConnectionStage] =
+    useState<ConnectionStage>('creating')
+  const [avatarDiagnostics, setAvatarDiagnostics] =
+    useState<AvatarConnectionDiagnostics>({})
   const [avatarEnabled, setAvatarEnabled] = useState(true)
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig | null>(null)
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
+  const [selectedConversationId, setSelectedConversationId] = useState<
+    string | null
+  >(null)
   const [showAllPractices, setShowAllPractices] = useState(false)
   const [appName, setAppName] = useState<string>('Live Voice Practice')
 
   const { authenticated, user, isTrainer } = useAuth()
 
-  const {
-    scenarios,
-    selectedScenario,
-    setSelectedScenario,
-    loading,
-  } = useScenarios()
+  const { scenarios, selectedScenario, setSelectedScenario, loading } =
+    useScenarios()
   const { playAudio } = useAudioPlayer()
   const activeScenario = scenarios.find(s => s.id === selectedScenario) || null
 
   // Fetch app name from config
   useEffect(() => {
-    api.getConfig().then((cfg: { app_name?: string }) => {
-      if (cfg.app_name) setAppName(cfg.app_name)
-    }).catch(() => {})
+    api
+      .getConfig()
+      .then((cfg: { app_name?: string }) => {
+        if (cfg.app_name) setAppName(cfg.app_name)
+      })
+      .catch(() => {})
   }, [])
 
   const navigateToConversations = useCallback(() => {
@@ -138,76 +146,132 @@ export default function App() {
     }
   }, [currentView, previousView])
 
-  const handleWebRTCMessage = useCallback((msg: any) => {
-    if (!avatarEnabled) return
-
-    api.clientLog('debug', 'app.webrtc_msg_received', {
-      type: msg?.type,
-      hasServerSdp: !!msg?.server_sdp,
-      hasSdp: !!msg?.sdp,
-      hasAnswer: !!msg?.answer,
-    })
-
-    if (msg.type === 'proxy.connected') {
-      api.clientLog('info', 'app.stage.connecting', { trigger: 'proxy.connected' })
-      setConnectionStage('connecting')
-    } else if (msg.type === 'session.created') {
-      api.clientLog('info', 'app.stage.configuring', { trigger: 'session.created' })
-      setConnectionStage('configuring')
-    } else if (msg.type === 'session.updated') {
-      api.clientLog('info', 'app.stage.rendering', { trigger: 'session.updated' })
-      setConnectionStage('rendering')
-      const session = msg.session
-      const servers =
-        session?.avatar?.ice_servers ||
-        session?.rtc?.ice_servers ||
-        session?.ice_servers
-      const username =
-        session?.avatar?.username ||
-        session?.avatar?.ice_username ||
-        session?.rtc?.ice_username ||
-        session?.ice_username
-      const credential =
-        session?.avatar?.credential ||
-        session?.avatar?.ice_credential ||
-        session?.rtc?.ice_credential ||
-        session?.ice_credential
-
-      api.clientLog('info', 'app.session_updated_ice', {
-        hasServers: !!servers,
-        hasCredentials: !!(username && credential),
-      })
-
-      if (servers) {
-        setupWebRTC(servers, username, credential)
-      } else {
-        api.clientLog('warning', 'app.session_updated_no_ice_servers')
-      }
-    } else if (
-      (msg.server_sdp || msg.sdp || msg.answer) &&
-      msg.type !== 'session.update'
-    ) {
-      api.clientLog('info', 'app.received_sdp_answer', { type: msg?.type })
-      handleAnswer(msg)
-    }
-  }, [avatarEnabled])
-
-  const { connected, messages, send, clearMessages, getRecordings, getConversationId } =
-    useRealtime({
-      agentId: currentAgent,
-      scenarioId: selectedScenario,
-      onMessage: handleWebRTCMessage,
-      onAudioDelta: playAudio,
-    })
-
-  const sendOffer = useCallback(
-    (sdp: string) => {
-      send({ type: 'session.avatar.connect', client_sdp: sdp })
+  const updateAvatarDiagnostics = useCallback(
+    (update: Omit<AvatarConnectionDiagnostics, 'lastUpdatedAt'>) => {
+      setAvatarDiagnostics(prev => ({
+        ...prev,
+        ...update,
+        media: {
+          ...prev.media,
+          ...update.media,
+        },
+        lastUpdatedAt: Date.now(),
+      }))
     },
-    [send]
+    []
   )
 
-  const { setupWebRTC, handleAnswer, videoRef } = useWebRTC(sendOffer)
+  const voiceSendRef = useRef<(data: unknown) => void>(() => {})
+  const sendOffer = useCallback((sdp: string) => {
+    voiceSendRef.current({ type: 'session.avatar.connect', client_sdp: sdp })
+  }, [])
+
+  const { setupWebRTC, handleAnswer, videoRef } = useWebRTC(
+    sendOffer,
+    updateAvatarDiagnostics
+  )
+
+  const handleWebRTCMessage = useCallback(
+    (msg: any) => {
+      if (!avatarEnabled) return
+
+      api.clientLog('debug', 'app.webrtc_msg_received', {
+        type: msg?.type,
+        hasServerSdp: !!msg?.server_sdp,
+        hasSdp: !!msg?.sdp,
+        hasAnswer: !!msg?.answer,
+      })
+
+      if (msg.type === 'proxy.connected') {
+        api.clientLog('info', 'app.stage.connecting', {
+          trigger: 'proxy.connected',
+        })
+        setConnectionStage('connecting')
+        updateAvatarDiagnostics({
+          message: 'Connected to the voice service',
+        })
+      } else if (msg.type === 'session.created') {
+        api.clientLog('info', 'app.stage.configuring', {
+          trigger: 'session.created',
+        })
+        setConnectionStage('configuring')
+        updateAvatarDiagnostics({
+          message: 'Voice session created',
+        })
+      } else if (msg.type === 'session.updated') {
+        api.clientLog('info', 'app.stage.rendering', {
+          trigger: 'session.updated',
+        })
+        setConnectionStage('rendering')
+        updateAvatarDiagnostics({
+          message: 'Avatar configuration received',
+        })
+        const session = msg.session
+        const servers =
+          session?.avatar?.ice_servers ||
+          session?.rtc?.ice_servers ||
+          session?.ice_servers
+        const username =
+          session?.avatar?.username ||
+          session?.avatar?.ice_username ||
+          session?.rtc?.ice_username ||
+          session?.ice_username
+        const credential =
+          session?.avatar?.credential ||
+          session?.avatar?.ice_credential ||
+          session?.rtc?.ice_credential ||
+          session?.ice_credential
+
+        api.clientLog('info', 'app.session_updated_ice', {
+          hasServers: !!servers,
+          hasCredentials: !!(username && credential),
+        })
+
+        if (servers) {
+          setupWebRTC(servers, username, credential)
+        } else {
+          api.clientLog('warning', 'app.session_updated_no_ice_servers')
+          updateAvatarDiagnostics({
+            message:
+              'Avatar configuration did not include media connection details',
+            warning: 'The avatar service did not return ICE server details.',
+          })
+        }
+      } else if (
+        (msg.server_sdp || msg.sdp || msg.answer) &&
+        msg.type !== 'session.update'
+      ) {
+        api.clientLog('info', 'app.received_sdp_answer', { type: msg?.type })
+        handleAnswer(msg)
+      } else if (msg.type === 'error') {
+        updateAvatarDiagnostics({
+          message: 'Voice service returned an error',
+          warning:
+            msg?.error?.message ?? 'The voice service returned an error.',
+        })
+      }
+    },
+    [avatarEnabled, handleAnswer, setupWebRTC, updateAvatarDiagnostics]
+  )
+
+  const {
+    connected,
+    messages,
+    send,
+    clearMessages,
+    getRecordings,
+    getConversationId,
+  } = useRealtime({
+    agentId: currentAgent,
+    scenarioId: selectedScenario,
+    onMessage: handleWebRTCMessage,
+    onAudioDelta: playAudio,
+    onConnectionStatus: updateAvatarDiagnostics,
+  })
+
+  useEffect(() => {
+    voiceSendRef.current = send
+  }, [send])
 
   const sendAudioChunk = useCallback(
     (base64: string) => {
@@ -216,8 +280,13 @@ export default function App() {
     [send]
   )
 
-  const { recording, recordingError, clearRecordingError, toggleRecording, getAudioRecording } =
-    useRecorder(sendAudioChunk)
+  const {
+    recording,
+    recordingError,
+    clearRecordingError,
+    toggleRecording,
+    getAudioRecording,
+  } = useRecorder(sendAudioChunk)
 
   const handleStart = async (avatarValue: string) => {
     if (!selectedScenario) return
@@ -228,16 +297,35 @@ export default function App() {
     setAvatarEnabled(!isAudioOnly)
 
     setConnectionStage('creating')
+    setAvatarDiagnostics({
+      startedAt: Date.now(),
+      lastUpdatedAt: Date.now(),
+      message: 'Creating practice session',
+      voiceSocket: 'waiting',
+      browserConnection: 'waiting',
+      networkRelay: 'waiting',
+      gathering: 'waiting',
+      media: { audio: false, video: false },
+      candidateTypes: [],
+    })
     try {
       const { agent_id } = await api.createAgent(selectedScenario, parsedAvatar)
 
       if (!isAudioOnly) {
         setConnectionStage('connecting')
+        updateAvatarDiagnostics({
+          message: 'Practice session created; opening voice connection',
+        })
       }
       setCurrentAgent(agent_id)
       setCurrentView('practice')
     } catch (error) {
       console.error('Failed to create agent:', error)
+      updateAvatarDiagnostics({
+        message: 'Could not create the practice session',
+        warning:
+          error instanceof Error ? error.message : 'Failed to create agent.',
+      })
     }
   }
 
@@ -282,7 +370,11 @@ export default function App() {
 
   return (
     <div className={styles.container}>
-      <UserHeader userName={user?.name} authenticated={authenticated} role={user?.role} />
+      <UserHeader
+        userName={user?.name}
+        authenticated={authenticated}
+        role={user?.role}
+      />
 
       {/* Branding bar - top left on non-setup views */}
       {currentView !== 'setup' && (
@@ -362,17 +454,33 @@ export default function App() {
       />
 
       {/* Error dialog */}
-      <Dialog open={!!analysisError} onOpenChange={() => setAnalysisError(null)}>
+      <Dialog
+        open={!!analysisError}
+        onOpenChange={() => setAnalysisError(null)}
+      >
         <DialogSurface>
           <DialogBody>
             <Text size={400} weight="semibold" block>
               Analysis Error
             </Text>
-            <Text size={300} block style={{ marginTop: tokens.spacingVerticalM }}>
+            <Text
+              size={300}
+              block
+              style={{ marginTop: tokens.spacingVerticalM }}
+            >
               {analysisError}
             </Text>
-            <div style={{ marginTop: tokens.spacingVerticalL, display: 'flex', justifyContent: 'flex-end' }}>
-              <Button appearance="primary" onClick={() => setAnalysisError(null)}>
+            <div
+              style={{
+                marginTop: tokens.spacingVerticalL,
+                display: 'flex',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <Button
+                appearance="primary"
+                onClick={() => setAnalysisError(null)}
+              >
                 OK
               </Button>
             </div>
@@ -384,7 +492,11 @@ export default function App() {
       {currentView === 'practice' && (
         <div className={styles.mainLayout}>
           {avatarEnabled && (
-            <VideoPanel videoRef={videoRef} connectionStage={connectionStage} />
+            <VideoPanel
+              videoRef={videoRef}
+              connectionStage={connectionStage}
+              diagnostics={avatarDiagnostics}
+            />
           )}
           <ChatPanel
             messages={messages}

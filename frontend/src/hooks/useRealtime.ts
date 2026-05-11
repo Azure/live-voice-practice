@@ -13,6 +13,11 @@ interface RealtimeOptions {
   onMessage?: (msg: any) => void
   onAudioDelta?: (delta: string) => void
   onTranscript?: (role: 'user' | 'assistant', text: string) => void
+  onConnectionStatus?: (status: {
+    message: string
+    voiceSocket?: string
+    warning?: string
+  }) => void
 }
 
 const SAVE_DEBOUNCE_MS = 5000
@@ -32,10 +37,14 @@ export function useRealtime(options: RealtimeOptions) {
     saveTimerRef.current = setTimeout(() => {
       if (!conversationIdRef.current || !pendingSaveRef.current) return
       const msgs = conversationRecording.current
-      const transcript = msgs.map((m: any) => `${m.role}: ${m.content}`).join('\n')
-      api.updateConversationMessages(conversationIdRef.current, msgs, transcript).catch(err =>
-        console.warn('Failed to save conversation messages:', err)
-      )
+      const transcript = msgs
+        .map((m: any) => `${m.role}: ${m.content}`)
+        .join('\n')
+      api
+        .updateConversationMessages(conversationIdRef.current, msgs, transcript)
+        .catch(err =>
+          console.warn('Failed to save conversation messages:', err)
+        )
       pendingSaveRef.current = false
     }, SAVE_DEBOUNCE_MS)
   }, [])
@@ -60,14 +69,26 @@ export function useRealtime(options: RealtimeOptions) {
       return
     }
 
+    options.onConnectionStatus?.({
+      message: 'Loading voice connection settings',
+      voiceSocket: 'starting',
+    })
     const config = await fetch('/api/config').then(r => r.json())
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(
       `${protocol}//${location.host}${config.ws_endpoint}`
     )
+    options.onConnectionStatus?.({
+      message: 'Opening voice connection',
+      voiceSocket: 'connecting',
+    })
 
     ws.onopen = () => {
       setConnected(true)
+      options.onConnectionStatus?.({
+        message: 'Voice connection is open',
+        voiceSocket: 'open',
+      })
       ws.send(
         JSON.stringify({
           type: 'session.update',
@@ -128,7 +149,21 @@ export function useRealtime(options: RealtimeOptions) {
       }
     }
 
-    ws.onclose = () => setConnected(false)
+    ws.onerror = () => {
+      options.onConnectionStatus?.({
+        message: 'Voice connection error',
+        voiceSocket: 'error',
+        warning: 'The browser could not keep the voice connection open.',
+      })
+    }
+
+    ws.onclose = () => {
+      setConnected(false)
+      options.onConnectionStatus?.({
+        message: 'Voice connection closed',
+        voiceSocket: 'closed',
+      })
+    }
     wsRef.current = ws
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options.agentId])
