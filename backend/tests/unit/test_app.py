@@ -234,6 +234,21 @@ class TestFlaskApp:
         data = json.loads(response.data)
         assert data["error"] == "scenario_id and transcript are required"
 
+    def test_analyze_conversation_accepts_structured_messages(self):
+        """Test analysis can build transcript from structured conversation messages."""
+        response = self.client.post(
+            "/api/analyze",
+            json={
+                "scenario_id": "test-scenario",
+                "conversation_messages": [
+                    {"role": "user", "content": "Hello, how are you?"},
+                    {"role": "assistant", "content": "I need help with my bill."},
+                ],
+            },
+        )
+
+        assert response.status_code != 400
+
     def test_audio_processor_route(self):
         """Test the audio processor route."""
         with patch("src.app.send_from_directory") as mock_send:
@@ -379,7 +394,6 @@ class TestFlaskApp:
         )
 
         assert response.status_code == 200
-        data = json.loads(response.data)
         # Should still call list_user_conversations, not list_all_conversations
         mock_store.list_user_conversations.assert_called_once()
         mock_store.list_all_conversations.assert_not_called()

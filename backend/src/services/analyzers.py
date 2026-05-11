@@ -53,9 +53,22 @@ MAX_STRENGTHS_COUNT = 3
 
 # Keywords that indicate criteria reference supporting documentation / policies
 SUPPORT_MATERIAL_KEYWORDS = [
-    "policy", "policies", "procedure", "procedures", "guideline", "guidelines",
-    "supporting", "documentation", "compliance", "regulation", "protocol",
-    "standard", "handbook", "manual", "reference", "knowledge base",
+    "policy",
+    "policies",
+    "procedure",
+    "procedures",
+    "guideline",
+    "guidelines",
+    "supporting",
+    "documentation",
+    "compliance",
+    "regulation",
+    "protocol",
+    "standard",
+    "handbook",
+    "manual",
+    "reference",
+    "knowledge base",
 ]
 
 # Fallback evaluation prompt for custom scenarios
@@ -418,12 +431,8 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
         openai_client = self.openai_client
 
         try:
-            supporting_materials = await self._fetch_supporting_materials(
-                scenario, rubric
-            )
-            prompt = self._build_rubric_evaluation_prompt(
-                scenario, transcript, rubric, supporting_materials
-            )
+            supporting_materials = await self._fetch_supporting_materials(scenario, rubric)
+            prompt = self._build_rubric_evaluation_prompt(scenario, transcript, rubric, supporting_materials)
             response_format = self._get_rubric_response_format(rubric)
 
             completion = await asyncio.get_event_loop().run_in_executor(
@@ -456,7 +465,10 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
             return None
 
     def _build_rubric_evaluation_prompt(
-        self, scenario: Dict[str, Any], transcript: str, rubric: Dict[str, Any],
+        self,
+        scenario: Dict[str, Any],
+        transcript: str,
+        rubric: Dict[str, Any],
         supporting_materials: str = "",
     ) -> str:
         """Build a prompt that incorporates the rubric criteria."""
@@ -473,9 +485,7 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
             levels_text = ""
             for level in criterion.get("levels", []):
                 levels_text += f"  - {level.get('level')}: {level.get('label')} — {level.get('description')}\n"
-            criteria_lines.append(
-                f"**{name}** (`{cid}`, scale {scale}):\n{description}\n{levels_text}"
-            )
+            criteria_lines.append(f"**{name}** (`{cid}`, scale {scale}):\n{description}\n{levels_text}")
 
         criteria_block = "\n".join(criteria_lines)
 
@@ -574,9 +584,7 @@ CONVERSATION TO EVALUATE:
             },
         }
 
-    def _process_rubric_evaluation_result(
-        self, result: Dict[str, Any], rubric: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def _process_rubric_evaluation_result(self, result: Dict[str, Any], rubric: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and enrich rubric evaluation results."""
         criteria_scores = result.get("criteria_scores", {})
         scores = [entry.get("score", 0) for entry in criteria_scores.values() if isinstance(entry, dict)]
@@ -598,8 +606,9 @@ CONVERSATION TO EVALUATE:
                 improvement["max_score"] = scale_max
 
         # Backfill missing improvements: every criterion with score < scale_max must have an entry
-        rubric_criteria = {c.get("criterionId", ""): c.get("name", c.get("criterionId", ""))
-                          for c in rubric.get("criteria", [])}
+        rubric_criteria = {
+            c.get("criterionId", ""): c.get("name", c.get("criterionId", "")) for c in rubric.get("criteria", [])
+        }
         existing_criteria = set()
         for imp in result.get("improvements", []):
             if isinstance(imp, dict) and imp.get("criterion"):
@@ -618,12 +627,14 @@ CONVERSATION TO EVALUATE:
             name = rubric_criteria.get(cid, cid)
             if name.lower() in existing_criteria:
                 continue
-            improvements.append({
-                "criterion": name,
-                "score": score,
-                "max_score": scale_max,
-                "recommendation": entry.get("justification", "Review this criterion for improvement."),
-            })
+            improvements.append(
+                {
+                    "criterion": name,
+                    "score": score,
+                    "max_score": scale_max,
+                    "recommendation": entry.get("justification", "Review this criterion for improvement."),
+                }
+            )
         result["improvements"] = improvements
 
         result["passed"] = result["overall_score"] >= pass_threshold
@@ -649,9 +660,7 @@ CONVERSATION TO EVALUATE:
         combined = " ".join(criteria_texts).lower()
         return any(kw in combined for kw in SUPPORT_MATERIAL_KEYWORDS)
 
-    async def _fetch_supporting_materials(
-        self, scenario: Dict[str, Any], rubric: Dict[str, Any]
-    ) -> str:
+    async def _fetch_supporting_materials(self, scenario: Dict[str, Any], rubric: Dict[str, Any]) -> str:
         """Fetch supporting materials from AI Search when criteria reference policies."""
         if not self.search_service:
             return ""
@@ -684,9 +693,7 @@ CONVERSATION TO EVALUATE:
             logger.warning("Failed to fetch supporting materials: %s", e)
             return ""
 
-    async def _fetch_supporting_materials_for_scenario(
-        self, scenario: Dict[str, Any]
-    ) -> str:
+    async def _fetch_supporting_materials_for_scenario(self, scenario: Dict[str, Any]) -> str:
         """Fetch supporting materials for the legacy (non-rubric) evaluation."""
         if not self.search_service:
             return ""
@@ -723,7 +730,7 @@ class PronunciationAssessor:
         self.speech_endpoint = config.get("azure_speech_endpoint")
         self.speech_region = config["azure_speech_region"]
 
-    def _create_wav_audio(self, audio_bytes: bytearray) -> bytes:
+    def _create_wav_audio(self, audio_bytes: bytes | bytearray) -> bytes:
         """Create WAV format audio from raw PCM bytes."""
         with io.BytesIO() as wav_buffer:
             wav_file: wave.Wave_write = wave.open(wav_buffer, "wb")  # type: ignore
@@ -833,6 +840,30 @@ class PronunciationAssessor:
 
         except Exception as e:
             logger.error("Error in pronunciation assessment: %s", e)
+            return None
+
+    async def assess_pronunciation_pcm(
+        self, audio_bytes: bytes | bytearray, reference_text: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Assess pronunciation from raw PCM bytes already captured by the backend."""
+        if not self.speech_key and not self.speech_endpoint:
+            logger.error("Azure Speech auth not configured (set AZURE_SPEECH_KEY or AZURE_SPEECH_ENDPOINT with MSI)")
+            return None
+
+        try:
+            if not audio_bytes:
+                logger.error("No server-side audio data to assess")
+                return None
+
+            logger.info("Server-side audio size: %s bytes", len(audio_bytes))
+            if len(audio_bytes) < MIN_AUDIO_SIZE_BYTES:
+                logger.warning("Audio might be too short: %s bytes", len(audio_bytes))
+
+            wav_audio = self._create_wav_audio(audio_bytes)
+            return await self._perform_assessment(wav_audio, reference_text)
+
+        except Exception as e:
+            logger.error("Error in server-side pronunciation assessment: %s", e)
             return None
 
     async def _prepare_audio_data(self, audio_data: List[Dict[str, Any]]) -> bytearray:

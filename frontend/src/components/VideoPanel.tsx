@@ -109,12 +109,40 @@ const useStyles = makeStyles({
     width: '100%',
     maxWidth: '280px',
     marginTop: tokens.spacingVerticalS,
-    padding: tokens.spacingVerticalS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
     borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground2,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow2,
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
+    gap: tokens.spacingVerticalXS,
+  },
+  diagnosticsHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+  },
+  diagnosticsTitle: {
+    color: tokens.colorNeutralForeground2,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+  },
+  diagnosticsStatus: {
+    color: tokens.colorNeutralForeground1,
+  },
+  diagnosticsGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    columnGap: tokens.spacingHorizontalM,
+    rowGap: tokens.spacingVerticalXXS,
+  },
+  diagnosticLabel: {
+    color: tokens.colorNeutralForeground3,
+  },
+  diagnosticValue: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
   },
   warning: {
     color: tokens.colorPaletteRedForeground1,
@@ -236,29 +264,68 @@ export function VideoPanel({
               })}
             </div>
             <div className={styles.diagnostics}>
-              <Text size={200} weight="semibold">
-                Status: {diagnostics?.message ?? stageInfo.label}
+              <div className={styles.diagnosticsHeader}>
+                <Text
+                  size={100}
+                  weight="semibold"
+                  className={styles.diagnosticsTitle}
+                >
+                  Connection details
+                </Text>
+                <Text size={100} className={styles.diagnosticLabel}>
+                  {formatElapsed(elapsedSeconds)}
+                </Text>
+              </div>
+              <Text
+                size={200}
+                weight="semibold"
+                className={styles.diagnosticsStatus}
+              >
+                {diagnostics?.message ?? stageInfo.label}
               </Text>
-              <Text size={200}>Elapsed: {formatElapsed(elapsedSeconds)}</Text>
+              <div className={styles.diagnosticsGrid}>
+                <Text size={100} className={styles.diagnosticLabel}>
+                  Voice
+                </Text>
+                <Text size={100} className={styles.diagnosticValue}>
+                  {formatValue(diagnostics?.voiceSocket)}
+                </Text>
+                <Text size={100} className={styles.diagnosticLabel}>
+                  Browser
+                </Text>
+                <Text size={100} className={styles.diagnosticValue}>
+                  {formatValue(diagnostics?.browserConnection)}
+                </Text>
+                <Text size={100} className={styles.diagnosticLabel}>
+                  Relay
+                </Text>
+                <Text size={100} className={styles.diagnosticValue}>
+                  {formatValue(diagnostics?.networkRelay)}
+                </Text>
+                <Text size={100} className={styles.diagnosticLabel}>
+                  ICE
+                </Text>
+                <Text size={100} className={styles.diagnosticValue}>
+                  {formatValue(diagnostics?.gathering)}
+                </Text>
+                <Text size={100} className={styles.diagnosticLabel}>
+                  Candidates
+                </Text>
+                <Text size={100} className={styles.diagnosticValue}>
+                  {candidateText}
+                </Text>
+                <Text size={100} className={styles.diagnosticLabel}>
+                  Media
+                </Text>
+                <Text size={100} className={styles.diagnosticValue}>
+                  {mediaText || 'waiting'}
+                </Text>
+              </div>
               {lastUpdateSeconds !== undefined && (
-                <Text size={200}>
-                  Last update: {formatElapsed(lastUpdateSeconds)} ago
+                <Text size={100} className={styles.diagnosticLabel}>
+                  Last update {formatElapsed(lastUpdateSeconds)} ago
                 </Text>
               )}
-              <Text size={200}>
-                Voice socket: {formatValue(diagnostics?.voiceSocket)}
-              </Text>
-              <Text size={200}>
-                Browser link: {formatValue(diagnostics?.browserConnection)}
-              </Text>
-              <Text size={200}>
-                Network relay: {formatValue(diagnostics?.networkRelay)}
-              </Text>
-              <Text size={200}>
-                ICE gathering: {formatValue(diagnostics?.gathering)}
-              </Text>
-              <Text size={200}>Candidates: {candidateText}</Text>
-              <Text size={200}>Media received: {mediaText || 'waiting'}</Text>
               {waitWarning && (
                 <Text size={200} className={styles.warning}>
                   {waitWarning}

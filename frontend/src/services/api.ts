@@ -4,12 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-    Assessment,
-    AVATAR_OPTIONS,
-    ConversationDetailData,
-    ConversationListResponse,
-    Scenario,
+  Assessment,
+  AVATAR_OPTIONS,
+  ConversationDetailData,
+  ConversationListResponse,
+  Scenario,
 } from '../types'
+
+const MAX_LEGACY_ANALYZE_AUDIO_PAYLOAD_CHARS = 60000
 
 export interface AvatarConfig {
   character: string
@@ -42,6 +44,28 @@ function extractUserText(conversationMessages: any[]): string {
     .map(msg => msg.content)
     .join(' ')
     .trim()
+}
+
+function estimateAudioPayloadChars(audioData: any[]): number {
+  return audioData.reduce((total, chunk) => {
+    const data = typeof chunk?.data === 'string' ? chunk.data : ''
+    return total + data.length
+  }, 0)
+}
+
+async function getErrorMessage(res: Response): Promise<string> {
+  const contentType = res.headers.get('content-type') ?? ''
+  try {
+    if (contentType.includes('application/json')) {
+      const detail = await res.json()
+      const code = detail.code ? `[${detail.code}] ` : ''
+      return `${code}${detail.error ?? detail.detail ?? `HTTP ${res.status}`}`
+    }
+    const text = await res.text()
+    return text || `HTTP ${res.status}`
+  } catch {
+    return `HTTP ${res.status}`
+  }
 }
 
 export const api = {
@@ -88,24 +112,68 @@ export const api = {
     transcript: string,
     audioData: any[],
     conversationMessages: any[],
-    conversationId?: string | null
+    conversationId?: string | null,
+    agentId?: string | null
   ): Promise<Assessment> {
     const referenceText = extractUserText(conversationMessages)
+    const audioPayloadChars = estimateAudioPayloadChars(audioData)
+    const shouldSendMessages = !conversationId
+    const shouldSendLegacyAudio =
+      !agentId && audioPayloadChars <= MAX_LEGACY_ANALYZE_AUDIO_PAYLOAD_CHARS
+    const payload = {
+      scenario_id: scenarioId,
+      ...(shouldSendMessages
+        ? { conversation_messages: conversationMessages }
+        : {}),
+      ...(shouldSendLegacyAudio ? { audio_data: audioData } : {}),
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(agentId ? { agent_id: agentId } : {}),
+    }
+    const estimatedRequestChars = JSON.stringify(payload).length
+    const audioSource = agentId
+      ? 'websocket-session'
+      : shouldSendLegacyAudio
+        ? 'legacy-request-body'
+        : 'none'
+
+    this.clientLog('info', 'analysis.request.start', {
+      scenarioId,
+      transcriptChars: transcript.length,
+      referenceChars: referenceText.length,
+      messages: conversationMessages.length,
+      audioChunks: audioData.length,
+      audioPayloadChars,
+      audioSource,
+      hasConversationId: !!conversationId,
+      hasAgentId: !!agentId,
+      sendsMessages: shouldSendMessages,
+      estimatedRequestChars,
+    })
 
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scenario_id: scenarioId,
-        transcript,
-        audio_data: audioData,
-        reference_text: referenceText,
-        conversation_messages: conversationMessages,
-        ...(conversationId ? { conversation_id: conversationId } : {}),
-      }),
+      body: JSON.stringify(payload),
     })
-    if (!res.ok) throw new Error('Analysis failed')
-    return res.json()
+    if (!res.ok) {
+      const message = await getErrorMessage(res)
+      this.clientLog('error', 'analysis.request.failed', {
+        status: res.status,
+        message,
+        audioPayloadChars,
+        audioSource,
+        estimatedRequestChars,
+      })
+      throw new Error(message)
+    }
+    const result = await res.json()
+    this.clientLog('info', 'analysis.request.succeeded', {
+      hasAiAssessment: !!result.ai_assessment,
+      hasPronunciationAssessment: !!result.pronunciation_assessment,
+      conversationId: result.conversation_id,
+      diagnostics: result.diagnostics,
+    })
+    return result
   },
 
   async createConversation(
@@ -143,10 +211,15 @@ export const api = {
     return res.json()
   },
 
-  async deleteConversation(conversationId: string): Promise<{ success: boolean }> {
-    const res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, {
-      method: 'DELETE',
-    })
+  async deleteConversation(
+    conversationId: string
+  ): Promise<{ success: boolean }> {
+    const res = await fetch(
+      `/api/conversations/${encodeURIComponent(conversationId)}`,
+      {
+        method: 'DELETE',
+      }
+    )
     if (!res.ok) throw new Error('Failed to delete conversation')
     return res.json()
   },
@@ -172,8 +245,12 @@ export const api = {
     return res.json()
   },
 
-  async getConversation(conversationId: string): Promise<ConversationDetailData> {
-    const res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`)
+  async getConversation(
+    conversationId: string
+  ): Promise<ConversationDetailData> {
+    const res = await fetch(
+      `/api/conversations/${encodeURIComponent(conversationId)}`
+    )
     if (!res.ok) throw new Error('Failed to get conversation')
     return res.json()
   },
@@ -196,8 +273,8 @@ export const api = {
         level === 'error'
           ? console.error
           : level === 'warning'
-          ? console.warn
-          : console.info
+            ? console.warn
+            : console.info
       consoleFn(`[client-log] ${event}`, detail ?? '')
       void fetch('/api/client-log', {
         method: 'POST',
@@ -211,5 +288,4 @@ export const api = {
       /* swallow */
     }
   },
-
 }

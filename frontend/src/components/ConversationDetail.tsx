@@ -4,17 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-    Button,
-    Card,
-    Spinner,
-    Text,
-    makeStyles,
-    tokens,
+  Button,
+  Card,
+  Spinner,
+  Text,
+  makeStyles,
+  tokens,
 } from '@fluentui/react-components'
-import {
-    ArrowLeft24Regular,
-    ChartMultipleRegular,
-} from '@fluentui/react-icons'
+import { ArrowLeft24Regular, ChartMultipleRegular } from '@fluentui/react-icons'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { Assessment, ConversationDetailData, Scenario } from '../types'
@@ -100,7 +97,8 @@ export function ConversationDetail({
   onShowAssessment,
 }: Props) {
   const styles = useStyles()
-  const [conversation, setConversation] = useState<ConversationDetailData | null>(null)
+  const [conversation, setConversation] =
+    useState<ConversationDetailData | null>(null)
   const [loading, setLoading] = useState(true)
   const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -115,7 +113,8 @@ export function ConversationDetail({
       .finally(() => setLoading(false))
   }, [conversationId])
 
-  const scenario = scenarios.find(s => s.id === conversation?.scenario_id) || null
+  const scenario =
+    scenarios.find(s => s.id === conversation?.scenario_id) || null
 
   const hasAssessment = !!conversation?.assessment?.ai_assessment
 
@@ -130,7 +129,8 @@ export function ConversationDetail({
         transcript,
         [],
         msgs,
-        conversation.id
+        conversation.id,
+        null
       )
       setConversation(prev =>
         prev ? { ...prev, assessment: result, status: 'analyzed' } : prev
@@ -169,13 +169,16 @@ export function ConversationDetail({
   if (!conversation) return null
 
   const messages = conversation.messages || []
-  const dateStr = new Date(conversation.created_at).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  const dateStr = new Date(conversation.created_at).toLocaleDateString(
+    undefined,
+    {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }
+  )
 
   return (
     <Card className={styles.card}>

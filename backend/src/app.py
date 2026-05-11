@@ -20,6 +20,7 @@ from flask_sock import Sock  # pyright: ignore[reportMissingTypeStubs]
 from src.services.auth import UserIdentity, get_current_user, require_auth
 from src.config import config
 from src.services.analyzers import ConversationAnalyzer, PronunciationAssessor
+from src.services.audio_store import session_audio_store
 from src.services.conversation_manager import ConversationManager
 from src.services.database import conversation_store
 from src.services.managers import AgentManager, ScenarioManager
@@ -250,6 +251,7 @@ def delete_agent(agent_id: str):
     """Delete an agent."""
     try:
         agent_manager.delete_agent(agent_id)
+        session_audio_store.clear(agent_id)
         return jsonify({"success": True})
     except Exception as e:
         logger.error("Failed to delete agent: %s", e)
@@ -320,38 +322,163 @@ def analyze_conversation():
     """Analyze a conversation for performance assessment and save it."""
     data = cast(Dict[str, Any], request.json)
     scenario_id = cast(str, data.get("scenario_id"))
-    transcript = cast(str, data.get("transcript"))
-    audio_data = data.get("audio_data", [])
-    reference_text = cast(str, data.get("reference_text"))
-    conversation_messages = cast(List[Dict[str, Any]], data.get("conversation_messages", []))
     existing_conversation_id = data.get("conversation_id")
+    agent_id = data.get("agent_id")
+    user = get_current_user()
+    saved_conversation = _get_saved_conversation_for_analysis(existing_conversation_id, user)
+    conversation_messages = cast(List[Dict[str, Any]], data.get("conversation_messages", []))
+    if not conversation_messages:
+        conversation_messages = _messages_from_saved_conversation(saved_conversation)
+    transcript = cast(
+        str,
+        data.get("transcript")
+        or _transcript_text_from_saved_conversation(saved_conversation)
+        or _build_transcript_from_messages(conversation_messages),
+    )
+    audio_data = data.get("audio_data", [])
+    reference_text = cast(str, data.get("reference_text") or _extract_user_text(conversation_messages))
+    session_audio = session_audio_store.get_user_audio(agent_id)
+    audio_source = "websocket-session" if session_audio else ("request-body" if audio_data else "none")
 
-    _log_analyze_request(scenario_id, transcript, reference_text)
+    _log_analyze_request(
+        scenario_id,
+        transcript,
+        reference_text,
+        conversation_messages,
+        audio_data,
+        existing_conversation_id,
+        agent_id,
+        session_audio,
+        audio_source,
+    )
 
     if not scenario_id or not transcript:
         return jsonify({"error": TRANSCRIPT_REQUIRED}), HTTP_BAD_REQUEST
 
-    # Get current user (may be None if not authenticated)
-    user = get_current_user()
+    try:
+        return _perform_conversation_analysis(
+            scenario_id,
+            transcript,
+            audio_data,
+            reference_text,
+            conversation_messages,
+            user,
+            existing_conversation_id=existing_conversation_id,
+            session_audio=session_audio,
+            audio_source=audio_source,
+        )
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        logger.exception("Analyze request failed for scenario %s", scenario_id)
+        return (
+            jsonify(
+                {
+                    "error": "Analysis failed",
+                    "code": "ANALYSIS_FAILED",
+                    "detail": str(error),
+                }
+            ),
+            HTTP_INTERNAL_SERVER_ERROR,
+        )
 
-    return _perform_conversation_analysis(
-        scenario_id,
-        transcript,
-        audio_data,
-        reference_text,
-        conversation_messages,
-        user,
-        existing_conversation_id=existing_conversation_id,
+
+def _get_saved_conversation_for_analysis(
+    conversation_id: Optional[str],
+    user: Optional[UserIdentity],
+) -> Optional[Dict[str, Any]]:
+    """Load an existing conversation so analysis requests can stay small."""
+    if not conversation_id:
+        return None
+
+    if user is not None:
+        return conversation_store.get_conversation(user.user_id, conversation_id)
+
+    return conversation_manager.get_conversation(conversation_id)
+
+
+def _messages_from_saved_conversation(saved_conversation: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Extract structured messages from either authenticated or anonymous conversation storage."""
+    if not saved_conversation:
+        return []
+
+    messages = saved_conversation.get("messages")
+    if isinstance(messages, list):
+        return cast(List[Dict[str, Any]], messages)
+
+    transcript = saved_conversation.get("transcript")
+    if isinstance(transcript, list):
+        return cast(List[Dict[str, Any]], transcript)
+
+    return []
+
+
+def _transcript_text_from_saved_conversation(saved_conversation: Optional[Dict[str, Any]]) -> str:
+    """Extract transcript text from either authenticated or anonymous conversation storage."""
+    if not saved_conversation:
+        return ""
+
+    transcript_text = saved_conversation.get("transcriptText")
+    if isinstance(transcript_text, str):
+        return transcript_text
+
+    transcript = saved_conversation.get("transcript")
+    if isinstance(transcript, str):
+        return transcript
+
+    transcript_messages = saved_conversation.get("transcript")
+    if isinstance(transcript_messages, list):
+        return _build_transcript_from_messages(cast(List[Dict[str, Any]], transcript_messages))
+
+    return ""
+
+
+def _build_transcript_from_messages(conversation_messages: List[Dict[str, Any]]) -> str:
+    """Build a transcript string from structured conversation messages."""
+    lines = []
+    for message in conversation_messages:
+        role = str(message.get("role", "")).strip()
+        content = str(message.get("content", "")).strip()
+        if role and content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+def _extract_user_text(conversation_messages: List[Dict[str, Any]]) -> str:
+    """Extract user turns for pronunciation reference text."""
+    return " ".join(
+        str(message.get("content", "")).strip()
+        for message in conversation_messages
+        if str(message.get("role", "")).strip().lower() == "user" and str(message.get("content", "")).strip()
     )
 
 
-def _log_analyze_request(scenario_id: str, transcript: str, reference_text: str):
+def _log_analyze_request(
+    scenario_id: str,
+    transcript: str,
+    reference_text: str,
+    conversation_messages: List[Dict[str, Any]],
+    audio_data: List[Dict[str, Any]],
+    existing_conversation_id: Optional[str],
+    agent_id: Optional[str],
+    session_audio: Optional[bytes],
+    audio_source: str,
+):
     """Log information about the analyze request."""
     logger.info(
-        "Analyze request - scenario: %s, transcript length: %s, reference_text length: %s",
+        (
+            "Analyze request - scenario=%s transcript_chars=%s reference_chars=%s messages=%s "
+            "request_audio_chunks=%s session_audio_bytes=%s content_length=%s existing_conversation=%s "
+            "agent_audio=%s audio_source=%s"
+        ),
         scenario_id,
         len(transcript or ""),
         len(reference_text or ""),
+        len(conversation_messages or []),
+        len(audio_data or []),
+        len(session_audio or b""),
+        request.content_length,
+        bool(existing_conversation_id),
+        bool(agent_id),
+        audio_source,
     )
 
 
@@ -363,6 +490,8 @@ def _perform_conversation_analysis(
     conversation_messages: List[Dict[str, Any]],
     user: Optional[UserIdentity] = None,
     existing_conversation_id: Optional[str] = None,
+    session_audio: Optional[bytes] = None,
+    audio_source: str = "request-body",
 ):
     """Perform the actual conversation analysis and save to database if user is authenticated."""
     loop = asyncio.new_event_loop()
@@ -371,9 +500,14 @@ def _perform_conversation_analysis(
     rubric = conversation_manager.get_rubric_for_scenario(scenario_id)
 
     try:
+        pronunciation_task = (
+            pronunciation_assessor.assess_pronunciation_pcm(session_audio, reference_text)
+            if session_audio
+            else pronunciation_assessor.assess_pronunciation(audio_data, reference_text)
+        )
         tasks = [
             conversation_analyzer.analyze_conversation(scenario_id, transcript, rubric=rubric),
-            pronunciation_assessor.assess_pronunciation(audio_data, reference_text),
+            pronunciation_task,
         ]
 
         results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
@@ -391,6 +525,11 @@ def _perform_conversation_analysis(
         response_data: Dict[str, Any] = {
             "ai_assessment": ai_assessment,
             "pronunciation_assessment": pronunciation,
+            "diagnostics": {
+                "audio_source": audio_source,
+                "session_audio_bytes": len(session_audio or b""),
+                "request_audio_chunks": len(audio_data or []),
+            },
         }
 
         assessment_data = {

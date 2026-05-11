@@ -260,7 +260,7 @@ export default function App() {
     send,
     clearMessages,
     getRecordings,
-    getConversationId,
+    saveConversationNow,
   } = useRealtime({
     agentId: currentAgent,
     scenarioId: selectedScenario,
@@ -344,20 +344,27 @@ export default function App() {
       const transcript = recordings.conversation
         .map((m: any) => `${m.role}: ${m.content}`)
         .join('\n')
+      const conversationId = await saveConversationNow()
 
       const result = await api.analyzeConversation(
         selectedScenario,
         transcript,
         [...audioData, ...recordings.audio],
         recordings.conversation,
-        getConversationId()
+        conversationId,
+        currentAgent
       )
 
       setAssessment(result)
       setShowAssessment(true)
     } catch (error) {
       console.error('Analysis failed:', error)
-      setAnalysisError('Performance analysis failed. Please try again.')
+      const detail = error instanceof Error ? error.message : 'Unknown error'
+      const message =
+        detail.includes('403') || detail.includes('Forbidden')
+          ? 'Performance analysis was blocked before it reached the app. This usually means the gateway/WAF rejected the request size or content. Client logs include request diagnostics.'
+          : `Performance analysis failed. ${detail}`
+      setAnalysisError(message)
     } finally {
       setShowLoading(false)
     }

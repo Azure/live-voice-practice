@@ -32,6 +32,7 @@ from azure.core.credentials import AzureKeyCredential, TokenCredential
 from azure.identity import DefaultAzureCredential
 
 from src.config import config
+from src.services.audio_store import session_audio_store
 from src.services.managers import AgentManager
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ class VoiceProxyHandler:
                 )
 
                 await self._send_initial_config(azure_conn, agent_config)
-                await self._handle_message_forwarding(client_ws, azure_conn)
+                await self._handle_message_forwarding(client_ws, azure_conn, current_agent_id)
 
         except ConnectionClosed as e:
             logger.info("VoiceLive connection closed: code=%s, reason=%s", e.code, e.reason)
@@ -245,10 +246,11 @@ class VoiceProxyHandler:
         self,
         client_ws: simple_websocket.ws.Server,
         azure_conn: VoiceLiveConnection,
+        current_agent_id: Optional[str],
     ) -> None:
         """Handle bidirectional message forwarding."""
         tasks = [
-            asyncio.create_task(self._forward_client_to_azure(client_ws, azure_conn)),
+            asyncio.create_task(self._forward_client_to_azure(client_ws, azure_conn, current_agent_id)),
             asyncio.create_task(self._forward_azure_to_client(azure_conn, client_ws)),
         ]
 
@@ -261,6 +263,7 @@ class VoiceProxyHandler:
         self,
         client_ws: simple_websocket.ws.Server,
         azure_conn: VoiceLiveConnection,
+        current_agent_id: Optional[str],
     ) -> None:
         """Forward messages from client to Azure using SDK."""
         try:
@@ -276,6 +279,11 @@ class VoiceProxyHandler:
 
                 if isinstance(message, str):
                     parsed = json.loads(message)
+                    if parsed.get("type") == "input_audio_buffer.append" and current_agent_id:
+                        try:
+                            session_audio_store.append_user_audio(current_agent_id, str(parsed.get("audio", "")))
+                        except Exception as error:
+                            logger.warning("Failed to store user audio chunk for analysis: %s", error)
                     await azure_conn.send(parsed)
                 else:
                     await azure_conn.send(message)

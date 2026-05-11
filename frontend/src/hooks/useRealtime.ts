@@ -50,12 +50,16 @@ export function useRealtime(options: RealtimeOptions) {
   }, [])
 
   const ensureConversationCreated = useCallback(async () => {
-    if (conversationIdRef.current || !options.scenarioId) return
+    if (conversationIdRef.current || !options.scenarioId) {
+      return conversationIdRef.current
+    }
     try {
       const result = await api.createConversation(options.scenarioId)
       conversationIdRef.current = result.conversation_id
+      return conversationIdRef.current
     } catch (err) {
       console.warn('Failed to create conversation record:', err)
+      return null
     }
   }, [options.scenarioId])
 
@@ -193,6 +197,24 @@ export function useRealtime(options: RealtimeOptions) {
 
   const getConversationId = useCallback(() => conversationIdRef.current, [])
 
+  const saveConversationNow = useCallback(async () => {
+    const conversationId = await ensureConversationCreated()
+    if (!conversationId) return null
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+
+    const msgs = conversationRecording.current
+    const transcript = msgs
+      .map((m: any) => `${m.role}: ${m.content}`)
+      .join('\n')
+    await api.updateConversationMessages(conversationId, msgs, transcript)
+    pendingSaveRef.current = false
+    return conversationId
+  }, [ensureConversationCreated])
+
   useEffect(() => {
     connect()
     return () => {
@@ -208,5 +230,6 @@ export function useRealtime(options: RealtimeOptions) {
     clearMessages,
     getRecordings,
     getConversationId,
+    saveConversationNow,
   }
 }
