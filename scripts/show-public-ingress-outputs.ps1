@@ -1,10 +1,10 @@
 #!/usr/bin/env pwsh
 # Prints the values needed by docs/manual-testing/public-ingress-runbook.md
 # Reads them from deployment outputs first, then falls back to Azure resources.
-# This is a management-plane helper. The jumpbox managed identity may not have
-# ARM Reader permissions for deployments or network resources; in that case use
-# values already printed by azd provision, or rerun this helper from your
-# workstation with your Azure user login.
+# This is a management-plane helper. On the jumpbox, run `az login --identity`
+# before using it. If the managed identity still cannot read deployment or
+# network resources after login, use the values already printed by azd provision
+# or rerun this helper from your workstation with your Azure user login.
 #
 # Usage:
 #   pwsh -File ./scripts/show-public-ingress-outputs.ps1
@@ -32,6 +32,18 @@ function Resolve-ResourceGroup {
 
 $rg = Resolve-ResourceGroup
 Write-Host "[i] Reading public ingress outputs from resource group '$rg'..." -ForegroundColor Cyan
+
+$accountOutput = az account show -o none 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[!] Azure CLI is not logged in." -ForegroundColor Yellow
+    Write-Host "    On the jumpbox, run: az login --identity" -ForegroundColor Yellow
+    Write-Host "    On your workstation, run: az login" -ForegroundColor Yellow
+    Write-Host "    Then rerun this helper." -ForegroundColor Yellow
+    if ($accountOutput) {
+        Write-Host "    Azure CLI output: $accountOutput" -ForegroundColor DarkYellow
+    }
+    exit 1
+}
 
 function Get-OutputValue {
     param(
@@ -109,8 +121,8 @@ if ($gwId -and $ip -and $nsgId -and $miPid -and $kv) {
 $agwListOutput = az network application-gateway list -g $rg --query "[0].name" -o tsv 2>&1
 if ($LASTEXITCODE -ne 0 -or -not $agwListOutput) {
     Write-Host "[!] Could not read Application Gateway resources in '$rg'." -ForegroundColor Yellow
-    Write-Host "    If you are on the jumpbox with 'az login --identity', stop here: this is usually an ARM Reader permission limitation of the jumpbox managed identity, not proof that public ingress is missing." -ForegroundColor Yellow
-    Write-Host "    Continue on the jumpbox using the values from your azd provision session, or rediscover them once from your workstation with your Azure user login." -ForegroundColor Yellow
+    Write-Host "    If you are on the jumpbox, first confirm you already ran 'az login --identity'." -ForegroundColor Yellow
+    Write-Host "    If you are logged in and this still fails, the jumpbox managed identity may not have ARM Reader for network resources; use the values from your azd provision session or rerun this helper from your workstation." -ForegroundColor Yellow
     if ($agwListOutput) {
         Write-Host "    Azure CLI output: $agwListOutput" -ForegroundColor DarkYellow
     }

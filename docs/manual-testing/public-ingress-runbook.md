@@ -24,11 +24,19 @@ This runbook does **not** prescribe a domain registrar, a DNS provider, or a cer
 
 ## 0. Read or carry forward the deployment outputs
 
-This is a **management-plane lookup**, not a jumpbox/private-network operation.
+This is a **management-plane lookup**. It can run from your workstation with your Azure user login, or from the jumpbox after logging the Azure CLI in with the jumpbox managed identity.
 
 If you just ran `azd provision` from your workstation, keep the output values from that session and continue the rest of the runbook from the jumpbox. You do **not** need to leave the jumpbox for the certificate and Key Vault steps.
 
-If you need to rediscover the values later, run this helper from your workstation with your Azure user login:
+If you need to rediscover the values later from the jumpbox, log in first and then run the helper:
+
+```powershell
+az login --identity
+cd C:\github\live-voice-practice
+pwsh -File ./scripts/show-public-ingress-outputs.ps1
+```
+
+From your workstation, use your normal Azure user login instead:
 
 ```powershell
 cd C:\path\to\live-voice-practice
@@ -57,12 +65,15 @@ $agw    = 'agw-<token>'
 
 `PUBLIC_INGRESS_LIVE=false` confirms the deployment is in skeleton mode.
 
-If `PUBLIC_INGRESS_PUBLIC_IP` is empty or the script reports that it cannot read Application Gateway resources, first confirm where you ran it:
+If `PUBLIC_INGRESS_PUBLIC_IP` is empty or the script reports that it cannot read Application Gateway resources, first confirm Azure CLI login:
 
-- **Workstation with your Azure user login:** check that `NETWORK_ISOLATION=true` (or set `PUBLIC_INGRESS_ENABLED=true` explicitly) and re-run `azd provision`.
-- **Jumpbox with `az login --identity`:** stop using this helper there. This is usually an ARM Reader permission limitation of the jumpbox managed identity. It does **not** mean the Application Gateway is missing. Continue on the jumpbox using the output values from your `azd provision` session, or rediscover those values once from the workstation.
+- **Jumpbox:** run `az login --identity`, then rerun the helper.
+- **Workstation:** run `az login`, then rerun the helper.
+- **Already logged in but still cannot read Application Gateway resources:** this may be an ARM Reader limitation of the jumpbox managed identity. It does **not** mean the Application Gateway is missing. Continue using the output values from your `azd provision` session, or rediscover those values from the workstation.
 
-> **Why not run this helper on the jumpbox?** The jumpbox is the right place for private data-plane work such as win-acme and Key Vault import, but its managed identity is intentionally limited and may not be able to read ARM deployment outputs or network resources. Treat output discovery as a one-time workstation step; treat certificate generation and Key Vault import as jumpbox steps.
+Do **not** grant ARM Reader to the jumpbox managed identity until you have first tried `az login --identity`. If the helper works after login, no permission change is needed. The actual jumpbox tasks in this runbook are win-acme and Key Vault certificate import, and those do not require the jumpbox managed identity to list Application Gateway resources.
+
+> **Why might this fail before `az login --identity`?** Azure CLI sessions are not automatically logged in just because the VM has a managed identity. The jumpbox has an identity available, but each shell still needs `az login --identity` before `az` can query Azure.
 
 ---
 
@@ -72,14 +83,14 @@ Because the Key Vault has **public network access disabled**, the workflow is sp
 
 | Step | Location | Why |
 |------|----------|-----|
-| **0** (read/carry outputs) | Workstation once, then carry values into jumpbox | Requires ARM read access to deployment outputs/network resources; not a private-network step |
+| **0** (read/carry outputs) | Workstation or jumpbox after `az login --identity` | Requires Azure CLI login and ARM read access to deployment outputs/network resources |
 | **1** (choose domain) | Your workstation | No Azure resources needed |
 | **2** (create DNS A record) | Your workstation | Edit DNS provider UI |
 | **3** (obtain TLS cert) | **Jumpbox recommended** | Run win-acme on the jumpbox; verify DNS propagation from your workstation or a public DNS checker |
 | **4** (import to Key Vault) | **Jumpbox only** | Key Vault is not reachable from your workstation (public access disabled) |
 | **5** (promote to live) | Workstation recommended | Use the same place you ran the initial `azd provision`; jumpbox MI may not have enough ARM permissions |
 
-**Bottom line:** After the initial `azd provision`, the operator work is jumpbox-first. Steps 3–4 are easiest when you do them together **on the jumpbox**, and the Key Vault import (step 4) *must* run from the jumpbox. Use the workstation only for public DNS/provider checks and ARM management-plane actions such as reading deployment outputs or re-running `azd provision`. Do **not** use the jumpbox to test public DNS resolvers such as `8.8.8.8` or `1.1.1.1`; network-isolated firewall rules commonly block those DNS queries and produce timeouts even when the public TXT record is correct.
+**Bottom line:** After the initial `azd provision`, the operator work is jumpbox-first. Steps 3–4 are easiest when you do them together **on the jumpbox**, and the Key Vault import (step 4) *must* run from the jumpbox. You may also read the deployment outputs from the jumpbox after `az login --identity`. Use the workstation for public DNS/provider checks and for re-running `azd provision` if that is where your azd environment is set up. Do **not** use the jumpbox to test public DNS resolvers such as `8.8.8.8` or `1.1.1.1`; network-isolated firewall rules commonly block those DNS queries and produce timeouts even when the public TXT record is correct.
 
 ---
 
@@ -377,8 +388,9 @@ Once `voicelab.pfx` is on the jumpbox, open PowerShell on the jumpbox and run:
 # Use managed identity to authenticate (no interactive login needed on jumpbox)
 az login --identity
 
-# Set variables (copy from step 0)
-$kv          = 'kv-<token>'              # KEY_VAULT_NAME from step 0
+# Set variables from the azd provision/helper output you already have.
+# You do not need ARM Reader on the jumpbox managed identity for this import.
+$kv          = 'kv-<token>'              # KEY_VAULT_NAME, for example kv-gnsz77ru5uckw
 $certName    = 'voicelab-cert'
 $pfxPassword = 'temporary-pfx-password'   # the one used in step 3.b
 
@@ -390,7 +402,9 @@ az keyvault certificate import `
   --password   $pfxPassword
 ```
 
-If the import succeeds, you will see JSON output with the certificate details. On `infra/` ≥ `v1.1.9`, jumpbox MI already includes `Key Vault Certificates Officer`. If you are on an older landing-zone version and still receive a permission error, assign it manually:
+If the import succeeds, you will see JSON output with the certificate details. On `infra/` ≥ `v1.1.9`, jumpbox MI already includes `Key Vault Certificates Officer`, so do not add any extra permission just because the Application Gateway helper could not list network resources. That helper needs ARM Reader; this import needs Key Vault data-plane certificate permission, which is already assigned by the current infra.
+
+Only if you are on an older landing-zone version and the **certificate import itself** fails with a Key Vault authorization error, assign the Key Vault certificate role manually:
 
 ```powershell
 # If import failed due to permissions (older infra tag), run this first:
@@ -432,7 +446,7 @@ Record this value for step 5.
 
 The upstream module models live mode and skeleton mode **explicitly in Bicep**, so the operator-completed configuration is **not** drift — re-running `azd provision` after this step will reconcile the configuration cleanly. Do not edit the Application Gateway from the portal beyond what this runbook describes; portal-side changes will be reverted by the next provision.
 
-Set the three operator-controlled values via `azd env`:
+Set the operator-controlled values via `azd env` from the same workstation/session that ran the initial `azd provision`. Do not use the jumpbox managed identity for this step unless you deliberately granted it deployment permissions:
 
 ```powershell
 azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   $hostName
@@ -462,6 +476,8 @@ Then re-provision:
 ```powershell
 azd provision
 ```
+
+This final `azd provision` is the other management-plane action in the flow. You can run it from your workstation with your normal Azure login and keep the jumpbox managed identity unchanged.
 
 The reconcile is fast (only the gateway listener, redirect rule, NSG rule, and the cert reference change). Validate the transition:
 
@@ -577,6 +593,8 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
+| `show-public-ingress-outputs.ps1` says `Please run 'az login'` | The Azure CLI shell is not authenticated yet. | On the jumpbox run `az login --identity`, then rerun the helper. On a workstation run `az login`. |
+| `show-public-ingress-outputs.ps1` on the jumpbox still cannot read Application Gateway resources after `az login --identity` | The jumpbox managed identity may not have ARM Reader for network resources. | Do not grant ARM Reader just for this unless you intentionally want the jumpbox to perform ARM lookups. Use the output values from the original `azd provision`, or run the helper once from your workstation. Continue win-acme and Key Vault import from the jumpbox. |
 | `PUBLIC_INGRESS_ENABLED` is `false` after provision | `NETWORK_ISOLATION=false` or `PUBLIC_INGRESS_ENABLED=false`. | `azd env set NETWORK_ISOLATION true` or `azd env set PUBLIC_INGRESS_ENABLED true` and re-provision. |
 | `PUBLIC_INGRESS_LIVE` stays `false` after step 5 | Either `frontendHostName` or `sslCertSecretId` is still empty on the gateway. | Re-check the two `azd env set` commands from step 5 and confirm `azd provision` re-ran. Then run `pwsh -File ./scripts/show-public-ingress-outputs.ps1` again. |
 | `curl https://<your-hostname>/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName $hostName` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
