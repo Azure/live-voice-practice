@@ -212,6 +212,24 @@ $wacsDir = 'C:\tools\win-acme'
   --emailaddress $contactEmail
 ```
 
+On the jumpbox, win-acme may print scary-looking warnings while still succeeding. Do not stop just because you see one of these messages:
+
+```text
+Error updating public suffix list from https://publicsuffix.org/list/public_suffix_list.dat: ...
+Error connection to 156.154....
+Unable to contact name servers for <domain>
+[HTTP] Request completed with status BadRequest
+First chance error calling into ACME server, retrying with new nonce...
+```
+
+Those are expected in network-isolated environments when win-acme cannot perform some local helper checks or has to retry the ACME nonce. Continue if win-acme still prints the DNS TXT challenge, and treat the run as successful only when you later see:
+
+```text
+Authorization result: valid
+Certificate [Manual] <your-hostname> created
+Copying certificate to the pfx folder ...\voicelab.pfx
+```
+
 win-acme will pause and print the DNS TXT record you must create. Example:
 
 ```text
