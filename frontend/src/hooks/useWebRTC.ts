@@ -9,9 +9,14 @@ import { api } from '../services/api'
 export function useWebRTC(onSendOffer: (sdp: string) => void) {
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const setupWebRTC = useCallback(
     async (iceServers: any, username?: string, password?: string) => {
+      pcRef.current?.close()
+      audioRef.current?.remove()
+      audioRef.current = null
+
       let servers = Array.isArray(iceServers)
         ? iceServers
         : [{ urls: iceServers }]
@@ -104,11 +109,50 @@ export function useWebRTC(onSendOffer: (sdp: string) => void) {
             })
           })
         } else if (e.track.kind === 'audio') {
-          const audio = document.createElement('audio')
-          audio.srcObject = e.streams[0]
+          const audio = audioRef.current ?? document.createElement('audio')
+          const stream = e.streams[0] ?? new MediaStream([e.track])
+
+          audioRef.current = audio
+          audio.srcObject = stream
           audio.autoplay = true
+          audio.muted = false
+          audio.volume = 1
           audio.style.display = 'none'
-          document.body.appendChild(audio)
+
+          e.track.onmute = () => {
+            api.clientLog('warning', 'webrtc.audio_track_muted', {
+              id: e.track.id,
+            })
+          }
+          e.track.onunmute = () => {
+            api.clientLog('info', 'webrtc.audio_track_unmuted', {
+              id: e.track.id,
+            })
+          }
+          e.track.onended = () => {
+            api.clientLog('warning', 'webrtc.audio_track_ended', {
+              id: e.track.id,
+            })
+          }
+
+          if (!audio.isConnected) {
+            document.body.appendChild(audio)
+          }
+
+          audio.play().then(
+            () => {
+              api.clientLog('info', 'webrtc.audio_play_started', {
+                trackId: e.track.id,
+                streamTrackCount: stream.getTracks().length,
+              })
+            },
+            err => {
+              api.clientLog('warning', 'webrtc.audio_play_failed', {
+                name: err?.name,
+                message: err?.message,
+              })
+            }
+          )
         }
       }
 
@@ -142,13 +186,16 @@ export function useWebRTC(onSendOffer: (sdp: string) => void) {
       })
       await pcRef.current.setRemoteDescription({ type: 'answer', sdp })
     } else {
-      api.clientLog('warning', 'webrtc.answer_no_sdp', { keys: Object.keys(msg) })
+      api.clientLog('warning', 'webrtc.answer_no_sdp', {
+        keys: Object.keys(msg),
+      })
     }
   }, [])
 
   useEffect(() => {
     return () => {
       pcRef.current?.close()
+      audioRef.current?.remove()
     }
   }, [])
 
