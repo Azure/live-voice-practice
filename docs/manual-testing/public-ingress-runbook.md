@@ -347,35 +347,9 @@ openssl pkcs12 -export \
 
 > ⚠️ **Important:** This step **must be executed from the jumpbox** (or another resource within the same virtual network), **not from your workstation**. The Key Vault has `Public network access = Disabled`, meaning only resources inside the Azure network can access it. Your workstation cannot reach it directly.
 
-### 4.a. Transfer the PFX to the jumpbox
+### 4.a. Import from the jumpbox
 
-If you generated the PFX on your workstation (step 3), transfer it to the jumpbox first. You have several options:
-
-**Option 1: Azure Bastion file transfer (recommended)**
-Use Azure Bastion's native file transfer feature:
-
-1. In the Azure Portal, go to your resource group → `testvm<token>` (or your jumpbox VM)
-2. Click **Bastion** (top menu)
-3. In Bastion, use the **Upload / Download** file transfer feature to upload `voicelab.pfx`
-
-**Option 2: Copy via Bastion connection**
-Connect to the jumpbox via RDP/SSH through Bastion and copy the file manually.
-
-**Option 3: Regenerate on jumpbox (recommended on `infra/` ≥ `v1.1.9`)**
-If you prefer, you can re-run steps 3.a–3.c on the jumpbox itself. First, verify connectivity from the jumpbox:
-
-```powershell
-# From jumpbox PowerShell:
-Resolve-DnsName acme-v02.api.letsencrypt.org
-Resolve-DnsName api.github.com
-Invoke-WebRequest 'https://acme-v02.api.letsencrypt.org/directory' -UseBasicParsing
-```
-
-If all succeed, win-acme will work on the jumpbox. If any fail, the firewall is blocking egress, and you must use **Option 1** or **2** to transfer the pre-generated PFX.
-
-### 4.b. Import from the jumpbox
-
-Once `voicelab.pfx` is on the jumpbox, open PowerShell on the jumpbox and run:
+If you followed the default path in step 3, `voicelab.pfx` is already on the jumpbox. Stay in the same jumpbox PowerShell session and run:
 
 ```powershell
 # Use managed identity to authenticate (no interactive login needed on jumpbox)
@@ -421,7 +395,7 @@ az keyvault certificate import `
   --password   $pfxPassword
 ```
 
-### 4.c. Capture the certificate secret URI
+### 4.b. Capture the certificate secret URI
 
 Once import succeeds, capture the **versionless** secret URI for the next step. Run this from the jumpbox:
 
@@ -432,6 +406,15 @@ Write-Host $secretId
 ```
 
 Record this value for step 5.
+
+### 4.c. Optional only: if the PFX was created somewhere else
+
+Skip this section if `voicelab.pfx` was generated on the jumpbox. If you chose an alternative certificate path and created the PFX on your workstation, copy it to the jumpbox before running step 4.a. The simplest options are:
+
+1. Use Azure Bastion's **Upload / Download** file transfer feature to upload `voicelab.pfx` to the jumpbox.
+2. Connect to the jumpbox through Bastion and copy the file manually.
+
+After the file is on the jumpbox, return to step 4.a and import it into Key Vault.
 
 ---
 
