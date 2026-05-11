@@ -1,6 +1,6 @@
 # Public ingress runbook — domain + certificate completion
 
-> **Scope.** This runbook covers the operator-completed configuration of the optional **Application Gateway WAF v2 public ingress** introduced upstream by [`Azure/bicep-ptn-aiml-landing-zone#49`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49), enhanced by [`#53`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/53), and hardened by [`#55`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/55), consumed by this accelerator from `infra/` ≥ `v1.1.9`.
+> **Scope.** This runbook completes the optional **Application Gateway WAF v2 public ingress** for a network-isolated deployment.
 >
 > **Pre-requisites.** A successful `azd provision` run with `NETWORK_ISOLATION=true` (which now also enables `publicIngress` by default — see [`main.parameters.json`](../../main.parameters.json)). The deployment is in **skeleton mode**: the gateway, Public IP, WAF policy, and a deny-all NSG are provisioned, but the HTTPS listener has no certificate, no hostname, and the NSG does not yet allow any source.
 >
@@ -14,7 +14,7 @@
 
 ## What you are completing, and why each step exists
 
-The upstream module ([infra/modules/networking/public-ingress.bicep](../../infra/modules/networking/public-ingress.bicep)) deliberately deploys the gateway in **skeleton mode** when either `frontendHostName` or `sslCertSecretId` is empty. Skeleton mode means: the gateway exists, the Public IP is allocated, the backend pool is wired to the Container App's internal FQDN, the WAF policy is attached — and **no human can reach it**. The HTTPS listener is absent (no cert), and the NSG `AllowHttpsFromAllowedSources` rule is absent (no allow-listed CIDRs). Port 80 is **never** opened from the Internet by the NSG.
+The infrastructure deliberately deploys the gateway in **skeleton mode** until both `frontendHostName` and `sslCertSecretId` are set. Skeleton mode means: the gateway exists, the Public IP is allocated, the backend pool is wired to the Container App's internal FQDN, the WAF policy is attached — and **no human can reach it**. The HTTPS listener is absent (no cert), and the NSG `AllowHttpsFromAllowedSources` rule is absent (no allow-listed CIDRs). Port 80 is **never** opened from the Internet by the NSG.
 
 Skeleton mode lets you provision the network plumbing (which is slow and expensive to change) once, then complete the security-relevant parts (cert + hostname + IP allow-list) in a separate, fast, reversible step. This runbook is that second step.
 
@@ -58,13 +58,11 @@ $publicIngressLive = $false
 
 `$publicIngressLive = $false` confirms the deployment is in skeleton mode.
 
-If `PUBLIC_INGRESS_PUBLIC_IP` is empty or the script reports that it cannot read Application Gateway resources, first confirm Azure CLI login:
+If the script reports that it cannot read Azure resources, first confirm Azure CLI login:
 
 - **Jumpbox:** run `az login --identity`, then rerun the helper.
 - **Workstation:** run `az login`, then rerun the helper.
-- **Already logged in but still cannot read Application Gateway resources:** this may be an ARM Reader limitation of the jumpbox managed identity. It does **not** mean the Application Gateway is missing. Continue using the output values from your `azd provision` session, or rediscover those values from the workstation.
-
-Do **not** grant ARM Reader to the jumpbox managed identity until you have first tried `az login --identity`. If the helper works after login, no permission change is needed. The actual jumpbox tasks in this runbook are win-acme and Key Vault certificate import, and those do not require the jumpbox managed identity to list Application Gateway resources.
+- **Already logged in but still blocked:** continue using the output values from your `azd provision` session, or run the helper from the workstation where you provisioned the environment.
 
 > **Why might this fail before `az login --identity`?** Azure CLI sessions are not automatically logged in just because the VM has a managed identity. The jumpbox has an identity available, but each shell still needs `az login --identity` before `az` can query Azure.
 
@@ -81,7 +79,7 @@ Because the Key Vault has **public network access disabled**, the workflow is sp
 | **2** (create DNS A record) | Your workstation | Edit DNS provider UI |
 | **3** (obtain TLS cert) | **Jumpbox recommended** | Run win-acme on the jumpbox; verify DNS propagation from your workstation or a public DNS checker |
 | **4** (import to Key Vault) | **Jumpbox only** | Key Vault is not reachable from your workstation (public access disabled) |
-| **5** (promote to live) | Workstation recommended | Use the same place you ran the initial `azd provision`; jumpbox MI may not have enough ARM permissions |
+| **5** (promote to live) | Workstation recommended | Use the same place you ran the initial `azd provision` |
 
 **Bottom line:** After the initial `azd provision`, the operator work is jumpbox-first. Steps 3–4 are easiest when you do them together **on the jumpbox**, and the Key Vault import (step 4) *must* run from the jumpbox. You may also read the deployment outputs from the jumpbox after `az login --identity`. Use the workstation for public DNS/provider checks and for re-running `azd provision` if that is where your azd environment is set up. Do **not** use the jumpbox to test public DNS resolvers such as `8.8.8.8` or `1.1.1.1`; network-isolated firewall rules commonly block those DNS queries and produce timeouts even when the public TXT record is correct.
 
@@ -135,14 +133,14 @@ Obtain a certificate from any certification authority your audience's browsers t
 
 ### 3.a. Verify or install win-acme, then patch DNS pre-validation (one-time, Windows PowerShell)
 
-If you are running on the jumpbox from `infra/` ≥ `v1.1.9`, win-acme is installed by bootstrap. Verify first:
+win-acme is installed on the jumpbox by bootstrap. Verify first:
 
 ```powershell
 $wacsDir = 'C:\tools\win-acme'
 & "$wacsDir\wacs.exe" --version
 ```
 
-If the command fails (older landing-zone tag or custom image), install manually with:
+If the command fails, install manually with:
 
 ```powershell
 $wacsDir = 'C:\tools\win-acme'
@@ -368,31 +366,7 @@ az keyvault certificate import `
   --password   $pfxPassword
 ```
 
-If the import succeeds, you will see JSON output with the certificate details. On `infra/` ≥ `v1.1.9`, jumpbox MI already includes `Key Vault Certificates Officer`, so do not add any extra permission just because the Application Gateway helper could not list network resources. That helper needs ARM Reader; this import needs Key Vault data-plane certificate permission, which is already assigned by the current infra.
-
-Only if you are on an older landing-zone version and the **certificate import itself** fails with a Key Vault authorization error, assign the Key Vault certificate role manually:
-
-```powershell
-# If import failed due to permissions (older infra tag), run this first:
-$rg = 'rg-<env>'
-$jumpboxVm = 'testvm<token>'
-$jumpboxMiId = (az vm identity show -n $jumpboxVm -g $rg --query 'principalId' -o tsv)
-az role assignment create `
-  --role 'Key Vault Certificates Officer' `
-  --assignee-object-id $jumpboxMiId `
-  --scope "/subscriptions/<subscription-id>/resourceGroups/$rg/providers/Microsoft.KeyVault/vaults/$kv" `
-  --assignee-principal-type ServicePrincipal
-
-# Wait 30 seconds for role propagation
-Start-Sleep -Seconds 30
-
-# Retry the import
-az keyvault certificate import `
-  --vault-name $kv `
-  --name       $certName `
-  --file       .\voicelab.pfx `
-  --password   $pfxPassword
-```
+If the import succeeds, you will see JSON output with the certificate details. If it fails with an authentication error, run `az login --identity` again in the same jumpbox shell and retry the import.
 
 ### 4.b. Capture the certificate secret URI
 
@@ -419,9 +393,9 @@ After the file is on the jumpbox, return to step 4.a and import it into Key Vaul
 
 ## 5. Promote the gateway to live mode (Bicep is the source of truth)
 
-The upstream module models live mode and skeleton mode **explicitly in Bicep**, so the operator-completed configuration is **not** drift — re-running `azd provision` after this step will reconcile the configuration cleanly. Do not edit the Application Gateway from the portal beyond what this runbook describes; portal-side changes will be reverted by the next provision.
+Live mode and skeleton mode are modeled in Bicep, so re-running `azd provision` after this step will reconcile the configuration cleanly. Do not edit the Application Gateway directly in the portal; portal-side changes will be reverted by the next provision.
 
-Set the operator-controlled values via `azd env` from the same workstation/session that ran the initial `azd provision`. Do not use the jumpbox managed identity for this step unless you deliberately granted it deployment permissions:
+Set the operator-controlled values via `azd env` from the same workstation/session that ran the initial `azd provision`:
 
 ```powershell
 azd env set PUBLIC_INGRESS_FRONTEND_HOSTNAME   $hostName
@@ -452,7 +426,7 @@ Then re-provision:
 azd provision
 ```
 
-This final `azd provision` is the other management-plane action in the flow. You can run it from your workstation with your normal Azure login and keep the jumpbox managed identity unchanged.
+Run this final `azd provision` from the same environment you used for the initial provision.
 
 The reconcile is fast (only the gateway listener, redirect rule, NSG rule, and the cert reference change). Validate the transition:
 
@@ -509,7 +483,7 @@ azd env set PUBLIC_INGRESS_ENABLED false
 azd provision
 ```
 
-> **Caveat documented upstream.** `azd`/ARM incremental deployments will **not** delete public-ingress resources when `publicIngress.enabled` flips back to `false` after a previous deploy. The upstream module documents this explicitly. To actually remove the resources without `azd down`, you must delete them manually:
+> **Caveat.** `azd`/ARM incremental deployments will **not** delete public-ingress resources when `publicIngress.enabled` flips back to `false` after a previous deploy. To actually remove the resources without `azd down`, you must delete them manually:
 >
 > ```powershell
 > az network application-gateway delete -g $rg -n $agw
@@ -569,7 +543,7 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `show-public-ingress-outputs.ps1` says `Please run 'az login'` | The Azure CLI shell is not authenticated yet. | On the jumpbox run `az login --identity`, then rerun the helper. On a workstation run `az login`. |
-| `show-public-ingress-outputs.ps1` on the jumpbox still cannot read Application Gateway resources after `az login --identity` | The jumpbox managed identity may not have ARM Reader for network resources. | Do not grant ARM Reader just for this unless you intentionally want the jumpbox to perform ARM lookups. Use the output values from the original `azd provision`, or run the helper once from your workstation. Continue win-acme and Key Vault import from the jumpbox. |
+| `show-public-ingress-outputs.ps1` on the jumpbox still cannot read Azure resources after `az login --identity` | The shell is logged in, but this session cannot read the required management-plane values. | Use the values from the original `azd provision`, or run the helper once from your workstation. Continue win-acme and Key Vault import from the jumpbox. |
 | `PUBLIC_INGRESS_ENABLED` is `false` after provision | `NETWORK_ISOLATION=false` or `PUBLIC_INGRESS_ENABLED=false`. | `azd env set NETWORK_ISOLATION true` or `azd env set PUBLIC_INGRESS_ENABLED true` and re-provision. |
 | `PUBLIC_INGRESS_LIVE` stays `false` after step 5 | Either `frontendHostName` or `sslCertSecretId` is still empty on the gateway. | Re-check the two `azd env set` commands from step 5 and confirm `azd provision` re-ran. Then run `pwsh -File ./scripts/show-public-ingress-outputs.ps1` again. |
 | `curl https://<your-hostname>/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName $hostName` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
@@ -599,4 +573,3 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 - [`docs/network-isolation-jumpbox-runbook.md`](../network-isolation-jumpbox-runbook.md) — Manual UI testing (microphone limitation) section
 - [ADR-0001 — Application Gateway pattern for manual testing](../adr/0001-manual-testing-microphone-application-gateway.md)
 - [ADR-0002 — Bring your own domain and certificate](../adr/0002-bring-your-own-domain-and-certificate.md)
-- Upstream issue: [`Azure/bicep-ptn-aiml-landing-zone#49`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49)
