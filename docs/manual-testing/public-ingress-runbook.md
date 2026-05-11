@@ -68,11 +68,11 @@ Because the Key Vault has **public network access disabled**, the workflow is sp
 | **0** (read outputs) | Your workstation or jumpbox | Either works; just needs Azure CLI |
 | **1** (choose domain) | Your workstation | No Azure resources needed |
 | **2** (create DNS A record) | Your workstation | Edit DNS provider UI |
-| **3** (obtain TLS cert) | **Jumpbox recommended** | If firewall blocks egress, you need jumpbox's private network path |
+| **3** (obtain TLS cert) | **Jumpbox recommended** | Run win-acme on the jumpbox; verify DNS propagation from your workstation or a public DNS checker |
 | **4** (import to Key Vault) | **Jumpbox only** | Key Vault is not reachable from your workstation (public access disabled) |
 | **5** (promote to live) | Your workstation or jumpbox | Just needs `az provision` |
 
-**Bottom line:** Steps 3–4 are easiest when you do them together **on the jumpbox**. The Key Vault import (step 4) *must* run from the jumpbox; step 3 can run from your workstation if firewall permits, but it's more convenient on the jumpbox if you're already connected there.
+**Bottom line:** Steps 3–4 are easiest when you do them together **on the jumpbox**. The Key Vault import (step 4) *must* run from the jumpbox; step 3 can run from your workstation if firewall permits, but it's more convenient on the jumpbox if you're already connected there. However, do **not** use the jumpbox to test public DNS resolvers such as `8.8.8.8` or `1.1.1.1`; network-isolated firewall rules commonly block those DNS queries and produce timeouts even when the public TXT record is correct.
 
 ---
 
@@ -240,7 +240,11 @@ Use these rules:
 3. Use the token from win-acme as the TXT value. If win-acme prints quotes around the value, copy the value without adding an extra set of quotes unless your DNS provider explicitly requires them.
 4. Save/apply the DNS change in the provider UI before testing propagation.
 
-Wait until the TXT record propagates. Test both public resolvers and your default resolver:
+> **Namecheap and similar DNS panels:** the **Host** field is relative to your zone. If your zone is `contoso.com` and win-acme asks for `_acme-challenge.app.contoso.com`, enter only `_acme-challenge.app`. If you enter the full `_acme-challenge.app.contoso.com`, the provider may create `_acme-challenge.app.contoso.com.contoso.com`, which Let's Encrypt will not find.
+
+Wait until the TXT record propagates. If you are running win-acme on the jumpbox, verify propagation from your **workstation** or from a browser-based public DNS checker, not from the jumpbox. Direct DNS queries from the jumpbox to public resolvers are expected to time out in network-isolated deployments.
+
+From your workstation:
 
 ```powershell
 $txtRecord = "_acme-challenge.$hostName"
@@ -249,6 +253,8 @@ Resolve-DnsName $txtRecord -Type TXT -Server 8.8.8.8
 Resolve-DnsName $txtRecord -Type TXT -Server 1.1.1.1
 # expected answer: the abc123XYZdef456... value
 ```
+
+If you only have the jumpbox session open, use the jumpbox browser to check the TXT record with a public DNS checker over HTTPS instead of running `Resolve-DnsName ... -Server 8.8.8.8` inside PowerShell.
 
 Do **not** press Enter in the win-acme terminal until at least one public resolver returns the exact TXT value from win-acme.
 
