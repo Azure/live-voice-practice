@@ -61,6 +61,8 @@ See **[docs/deployment.md](docs/deployment.md)** for the full step-by-step guide
 
 Quick reference for the jumpbox split (subnets, firewall allow-list, troubleshooting): [docs/network-isolation-jumpbox-runbook.md](docs/network-isolation-jumpbox-runbook.md).
 
+To enable user sign-in, personal practice history, and trainer views, follow **[docs/authentication.md](docs/authentication.md)**.
+
 Speech is provisioned by the AILZ Bicep template (`deploySpeechService=true` by default, AILZ v1.1.4+). To opt out:
 
 ```bash
