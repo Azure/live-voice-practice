@@ -5,19 +5,23 @@ This guide explains how to deploy **Live Voice Practice** to Azure in two modes:
 1. **Basic deployment** — public endpoints, no Azure Firewall / Bastion / jumpbox. Fastest path; suitable for development, demos, and personal sandboxes.
 2. **Network-isolated (Zero Trust) deployment** — private endpoints, Azure Firewall egress control, all data-plane traffic stays inside the VNet. Required for production-grade environments.
 
-Both modes share the same Azure Developer CLI (`azd`) workflow:
+## Workflow at a glance
 
-```
-azd auth login
-azd env new <env-name>
-# (set NETWORK_ISOLATION=true for the isolated mode — see below)
-azd up                      # first time only (provision + deploy)
-# subsequent iterations:
-azd deploy                  # app code changes
-azd provision               # infra/Bicep changes
-```
+| Step | Basic mode | Network-isolated (ZTA) mode |
+|------|-----------|------------------------------|
+| Provision infra | `azd up` (workstation) | `azd provision` (workstation) |
+| Build & deploy the app | included in `azd up` | `azd deploy` from the **jumpbox** *(after `git pull` + submodule init + `az login --identity`)* |
+| Data-plane post-provision | runs automatically on your workstation | run `pwsh ./scripts/postProvision.ps1` from the **jumpbox** (private endpoints) |
+| Public access (BYO domain + cert) | not applicable | follow the [public ingress runbook](manual-testing/public-ingress-runbook.md) |
 
-`azd up` ≡ `azd provision` followed by `azd deploy`. The `postprovision` hook (`scripts/postProvision.ps1` / `scripts/postProvision.sh`) runs automatically at the end of `azd provision`.
+`azd up` ≡ `azd provision` followed by `azd deploy`. The `postprovision` hook (`scripts/postProvision.ps1` / `scripts/postProvision.sh`) runs automatically at the end of `azd provision`; in NI mode it auto-skips the data-plane steps because they cannot reach private endpoints from outside the VNet.
+
+For day-to-day iteration:
+
+```powershell
+azd deploy      # app code changes (workstation in basic mode, jumpbox in NI mode)
+azd provision   # infra/Bicep changes (always from workstation)
+```
 
 ---
 
@@ -76,12 +80,11 @@ The executor principal is determined automatically by the Bicep template: it fal
 
 ```powershell
 azd env new <env-name>
-azd env set AZURE_LOCATION       <region>             # e.g. swedencentral
-azd env set AZURE_SUBSCRIPTION_ID <subscription-guid>
-azd env set NETWORK_ISOLATION    false                # default
 # optional: pin Azure AI Search to another region
 azd env set AZURE_SEARCH_LOCATION northeurope
 ```
+
+> `azd` will prompt for subscription and location on first run if they are not set; only set them explicitly when you want to override the prompts (e.g. CI). `NETWORK_ISOLATION` defaults to `false`.
 
 ### 2. Provision and deploy
 
@@ -143,13 +146,13 @@ The deployment is split into two phases:
 
 ```powershell
 azd env new <env-name>
-azd env set AZURE_LOCATION                       <region>            # e.g. swedencentral
-azd env set AZURE_SUBSCRIPTION_ID                <subscription-guid>
 azd env set NETWORK_ISOLATION                    true
 azd env set AZURE_SKIP_NETWORK_ISOLATION_WARNING true
-azd env set AZURE_SEARCH_LOCATION                northeurope         # optional
-azd env set DEPLOY_SPEECH_SERVICE                true                # default true
+# optional: pin Azure AI Search to another region
+azd env set AZURE_SEARCH_LOCATION                northeurope
 ```
+
+> `azd` will prompt for subscription and location on first run if they are not set. Only set `AZURE_LOCATION` / `AZURE_SUBSCRIPTION_ID` explicitly when you want to override the prompt (e.g. CI). `DEPLOY_SPEECH_SERVICE` defaults to `true`.
 
 > The Bastion + Azure Firewall + jumpbox VM are part of the Bicep template (`deployVM=true`, default). The firewall policy is pre-configured with the FQDN allow-list needed to bootstrap the jumpbox (`azd`, Bicep CLI, GitHub, Speech, Foundry, ACR, …).
 
@@ -284,18 +287,25 @@ az containerapp update -g $rg -n $ca --image "$acr.azurecr.io/voicelab:$tag"
 #### B.6. Validate from the jumpbox
 
 ```powershell
-$rg = azd env get-value AZURE_RESOURCE_GROUP
-$ca = az containerapp list -g $rg --query "[0].name" -o tsv
+$rg  = azd env get-value AZURE_RESOURCE_GROUP
+$ca  = az containerapp list -g $rg --query "[0].name" -o tsv
+$fqdn = az containerapp show -g $rg -n $ca --query "properties.configuration.ingress.fqdn" -o tsv
+"https://$fqdn"
+```
 
-az containerapp show -g $rg -n $ca `
-  --query "{fqdn:properties.configuration.ingress.fqdn,revision:properties.latestRevisionName,running:properties.runningStatus}" -o table
+Open that URL in the jumpbox browser (Edge is preinstalled). The ingress is internal-only in NI mode, so it resolves through `privatelink.<region>.azurecontainerapps.io` from inside the VNet without needing the Application Gateway yet.
 
+If something looks off, tail the container logs:
+
+```powershell
 az containerapp logs show -g $rg -n $ca --follow --tail 100
 ```
 
-Open the FQDN in a browser **inside the jumpbox** — in NI mode the ingress is internal-only (resolves through `privatelink.<region>.azurecontainerapps.io`).
+#### B.7. (Optional) Expose the app publicly with a real domain
 
-#### B.7. Shut down the jumpbox when you're done
+To let testers reach the app from a real workstation with a real microphone, follow the [public ingress runbook](manual-testing/public-ingress-runbook.md). It walks through the BYO domain + Key Vault certificate step that wires the pre-provisioned Application Gateway WAF v2 to your domain, and configures the NSG allow-list with the source IPs you want to grant access to.
+
+#### B.8. Shut down the jumpbox when you're done
 
 To save cost, deallocate the VM after each session (the disk persists, OS state is preserved for next time):
 
