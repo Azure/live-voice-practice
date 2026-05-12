@@ -21,6 +21,9 @@ interface RealtimeOptions {
 }
 
 const SAVE_DEBOUNCE_MS = 5000
+const RECONNECT_MAX_ATTEMPTS = 8
+const RECONNECT_BASE_DELAY_MS = 1000
+const RECONNECT_MAX_DELAY_MS = 30000
 
 export function useRealtime(options: RealtimeOptions) {
   const [connected, setConnected] = useState(false)
@@ -31,6 +34,10 @@ export function useRealtime(options: RealtimeOptions) {
   const conversationIdRef = useRef<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingSaveRef = useRef(false)
+  const manualCloseRef = useRef(false)
+  const reconnectAttemptsRef = useRef(0)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const connectRef = useRef<(() => Promise<void>) | null>(null)
   const scheduleSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     pendingSaveRef.current = true
@@ -64,7 +71,13 @@ export function useRealtime(options: RealtimeOptions) {
   }, [options.scenarioId])
 
   const connect = useCallback(async () => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+
     if (!options.agentId) {
+      manualCloseRef.current = true
       if (wsRef.current) {
         wsRef.current.close()
         wsRef.current = null
@@ -73,8 +86,13 @@ export function useRealtime(options: RealtimeOptions) {
       return
     }
 
+    manualCloseRef.current = false
+
+    const isReconnect = reconnectAttemptsRef.current > 0
     options.onConnectionStatus?.({
-      message: 'Loading voice connection settings',
+      message: isReconnect
+        ? `Reconnecting voice connection (attempt ${reconnectAttemptsRef.current})`
+        : 'Loading voice connection settings',
       voiceSocket: 'starting',
     })
     const config = await fetch('/api/config').then(r => r.json())
@@ -88,9 +106,13 @@ export function useRealtime(options: RealtimeOptions) {
     })
 
     ws.onopen = () => {
+      const wasReconnect = reconnectAttemptsRef.current > 0
+      reconnectAttemptsRef.current = 0
       setConnected(true)
       options.onConnectionStatus?.({
-        message: 'Voice connection is open',
+        message: wasReconnect
+          ? 'Voice connection restored'
+          : 'Voice connection is open',
         voiceSocket: 'open',
       })
       ws.send(
@@ -163,10 +185,44 @@ export function useRealtime(options: RealtimeOptions) {
 
     ws.onclose = () => {
       setConnected(false)
+
+      if (manualCloseRef.current || !options.agentId) {
+        options.onConnectionStatus?.({
+          message: 'Voice connection closed',
+          voiceSocket: 'closed',
+        })
+        return
+      }
+
+      if (reconnectAttemptsRef.current >= RECONNECT_MAX_ATTEMPTS) {
+        options.onConnectionStatus?.({
+          message: 'Voice connection lost',
+          voiceSocket: 'closed',
+          warning:
+            'Unable to reconnect after several attempts. Please refresh the page to resume.',
+        })
+        return
+      }
+
+      const attempt = reconnectAttemptsRef.current + 1
+      reconnectAttemptsRef.current = attempt
+      const delay = Math.min(
+        RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1),
+        RECONNECT_MAX_DELAY_MS
+      )
       options.onConnectionStatus?.({
-        message: 'Voice connection closed',
-        voiceSocket: 'closed',
+        message: `Voice connection dropped — reconnecting in ${Math.round(delay / 1000)}s (attempt ${attempt}/${RECONNECT_MAX_ATTEMPTS})`,
+        voiceSocket: 'reconnecting',
+        warning:
+          'The voice session was interrupted. Attempting to restore it automatically.',
       })
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null
+        connectRef
+          .current?.()
+          .catch(err => console.warn('Reconnect attempt failed:', err))
+      }, delay)
     }
     wsRef.current = ws
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -186,6 +242,10 @@ export function useRealtime(options: RealtimeOptions) {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     pendingSaveRef.current = false
   }, [])
+
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   const getRecordings = useCallback(
     () => ({
@@ -218,6 +278,12 @@ export function useRealtime(options: RealtimeOptions) {
   useEffect(() => {
     connect()
     return () => {
+      manualCloseRef.current = true
+      reconnectAttemptsRef.current = 0
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
       wsRef.current?.close()
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }

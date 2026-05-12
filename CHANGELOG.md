@@ -5,6 +5,16 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [v0.0.2]
+
+### Added
+- **Automatic voice WebSocket reconnect with exponential backoff** (`frontend/src/hooks/useRealtime.ts`). If the voice connection drops while a practice session is active — typically after idle timeouts on the upstream Voice Live API, Container Apps ingress, or Application Gateway — the client now attempts to reconnect automatically (up to 8 attempts, 1s → 30s backoff) instead of leaving the avatar in a frozen state where `Start Recording` silently does nothing.
+- User-visible reconnect status messages surfaced through the existing connection-status callback (e.g., `Voice connection dropped — reconnecting in 2s (attempt 2/8)`, `Voice connection restored`, `Unable to reconnect after several attempts. Please refresh the page to resume.`).
+- Automatic avatar WebRTC re-initialization on reconnect: the reopened WebSocket re-sends `session.update`, which causes the backend to re-emit ICE servers via `session.updated`; `App.tsx`'s existing handler then rebuilds the `RTCPeerConnection` through `useWebRTC.setupWebRTC` (which already tears down the prior peer connection safely). No additional app-level wiring required.
+
+### Changed
+- Frontend release version bumped to `v0.0.2` (`frontend/src/app/App.tsx`).
+
 ### Changed
 - **Authentication is now Entra ID only across the entire solution; no account / admin / connection-string keys are read or generated anywhere.**
   - Backend (`SupportMaterialsSearchService`, `ConversationManager`, `ScenarioManager`) always uses `DefaultAzureCredential`. The optional `AZURE_SEARCH_API_KEY` and `COSMOS_KEY` config entries were removed.
