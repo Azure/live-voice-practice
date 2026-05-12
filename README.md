@@ -57,9 +57,11 @@ This project supports two deployment modes:
 
 Override any of these with `azd env set` (e.g. `azd env set USE_UAI true`, `azd env set ENABLE_ACS_MEDIA_EGRESS false`, `azd env set PUBLIC_INGRESS_ENABLED false`) before `azd provision`.
 
-See **[docs/deployment.md](docs/deployment.md)** for the full step-by-step guide covering both modes (prerequisites, env variables, the workstation/jumpbox split for network isolation, post-provision hook, image build via the in-VNet ACR Tasks agent pool, validation, and teardown).
+### Deployment guides
 
-Quick reference for the jumpbox split (subnets, firewall allow-list, troubleshooting): [docs/network-isolation-jumpbox-runbook.md](docs/network-isolation-jumpbox-runbook.md).
+- **[Full deployment guide](docs/deployment.md)** — prerequisites, environment variables, both deployment modes, validation, and teardown.
+- **[Network isolation quick reference](docs/network-isolation-jumpbox-runbook.md)** — workstation/jumpbox split, subnets, firewall allow-list, and troubleshooting.
+- **[Public ingress runbook](docs/manual-testing/public-ingress-runbook.md)** — BYO domain/certificate setup and real microphone validation.
 
 ### Optional user sign-in
 
