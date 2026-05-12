@@ -27,6 +27,13 @@ Key capabilities include:
 In a typical session, a trainee selects a practice scenario and begins a real-time voice conversation with an AI-driven customer through **Azure Voice Live**, while transcripts and interaction events are captured. After the session ends, the interaction is evaluated asynchronously to generate structured feedback. Scenarios, rubric-based evaluation, and example transcripts enable more structured and repeatable training workflows.
 
 
+## Architecture
+
+![Live Voice Practice — architecture diagram](docs/diagrams/Architecture%20Diagram.png)
+
+The diagram above shows the network-isolated (ZTA) topology: the browser reaches the app through Application Gateway WAF v2, the Container App runs the React frontend + Flask/WebSocket backend, and all data-plane traffic to Azure AI Foundry / Voice Live, Speech, Cosmos DB, AI Search, Key Vault, App Configuration and Storage flows through private endpoints inside the VNet. Outbound traffic from the jumpbox subnet is forced through Azure Firewall. For a deeper dive into the runtime flow see [docs/how-it-works.md](docs/how-it-works.md).
+
+
 ## Deployment
 
 This project supports two deployment modes:
