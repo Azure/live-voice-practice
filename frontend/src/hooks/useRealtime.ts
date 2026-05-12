@@ -24,6 +24,7 @@ const SAVE_DEBOUNCE_MS = 5000
 const RECONNECT_MAX_ATTEMPTS = 8
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30000
+const KEEPALIVE_INTERVAL_MS = 25000
 
 export function useRealtime(options: RealtimeOptions) {
   const [connected, setConnected] = useState(false)
@@ -37,7 +38,28 @@ export function useRealtime(options: RealtimeOptions) {
   const manualCloseRef = useRef(false)
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const keepAliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const connectRef = useRef<(() => Promise<void>) | null>(null)
+
+  const stopKeepAlive = useCallback(() => {
+    if (keepAliveTimerRef.current) {
+      clearInterval(keepAliveTimerRef.current)
+      keepAliveTimerRef.current = null
+    }
+  }, [])
+
+  const startKeepAlive = useCallback(() => {
+    stopKeepAlive()
+    keepAliveTimerRef.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        try {
+          wsRef.current.send(JSON.stringify({ type: 'client.ping' }))
+        } catch (err) {
+          console.warn('Keep-alive ping failed:', err)
+        }
+      }
+    }, KEEPALIVE_INTERVAL_MS)
+  }, [stopKeepAlive])
   const scheduleSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     pendingSaveRef.current = true
@@ -121,6 +143,7 @@ export function useRealtime(options: RealtimeOptions) {
           session: { agent_id: options.agentId },
         })
       )
+      startKeepAlive()
     }
 
     ws.onmessage = event => {
@@ -185,6 +208,7 @@ export function useRealtime(options: RealtimeOptions) {
 
     ws.onclose = () => {
       setConnected(false)
+      stopKeepAlive()
 
       if (manualCloseRef.current || !options.agentId) {
         options.onConnectionStatus?.({
@@ -284,10 +308,11 @@ export function useRealtime(options: RealtimeOptions) {
         clearTimeout(reconnectTimerRef.current)
         reconnectTimerRef.current = null
       }
+      stopKeepAlive()
       wsRef.current?.close()
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }
-  }, [connect])
+  }, [connect, stopKeepAlive])
 
   return {
     connected,

@@ -53,6 +53,8 @@ DEFAULT_VOICE_TYPE = "azure-standard"
 # Message types
 SESSION_UPDATE_TYPE = "session.update"
 PROXY_CONNECTED_TYPE = "proxy.connected"
+CLIENT_PING_TYPE = "client.ping"
+PROXY_PONG_TYPE = "proxy.pong"
 ERROR_TYPE = "error"
 
 # Log message truncation length
@@ -279,7 +281,14 @@ class VoiceProxyHandler:
 
                 if isinstance(message, str):
                     parsed = json.loads(message)
-                    if parsed.get("type") == "input_audio_buffer.append" and current_agent_id:
+                    message_type = parsed.get("type")
+                    if message_type == CLIENT_PING_TYPE:
+                        # Application-level keep-alive: answer the client and do
+                        # not forward to upstream Voice Live to avoid polluting
+                        # the session.
+                        await self._send_message(client_ws, {"type": PROXY_PONG_TYPE})
+                        continue
+                    if message_type == "input_audio_buffer.append" and current_agent_id:
                         try:
                             session_audio_store.append_user_audio(current_agent_id, str(parsed.get("audio", "")))
                         except Exception as error:
