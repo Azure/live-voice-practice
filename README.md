@@ -45,7 +45,7 @@ This project supports two deployment modes:
   # then connect to the jumpbox via Bastion and run azd deploy + postProvision there
   ```
 
-  For public access in network-isolated mode, follow [docs/manual-testing/public-ingress-runbook.md](docs/manual-testing/public-ingress-runbook.md) to configure BYO domain/certificate and validate from a real workstation with a real microphone.
+  For public access in network-isolated mode, use the [public ingress runbook](docs/manual-testing/public-ingress-runbook.md) to configure domain/cert and validate with a real microphone.
 
 ### Defaults at a glance
 
