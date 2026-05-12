@@ -33,6 +33,9 @@ export function useWebRTC(
       pcRef.current?.close()
       audioRef.current?.remove()
       audioRef.current = null
+      if (videoRef.current) {
+        videoRef.current.srcObject = null
+      }
       if (offerTimerRef.current) {
         clearTimeout(offerTimerRef.current)
         offerTimerRef.current = null

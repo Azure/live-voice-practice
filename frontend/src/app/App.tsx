@@ -161,6 +161,17 @@ export default function App() {
 
   const updateAvatarDiagnostics = useCallback(
     (update: Omit<AvatarConnectionDiagnostics, 'lastUpdatedAt'>) => {
+      if (update.voiceSocket === 'reconnecting') {
+        setConnectionStage('connecting')
+        setAvatarDiagnostics(prev => ({
+          ...prev,
+          ...update,
+          startedAt: Date.now(),
+          media: { audio: false, video: false },
+          lastUpdatedAt: Date.now(),
+        }))
+        return
+      }
       setAvatarDiagnostics(prev => ({
         ...prev,
         ...update,
