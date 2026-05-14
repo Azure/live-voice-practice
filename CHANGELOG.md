@@ -16,6 +16,7 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 
 ### Changed
 - Frontend release version bumped to `v0.0.2` (`frontend/src/app/App.tsx`).
+- `main.parameters.json`: `searchServiceLocation` default now falls back to `${AZURE_LOCATION}` instead of being hard-coded to `swedencentral`. Set `AZURE_SEARCH_LOCATION` explicitly only when you need the AI Search service to live in a different region than the rest of the deployment.
 
 ### Changed
 - **Authentication is now Entra ID only across the entire solution; no account / admin / connection-string keys are read or generated anywhere.**
