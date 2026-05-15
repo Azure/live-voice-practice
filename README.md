@@ -54,7 +54,7 @@ This project supports two deployment modes:
   # then connect to the jumpbox via Bastion and run azd deploy + postProvision there
   ```
 
-  For public access in network-isolated mode, use the [public ingress runbook](docs/manual-testing/public-ingress-runbook.md) to configure domain/cert and validate with a real microphone.
+  For public access in network-isolated mode, opt in with `azd env set PUBLIC_INGRESS_ENABLED true` before `azd provision`, then use the [public ingress runbook](docs/manual-testing/public-ingress-runbook.md) to configure domain/cert and validate with a real microphone. If you only need private access (jumpbox, Bastion, Azure Virtual Desktop in the spoke, or ExpressRoute/VPN), leave `PUBLIC_INGRESS_ENABLED` unset — the Application Gateway is not deployed and the runbook is not needed.
 
 ### Defaults at a glance
 
@@ -62,9 +62,9 @@ This project supports two deployment modes:
 |---|---|---|
 | Container App identity (`useUAI=false`) | **System-assigned (default)** | (same) |
 | ACS media egress firewall rules (`enableAcsMediaEgress`) | n/a (no firewall) | **enabled (default)** — opens UDP 3478-3481 / TCP 443+3478-3481 to `AzureCloud` for Speech avatar / ACS Calling / Teams Media |
-| Application Gateway WAF v2 skeleton (`publicIngress.enabled`) | n/a (Container App ingress is public) | **enabled (default)** — inert until you complete BYO domain + cert in the public-ingress runbook |
+| Application Gateway WAF v2 skeleton (`publicIngress.enabled`) | n/a (Container App ingress is public) | **disabled (default)** — opt in with `azd env set PUBLIC_INGRESS_ENABLED true` only when you need a public entry point; otherwise reach the app from the jumpbox / Bastion, an Azure Virtual Desktop in the spoke, or an ExpressRoute/VPN into the VNet |
 
-Override any of these with `azd env set` (e.g. `azd env set USE_UAI true`, `azd env set ENABLE_ACS_MEDIA_EGRESS false`, `azd env set PUBLIC_INGRESS_ENABLED false`) before `azd provision`.
+Override any of these with `azd env set` (e.g. `azd env set USE_UAI true`, `azd env set ENABLE_ACS_MEDIA_EGRESS false`, `azd env set PUBLIC_INGRESS_ENABLED true`) before `azd provision`. The public-ingress runbook only applies when `PUBLIC_INGRESS_ENABLED=true`; with the default the Application Gateway WAF v2 is not deployed and the runbook is not needed.
 
 ### Deployment guides
 

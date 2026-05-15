@@ -93,7 +93,9 @@ The jumpbox is intended for **bootstrap and admin tasks**, not as a workstation 
 
 Practical consequence: the **avatar renders correctly** inside an Edge session on the jumpbox (audio output works), but **`Start Recording` reports "Microphone unavailable"** — no VM-side or `.rdp` configuration changes this.
 
-### Recommended path — Application Gateway public ingress (deployer-controlled, BYO domain + cert)
+### Optional path — Application Gateway public ingress (deployer-controlled, BYO domain + cert)
+
+> Opt-in only. The Application Gateway is **not** deployed by default; enable it with `azd env set PUBLIC_INGRESS_ENABLED true` before `azd provision`. Skip this entire section if you reach the app from the jumpbox / Bastion, an Azure Virtual Desktop in the spoke, or an ExpressRoute/VPN into the VNet.
 
 Since [Azure/bicep-ptn-aiml-landing-zone#49](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/49), [#53](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/53), and [#55](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/55) shipped upstream (consumed here in `v1.1.9`), the network-isolated deployment **automatically** provisions an Application Gateway WAF v2 in **skeleton mode** in front of the internally posted Container App: the gateway, Public IP, WAF policy, and a deny-all NSG are provisioned, but the HTTPS listener has no cert and the NSG allows no source. This is by design — the operator completes the security-relevant bits (domain + cert + IP allow-list) in a separate, fast, reversible step.
 

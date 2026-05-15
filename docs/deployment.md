@@ -12,7 +12,7 @@ This guide explains how to deploy **Live Voice Practice** to Azure in two modes:
 | Provision infra | `azd up` (workstation) | `azd provision` (workstation) |
 | Build & deploy the app | included in `azd up` | `azd deploy` from the **jumpbox** *(after `git pull` + submodule init + `az login --identity`)* |
 | Data-plane post-provision | runs automatically on your workstation | run `pwsh ./scripts/postProvision.ps1` from the **jumpbox** (private endpoints) |
-| Public access (BYO domain + cert) | not applicable | follow the [public ingress runbook](manual-testing/public-ingress-runbook.md) |
+| Public access (BYO domain + cert) | not applicable | **opt-in.** Set `azd env set PUBLIC_INGRESS_ENABLED true` before `azd provision`, then follow the [public ingress runbook](manual-testing/public-ingress-runbook.md). Skip entirely if you reach the app from the jumpbox / Bastion, an Azure Virtual Desktop in the spoke, or an ExpressRoute/VPN into the VNet. |
 
 `azd up` ≡ `azd provision` followed by `azd deploy`. The `postprovision` hook (`scripts/postProvision.ps1` / `scripts/postProvision.sh`) runs automatically at the end of `azd provision`; in NI mode it auto-skips the data-plane steps because they cannot reach private endpoints from outside the VNet.
 
@@ -156,7 +156,7 @@ azd env set AZURE_SEARCH_LOCATION                northeurope
 
 > The Bastion + Azure Firewall + jumpbox VM are part of the Bicep template (`deployVM=true`, default). The firewall policy is pre-configured with the FQDN allow-list needed to bootstrap the jumpbox (`azd`, Bicep CLI, GitHub, Speech, Foundry, ACR, …).
 
-> Since `infra/` ≥ `v1.1.9`, network isolation also provisions an **Application Gateway WAF v2 in skeleton mode** (gateway + Public IP + WAF policy + deny-all NSG, no listener cert, no allowed sources). It exists so testers can later reach the app from a real workstation with a real microphone after you complete a deployer-side BYO domain + certificate step. The jumpbox bootstrap and RBAC are also ready for the certificate path (win-acme preinstalled via deterministic asset URL and Key Vault certificate import role pre-granted). See [docs/manual-testing/public-ingress-runbook.md](manual-testing/public-ingress-runbook.md). To skip the gateway entirely, set `azd env set PUBLIC_INGRESS_ENABLED false` before `azd provision`.
+> Since `infra/` ≥ `v1.1.9`, the optional **Application Gateway WAF v2 public ingress** is available but **disabled by default**, even when `NETWORK_ISOLATION=true`. Network isolation provisions the dedicated `AppGatewaySubnet` regardless, but the gateway/Public IP/WAF policy/NSG are only deployed when you opt in. Opt in only if you need testers to reach the app from a real workstation with a real microphone (or any other public-Internet entry point). Otherwise reach the app from the jumpbox / Bastion, an Azure Virtual Desktop in the spoke, or an ExpressRoute/VPN into the VNet — none of these require the gateway. To enable it, run `azd env set PUBLIC_INGRESS_ENABLED true` before `azd provision`, then follow [docs/manual-testing/public-ingress-runbook.md](manual-testing/public-ingress-runbook.md) to complete the BYO domain + certificate step. The jumpbox bootstrap and RBAC are already prepared for that path (win-acme preinstalled via deterministic asset URL and Key Vault certificate import role pre-granted).
 
 #### A.2. Run provision
 
@@ -303,7 +303,9 @@ az containerapp logs show -g $rg -n $ca --follow --tail 100
 
 #### B.7. (Optional) Expose the app publicly with a real domain
 
-To let testers reach the app from a real workstation with a real microphone, follow the [public ingress runbook](manual-testing/public-ingress-runbook.md). It walks through the BYO domain + Key Vault certificate step that wires the pre-provisioned Application Gateway WAF v2 to your domain, and configures the NSG allow-list with the source IPs you want to grant access to.
+This step is **only needed if you want a public Internet entry point** for the app — typically to let testers reach it from a real workstation with a real microphone. If you only need to reach the app from the jumpbox / Bastion, an Azure Virtual Desktop in the spoke, or an ExpressRoute/VPN into the VNet, skip this section: the Application Gateway is not deployed by default and no further action is required.
+
+To opt in, set `azd env set PUBLIC_INGRESS_ENABLED true` and re-run `azd provision`, then follow the [public ingress runbook](manual-testing/public-ingress-runbook.md). It walks through the BYO domain + Key Vault certificate step that wires the Application Gateway WAF v2 to your domain, and configures the NSG allow-list with the source IPs you want to grant access to.
 
 #### B.8. Shut down the jumpbox when you're done
 

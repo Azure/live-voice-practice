@@ -2,7 +2,9 @@
 
 > **Scope.** This runbook completes the optional **Application Gateway WAF v2 public ingress** for a network-isolated deployment.
 >
-> **Pre-requisites.** A successful `azd provision` run with `NETWORK_ISOLATION=true` (which now also enables `publicIngress` by default — see [`main.parameters.json`](../../main.parameters.json)). The deployment is in **skeleton mode**: the gateway, Public IP, WAF policy, and a deny-all NSG are provisioned, but the HTTPS listener has no certificate, no hostname, and the NSG does not yet allow any source.
+> **When this runbook applies.** Only when you have **explicitly opted into the public ingress** by setting `PUBLIC_INGRESS_ENABLED=true` (e.g. `azd env set PUBLIC_INGRESS_ENABLED true`) before `azd provision`. With the default (`PUBLIC_INGRESS_ENABLED` unset or `false`) the Application Gateway WAF v2 is **not** deployed — even under `NETWORK_ISOLATION=true` — and you don't need this runbook at all. Skip it if you reach the app from the jumpbox / Bastion, an Azure Virtual Desktop in the spoke, or an ExpressRoute/VPN into the VNet.
+>
+> **Pre-requisites.** A successful `azd provision` run with both `NETWORK_ISOLATION=true` and `PUBLIC_INGRESS_ENABLED=true`. After provisioning, the deployment is in **skeleton mode**: the gateway, Public IP, WAF policy, and a deny-all NSG are provisioned, but the HTTPS listener has no certificate, no hostname, and the NSG does not yet allow any source.
 >
 > **Outcome of this runbook.** The gateway transitions from skeleton mode to **live mode**: an HTTPS listener served by your TLS certificate, an HTTP→HTTPS redirect, and an NSG that allows TCP/443 only from the operator-controlled CIDRs. The application is then reachable at `https://<your-hostname>/` from a real workstation, with a real microphone, in a secure context, from any allow-listed IP.
 >
@@ -418,7 +420,7 @@ Still on your workstation, set the IP allow-list directly in [`main.parameters.j
 ```jsonc
 "publicIngress": {
   "value": {
-    "enabled": "${PUBLIC_INGRESS_ENABLED=${NETWORK_ISOLATION=false}}",
+    "enabled": "${PUBLIC_INGRESS_ENABLED=false}",
     "frontendHostName": "${PUBLIC_INGRESS_FRONTEND_HOSTNAME=}",
     "sslCertSecretId": "${PUBLIC_INGRESS_SSL_CERT_SECRET_ID=}",
     "allowedSourceAddressPrefixes": [
@@ -556,7 +558,7 @@ If you prefer hands-off renewals, swap the manual DNS-01 flow for an automated a
 |---------|--------------|-----|
 | `show-public-ingress-outputs.ps1` says `Please run 'az login'` | The Azure CLI shell is not authenticated yet. | On the jumpbox run `az login --identity`, then rerun the helper. On a workstation run `az login`. |
 | `show-public-ingress-outputs.ps1` on the jumpbox still cannot read Azure resources after `az login --identity` | The shell is logged in, but this session cannot read the required management-plane values. | Use the values from the original `azd provision`, or run the helper once from your workstation. Continue win-acme and Key Vault import from the jumpbox. |
-| `PUBLIC_INGRESS_ENABLED` is `false` after provision | `NETWORK_ISOLATION=false` or `PUBLIC_INGRESS_ENABLED=false`. | `azd env set NETWORK_ISOLATION true` or `azd env set PUBLIC_INGRESS_ENABLED true` and re-provision. |
+| `PUBLIC_INGRESS_ENABLED` is `false` after provision | The public ingress is opt-in and `PUBLIC_INGRESS_ENABLED` was not set to `true` (the default is `false` regardless of `NETWORK_ISOLATION`). Also requires `NETWORK_ISOLATION=true` to take effect. | `azd env set NETWORK_ISOLATION true` and `azd env set PUBLIC_INGRESS_ENABLED true`, then re-run `azd provision`. |
 | `PUBLIC_INGRESS_LIVE` stays `false` after step 5 | Either `frontendHostName` or `sslCertSecretId` is still empty on the gateway. | Re-check the two `azd env set` commands from step 5 and confirm `azd provision` re-ran. Then run `pwsh -File ./scripts/show-public-ingress-outputs.ps1` again. |
 | `curl https://<your-hostname>/` returns `tls handshake timeout` from an allow-listed IP | DNS not propagated yet; or the allow-list does not include this IP. | Verify `Resolve-DnsName $hostName` returns the gateway IP, then check the NSG rule contains the IP's `/32`. |
 | Browser or `curl` times out while Azure VPN is connected, but `PUBLIC_INGRESS_LIVE=true` | The workstation may be routing the gateway public IP through the VPN tunnel instead of normal Internet. | Disconnect the VPN for the browser test, or add a local route exception so the gateway public IP uses the workstation's normal Internet gateway. Confirm with `Find-NetRoute -RemoteIPAddress <gateway-public-ip>`. |
