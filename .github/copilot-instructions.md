@@ -20,6 +20,31 @@ When generating or modifying code, keep changes focused, minimal, and aligned wi
 - Do not introduce new dependencies unless they are clearly required.
 - Reuse existing services/hooks/components before creating new ones.
 
+## Clean Code and Modularity Expectations
+
+All implementations in this repository should follow clean code best practices. Optimize for code that is easy to read,
+easy to review, and safe to change later.
+
+- Keep files focused on a single responsibility. Avoid adding more code to already-large files when the behavior can be
+  extracted into a service, hook, component, helper, or module that matches the existing project structure.
+- Prefer small, cohesive functions and components over long procedures with many branches or mixed concerns.
+- Use clear names for modules, functions, variables, props, and types so the intent is obvious without excessive comments.
+- Avoid duplication. Search for existing services, hooks, helpers, constants, and types before adding new logic.
+- Separate orchestration from business logic: route handlers, React screen components, and deployment scripts should stay
+  thin and delegate non-trivial work to focused modules.
+- Keep boundaries explicit:
+  - backend API routes in `backend/src/app.py` should delegate domain logic to `backend/src/services/`.
+  - frontend screens should delegate reusable UI to `frontend/src/components/`, behavior to `frontend/src/hooks/`, and
+    network calls to `frontend/src/services/`.
+  - infrastructure changes should preserve the module/parameter pattern under `infra/`.
+- Avoid speculative abstractions, but extract code when a file or function is growing because it is handling multiple
+  responsibilities.
+- Prefer typed, explicit data shapes over loosely structured dictionaries/objects where practical.
+- Surface errors clearly and consistently; do not hide failures with silent fallbacks or broad catch-all handling.
+- When modifying a large file, consider whether the change should include a small extraction that improves cohesion while
+  keeping the behavior stable.
+- Add or update tests for behavior changes and for extracted logic that becomes independently testable.
+
 ## Azure Dev Environment Targeting
 
 For any Azure-related build, deploy, validation, or test operation in this repository, target this development environment by default:

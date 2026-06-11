@@ -41,5 +41,18 @@ npm install
 Verify that the following are valid
 * ...
 
+## Clean Code and Modularity Checklist
+<!-- Mark items that apply with an "x". Use N/A when not applicable. -->
+```
+[ ] Changes are focused and avoid unrelated refactors
+[ ] New or changed files keep a clear single responsibility
+[ ] Large files were not made significantly larger without considering extraction
+[ ] Non-trivial backend logic lives in services instead of route handlers
+[ ] Reusable frontend UI/behavior lives in components, hooks, or services as appropriate
+[ ] Existing helpers, constants, types, hooks, and services were reused where practical
+[ ] Errors are surfaced clearly and are not hidden by silent fallbacks
+[ ] Behavior changes include tests or a clear validation path
+```
+
 ## Other Information
 <!-- Add any other helpful information that may be needed here. -->

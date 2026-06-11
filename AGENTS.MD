@@ -259,3 +259,22 @@ azd deploy
 ```
 
 Use `azd provision` when infrastructure changes require it. Use `azd up` for the full provision-and-deploy flow.
+
+## Engineering Standards
+
+### Clean Code and Modularity
+
+All implementations in this repository should follow clean code best practices. The codebase should stay modular and easy to evolve; avoid letting files become large collections of unrelated behavior.
+
+- Keep each file focused on a clear responsibility.
+- Extract non-trivial logic into the right layer instead of adding more complexity to entrypoints or screens.
+- Prefer small, cohesive functions, React components, hooks, and services.
+- Use clear names that explain intent without relying on excessive comments.
+- Reuse existing modules, helpers, hooks, services, constants, and types before adding new ones.
+- Avoid duplication and speculative abstractions; extract when code is repeated or when a file is mixing concerns.
+- Keep backend route handlers thin and place domain logic in `backend/src/services/`.
+- Keep frontend screen components focused on composition; place reusable UI in `frontend/src/components/`, shared behavior in `frontend/src/hooks/`, and API calls in `frontend/src/services/`.
+- Preserve infrastructure modularity under `infra/` by extending parameters and modules instead of hardcoding workload-specific logic.
+- Prefer typed and explicit data contracts, especially across backend/frontend API boundaries.
+- Surface errors clearly and consistently; do not add silent fallbacks that hide broken states.
+- Add or update tests when behavior changes or when extracted logic becomes independently testable.
