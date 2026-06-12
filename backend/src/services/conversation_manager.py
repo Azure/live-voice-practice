@@ -79,6 +79,16 @@ class ConversationManager:
         """Return the evaluation rubric applicable to a given scenario, if any."""
         return self.rubrics.get(scenario_id)
 
+    def reload_rubrics(self) -> None:
+        """Clear and reload all rubrics from Cosmos after an admin write.
+
+        Reloading wholesale (rather than patching individual bindings) keeps the
+        ``scenarioId -> rubric`` index consistent when a rubric's
+        ``appliesTo.scenarioIds`` list changes, without requiring a pod restart.
+        """
+        self.rubrics = {}
+        self._load_rubrics()
+
     def save_conversation(
         self,
         scenario_id: str,

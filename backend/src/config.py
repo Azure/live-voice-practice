@@ -289,7 +289,36 @@ class Config:
                 env_var="AZURE_SEARCH_ENDPOINT",
                 app_config=app_config_values,
                 app_config_key="AZURE_SEARCH_ENDPOINT",
+                default=self._get_setting(
+                    env_var="SEARCH_SERVICE_QUERY_ENDPOINT",
+                    app_config=app_config_values,
+                    app_config_key="SEARCH_SERVICE_QUERY_ENDPOINT",
+                    default="",
+                ),
+            ),
+            "azure_search_indexer": self._get_setting(
+                env_var="AZURE_SEARCH_INDEXER",
+                app_config=app_config_values,
+                app_config_key="AZURE_SEARCH_INDEXER",
                 default="",
+            ),
+            "storage_blob_endpoint": self._get_setting(
+                env_var="STORAGE_BLOB_ENDPOINT",
+                app_config=app_config_values,
+                app_config_key="STORAGE_BLOB_ENDPOINT",
+                default="",
+            ),
+            "transcripts_storage_container": self._get_setting(
+                env_var="TRANSCRIPTS_STORAGE_CONTAINER",
+                app_config=app_config_values,
+                app_config_key="TRANSCRIPTS_STORAGE_CONTAINER",
+                default="transcripts",
+            ),
+            "documents_storage_container": self._get_setting(
+                env_var="DOCUMENTS_STORAGE_CONTAINER",
+                app_config=app_config_values,
+                app_config_key="DOCUMENTS_STORAGE_CONTAINER",
+                default="documents",
             ),
             "azure_search_index": self._get_setting(
                 env_var="AZURE_SEARCH_INDEX",
@@ -302,6 +331,20 @@ class Config:
                 app_config=app_config_values,
                 app_config_key="AZURE_SEARCH_EMBEDDING_DEPLOYMENT",
                 default="text-embedding-3-small",
+            ),
+            "show_trainee_identities": self._parse_bool_value(
+                self._get_setting(
+                    env_var="SHOW_TRAINEE_IDENTITIES",
+                    app_config=app_config_values,
+                    app_config_key="SHOW_TRAINEE_IDENTITIES",
+                    default="true",
+                )
+            ),
+            "trainee_hash_salt": self._get_setting(
+                env_var="TRAINEE_HASH_SALT",
+                app_config=app_config_values,
+                app_config_key="TRAINEE_HASH_SALT",
+                default="live-voice-practice",
             ),
         }
         return result

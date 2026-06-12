@@ -18,7 +18,7 @@ export function useScenarios() {
     // Load server scenarios
     api
       .getScenarios()
-      .then((s) => {
+      .then(s => {
         setScenarios(s)
         setError(null)
       })
@@ -40,7 +40,8 @@ export function useScenarios() {
       setScenarios(updatedScenarios)
       setError(null)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to refresh scenarios'
+      const message =
+        err instanceof Error ? err.message : 'Failed to refresh scenarios'
       console.error('Failed to refresh scenarios:', err)
       setError(message)
       setScenarios([])

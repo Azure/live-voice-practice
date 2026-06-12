@@ -23,7 +23,13 @@ export function useConversations(showAll?: boolean) {
     setLoading(true)
     try {
       const offset = (currentPage - 1) * PAGE_SIZE
-      const result = await api.listConversations(PAGE_SIZE, offset, sortBy, sortOrder, showAll)
+      const result = await api.listConversations(
+        PAGE_SIZE,
+        offset,
+        sortBy,
+        sortOrder,
+        showAll
+      )
       setConversations(result.conversations)
       setTotal(result.total)
     } catch (err) {
@@ -39,9 +45,12 @@ export function useConversations(showAll?: boolean) {
     fetchConversations()
   }, [fetchConversations])
 
-  const setPage = useCallback((page: number) => {
-    setCurrentPage(Math.max(1, Math.min(page, totalPages)))
-  }, [totalPages])
+  const setPage = useCallback(
+    (page: number) => {
+      setCurrentPage(Math.max(1, Math.min(page, totalPages)))
+    },
+    [totalPages]
+  )
 
   const setSort = useCallback((column: string, order: 'asc' | 'desc') => {
     setSortBy(column)

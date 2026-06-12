@@ -6,26 +6,37 @@
 """Flask application for Live Voice Practice."""
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
 import simple_websocket.ws  # pyright: ignore[reportMissingTypeStubs]
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_sock import Sock  # pyright: ignore[reportMissingTypeStubs]
 
-from src.services.auth import UserIdentity, get_current_user, require_auth
+from src.services.auth import UserIdentity, get_current_user, require_auth, require_trainer
 from src.config import config
 from src.services.analyzers import ConversationAnalyzer, PronunciationAssessor
+from src.services.anonymize import (
+    anonymize_conversation_record,
+    anonymize_trainee_row,
+    resolve_user_hash,
+)
 from src.services.audio_store import session_audio_store
 from src.services.conversation_manager import ConversationManager
 from src.services.database import conversation_store
 from src.services.managers import AgentManager, ScenarioManager
 from src.services.role_store import role_store
+from src.services.admin_content_service import admin_content_service
+from src.routes.admin_content import admin_content_bp
 from src.services.search_service import SupportMaterialsSearchService
+from src.services.statistics_service import StatisticsFilters, parse_iso, statistics_service
 from src.services.websocket_handler import VoiceProxyHandler
 
 # Constants
@@ -42,6 +53,9 @@ API_SCENARIOS_ENDPOINT = "/api/scenarios"
 API_AGENTS_CREATE_ENDPOINT = "/api/agents/create"
 API_ANALYZE_ENDPOINT = "/api/analyze"
 API_CONVERSATIONS_ENDPOINT = "/api/conversations"
+API_STATISTICS_OVERVIEW_ENDPOINT = "/api/admin/statistics/overview"
+API_STATISTICS_TRAINEES_ENDPOINT = "/api/admin/statistics/trainees"
+API_STATISTICS_EXPORT_ENDPOINT = "/api/admin/statistics/export"
 API_GRAPH_SCENARIO_ENDPOINT = "/api/scenarios/graph"
 API_CLIENT_LOG_ENDPOINT = "/api/client-log"
 
@@ -137,10 +151,38 @@ conversation_analyzer = ConversationAnalyzer(search_service=search_service)
 pronunciation_assessor = PronunciationAssessor()
 voice_proxy_handler = VoiceProxyHandler(agent_manager)
 
+# Wire admin content-management routes and hot-reload caches so trainer edits
+# take effect for new conversations without restarting the pod.
+admin_content_service.configure(
+    on_scenario_change=scenario_manager.upsert_scenario_cache,
+    on_scenario_delete=scenario_manager.remove_scenario_cache,
+    on_rubric_change=lambda _doc: conversation_manager.reload_rubrics(),
+    on_rubric_delete=lambda _doc: conversation_manager.reload_rubrics(),
+)
+app.register_blueprint(admin_content_bp)
+
 
 @app.route("/")
 def index():
     """Serve the main application page."""
+    return _serve_index()
+
+
+@app.route("/admin")
+@app.route("/admin/<path:subpath>")
+def admin_spa(subpath: str = ""):  # pylint: disable=unused-argument
+    """Serve the SPA entrypoint for client-side admin routes.
+
+    The admin UI is rendered entirely client-side by react-router. Serving
+    index.html here lets trainers deep-link to (or refresh) any /admin/* route
+    without hitting a Flask 404; access control is enforced server-side on the
+    /api/admin/* endpoints the page calls.
+    """
+    return _serve_index()
+
+
+def _serve_index():
+    """Return the built SPA index.html from the static folder."""
     if app.static_folder is None:
         logger.error("STATIC_FOLDER is not set. Cannot serve index.html.")
         import sys  # pylint: disable=C0415
@@ -631,6 +673,7 @@ def list_conversations():
             sort_by=sort_by,
             sort_order=sort_order,
         )
+        result["items"] = [anonymize_conversation_record(item) for item in result.get("items", [])]
     else:
         result = conversation_store.list_user_conversations(
             user_id=user.user_id,
@@ -690,6 +733,10 @@ def get_conversation(conversation_id: str):
     if not user.can_access_user_data(conversation.get("user_id", "")):
         return jsonify({"error": ACCESS_DENIED}), HTTP_FORBIDDEN
 
+    # Anonymize when a trainer/admin views another trainee's conversation; self-access keeps identity.
+    if conversation.get("user_id", "") != user.user_id:
+        conversation = anonymize_conversation_record(conversation)
+
     return jsonify(conversation)
 
 
@@ -736,6 +783,123 @@ def delete_conversation(conversation_id: str):
     if success:
         return jsonify({"success": True})
     return jsonify({"error": "Failed to delete conversation"}), HTTP_INTERNAL_SERVER_ERROR
+
+
+def _parse_list_arg(name: str) -> Optional[List[str]]:
+    """Parse a repeated or comma-separated query argument into a list."""
+    values: List[str] = []
+    for raw in request.args.getlist(name):
+        values.extend(part.strip() for part in raw.split(",") if part.strip())
+    return values or None
+
+
+def _parse_statistics_filters() -> StatisticsFilters:
+    """Build a StatisticsFilters from the current request query string."""
+    include_in_progress = request.args.get("includeInProgress", "false", type=str).lower() in ("true", "1")
+    return StatisticsFilters(
+        date_from=parse_iso(request.args.get("from", type=str)),
+        date_to=parse_iso(request.args.get("to", type=str)),
+        scenario_ids=_parse_list_arg("scenarioIds"),
+        rubric_ids=_parse_list_arg("rubricIds"),
+        include_in_progress=include_in_progress,
+    )
+
+
+@app.route(API_STATISTICS_OVERVIEW_ENDPOINT, methods=["GET"])
+@require_trainer
+def statistics_overview():
+    """Return the cohort overview (KPIs + over-time series) for trainers."""
+    filters = _parse_statistics_filters()
+    try:
+        payload = statistics_service.overview(filters)
+    except Exception as exc:  # noqa: BLE001 - return a consistent API error payload
+        logger.error("Failed to build statistics overview: %s", exc)
+        return jsonify({"error": "Failed to build statistics overview"}), HTTP_INTERNAL_SERVER_ERROR
+    return jsonify(payload)
+
+
+@app.route(API_STATISTICS_TRAINEES_ENDPOINT, methods=["GET"])
+@require_trainer
+def statistics_trainees():
+    """Return paginated per-trainee aggregates for trainers."""
+    filters = _parse_statistics_filters()
+    sort_by = request.args.get("sort_by", "lastPracticeAt", type=str)
+    sort_order = request.args.get("sort_order", "desc", type=str)
+    limit = request.args.get("limit", 25, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    try:
+        payload = statistics_service.trainees(
+            filters,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:  # noqa: BLE001 - return a consistent API error payload
+        logger.error("Failed to build trainee statistics: %s", exc)
+        return jsonify({"error": "Failed to build trainee statistics"}), HTTP_INTERNAL_SERVER_ERROR
+    payload["items"] = [anonymize_trainee_row(row) for row in payload.get("items", [])]
+    return jsonify(payload)
+
+
+@app.route(f"{API_STATISTICS_TRAINEES_ENDPOINT}/<identifier>", methods=["GET"])
+@require_trainer
+def statistics_trainee_detail(identifier: str):
+    """Return the detailed evolution payload for a single trainee."""
+    filters = _parse_statistics_filters()
+    try:
+        detail = statistics_service.trainee_detail(filters, identifier, resolver=resolve_user_hash)
+    except Exception as exc:  # noqa: BLE001 - return a consistent API error payload
+        logger.error("Failed to build trainee detail: %s", exc)
+        return jsonify({"error": "Failed to build trainee detail"}), HTTP_INTERNAL_SERVER_ERROR
+    if detail is None:
+        return jsonify({"error": "Trainee not found"}), HTTP_NOT_FOUND
+    return jsonify(anonymize_trainee_row(detail))
+
+
+_EXPORT_BASE_COLUMNS = [
+    "userId",
+    "displayName",
+    "conversationId",
+    "scenarioId",
+    "rubricId",
+    "createdAt",
+    "overallScore",
+    "scaleMax",
+    "scorePercent",
+    "passed",
+]
+
+
+@app.route(API_STATISTICS_EXPORT_ENDPOINT, methods=["GET"])
+@require_trainer
+def statistics_export():
+    """Stream a CSV of analyzed conversations under the current filters."""
+    filters = _parse_statistics_filters()
+    try:
+        payload = statistics_service.export_rows(filters)
+    except Exception as exc:  # noqa: BLE001 - return a consistent API error payload
+        logger.error("Failed to build statistics export: %s", exc)
+        return jsonify({"error": "Failed to build statistics export"}), HTTP_INTERNAL_SERVER_ERROR
+
+    rows = [anonymize_trainee_row(row) for row in payload.get("rows", [])]
+    criterion_columns: List[str] = payload.get("criterionColumns", [])
+    header = _EXPORT_BASE_COLUMNS + criterion_columns
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(header)
+    for row in rows:
+        criteria = row.get("criteria") or {}
+        base = [row.get(column) for column in _EXPORT_BASE_COLUMNS]
+        writer.writerow(base + [criteria.get(name) for name in criterion_columns])
+
+    filename = f"statistics-export-{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.route("/api/me", methods=["GET"])

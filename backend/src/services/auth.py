@@ -164,3 +164,39 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
         return f(*args, **kwargs)
 
     return decorated_function
+
+
+def require_trainer(f: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator to require the trainer role for a route.
+
+    Composes with :func:`require_auth`: the request must be authenticated and
+    the resolved role (via the Cosmos ``role_assignments`` container) must be
+    ``trainer``. Unauthenticated requests get HTTP 401; authenticated
+    non-trainers get HTTP 403. On success the resolved role is cached on the
+    ``UserIdentity`` so downstream handlers do not re-query.
+
+    Usage:
+        @app.route('/api/admin/thing')
+        @require_trainer
+        def admin_route():
+            ...
+    """
+
+    @wraps(f)
+    def decorated_function(*args: Any, **kwargs: Any) -> Any:
+        from flask import jsonify
+
+        # Imported lazily/by module reference so tests can patch the singleton.
+        from src.services.role_store import role_store
+
+        user = get_current_user()
+        if user is None:
+            return jsonify({"error": "Authentication required"}), 401
+
+        user.role = role_store.get_user_role(user.user_id)
+        if not user.is_trainer:
+            return jsonify({"error": "Access denied"}), 403
+
+        return f(*args, **kwargs)
+
+    return decorated_function

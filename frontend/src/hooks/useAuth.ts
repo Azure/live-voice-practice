@@ -47,11 +47,21 @@ export function useAuth(): AuthState {
             isTrainer: data.role === 'trainer',
           })
         } else {
-          setState({ authenticated: false, user: null, loading: false, isTrainer: false })
+          setState({
+            authenticated: false,
+            user: null,
+            loading: false,
+            isTrainer: false,
+          })
         }
       })
       .catch(() => {
-        setState({ authenticated: false, user: null, loading: false, isTrainer: false })
+        setState({
+          authenticated: false,
+          user: null,
+          loading: false,
+          isTrainer: false,
+        })
       })
   }, [])
 

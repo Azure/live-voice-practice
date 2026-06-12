@@ -397,3 +397,189 @@ class TestFlaskApp:
         # Should still call list_user_conversations, not list_all_conversations
         mock_store.list_user_conversations.assert_called_once()
         mock_store.list_all_conversations.assert_not_called()
+
+    @patch("src.services.role_store.role_store")
+    @patch("src.app.statistics_service")
+    def test_statistics_overview_as_trainer(self, mock_stats, mock_role_store):
+        """Trainers receive the overview payload from the statistics service."""
+        mock_role_store.get_user_role.return_value = "trainer"
+        mock_stats.overview.return_value = {"kpis": {"totalPractices": 3}, "generatedAt": "now"}
+
+        response = self.client.get(
+            "/api/admin/statistics/overview",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["kpis"]["totalPractices"] == 3
+        mock_stats.overview.assert_called_once()
+
+    @patch("src.services.role_store.role_store")
+    def test_statistics_overview_forbidden_for_trainee(self, mock_role_store):
+        """Trainees are denied access to the statistics overview (403)."""
+        mock_role_store.get_user_role.return_value = "trainee"
+
+        response = self.client.get(
+            "/api/admin/statistics/overview",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 403
+
+    def test_statistics_overview_unauthenticated(self):
+        """Unauthenticated requests to the overview endpoint get 401."""
+        response = self.client.get("/api/admin/statistics/overview")
+        assert response.status_code == 401
+
+    @patch("src.services.role_store.role_store")
+    @patch("src.app.statistics_service")
+    def test_statistics_trainees_as_trainer(self, mock_stats, mock_role_store):
+        """Trainers receive paginated trainee rows from the service."""
+        mock_role_store.get_user_role.return_value = "trainer"
+        mock_stats.trainees.return_value = {
+            "items": [{"userId": "user-2", "displayName": "Bob", "practices": 3}],
+            "total": 1,
+        }
+
+        response = self.client.get(
+            "/api/admin/statistics/trainees",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["total"] == 1
+        assert data["items"][0]["userId"] == "user-2"
+        mock_stats.trainees.assert_called_once()
+
+    @patch("src.services.role_store.role_store")
+    def test_statistics_trainees_forbidden_for_trainee(self, mock_role_store):
+        """Trainees are denied access to the trainees endpoint (403)."""
+        mock_role_store.get_user_role.return_value = "trainee"
+
+        response = self.client.get(
+            "/api/admin/statistics/trainees",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 403
+
+    @patch("src.services.role_store.role_store")
+    @patch("src.app.statistics_service")
+    def test_statistics_trainee_detail_found(self, mock_stats, mock_role_store):
+        """Trainers receive a trainee detail payload."""
+        mock_role_store.get_user_role.return_value = "trainer"
+        mock_stats.trainee_detail.return_value = {
+            "userId": "user-2",
+            "displayName": "Bob",
+            "totals": {"practices": 2},
+        }
+
+        response = self.client.get(
+            "/api/admin/statistics/trainees/user-2",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["userId"] == "user-2"
+
+    @patch("src.services.role_store.role_store")
+    @patch("src.app.statistics_service")
+    def test_statistics_trainee_detail_not_found(self, mock_stats, mock_role_store):
+        """Unresolvable trainees return 404."""
+        mock_role_store.get_user_role.return_value = "trainer"
+        mock_stats.trainee_detail.return_value = None
+
+        response = self.client.get(
+            "/api/admin/statistics/trainees/missing",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 404
+
+    @patch("src.services.role_store.role_store")
+    @patch("src.app.statistics_service")
+    def test_statistics_export_as_trainer(self, mock_stats, mock_role_store):
+        """Trainers receive a CSV with base columns plus per-criterion columns."""
+        mock_role_store.get_user_role.return_value = "trainer"
+        mock_stats.export_rows.return_value = {
+            "rows": [
+                {
+                    "userId": "user-2",
+                    "displayName": "Bob",
+                    "conversationId": "c1",
+                    "scenarioId": "s1",
+                    "rubricId": "r1",
+                    "createdAt": "2026-01-01T00:00:00+00:00",
+                    "overallScore": 4,
+                    "scaleMax": 5,
+                    "scorePercent": 80.0,
+                    "passed": True,
+                    "criteria": {"Clarity": 4, "Empathy": 3},
+                }
+            ],
+            "criterionColumns": ["Clarity", "Empathy"],
+        }
+
+        response = self.client.get(
+            "/api/admin/statistics/export",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 200
+        assert response.mimetype == "text/csv"
+        assert "attachment" in response.headers.get("Content-Disposition", "")
+        body = response.get_data(as_text=True)
+        lines = body.strip().splitlines()
+        assert lines[0].endswith("Clarity,Empathy")
+        assert "Bob" in lines[1]
+        assert lines[1].endswith("4,3")
+
+    @patch("src.services.role_store.role_store")
+    @patch("src.services.anonymize.identities_visible", return_value=False)
+    @patch("src.app.statistics_service")
+    def test_statistics_export_anonymized(self, mock_stats, _mock_visible, mock_role_store):
+        """When identities are hidden, the CSV uses opaque trainee labels."""
+        mock_role_store.get_user_role.return_value = "trainer"
+        mock_stats.export_rows.return_value = {
+            "rows": [
+                {
+                    "userId": "user-2",
+                    "displayName": "Bob",
+                    "conversationId": "c1",
+                    "scenarioId": "s1",
+                    "rubricId": "r1",
+                    "createdAt": "2026-01-01T00:00:00+00:00",
+                    "overallScore": 4,
+                    "scaleMax": 5,
+                    "scorePercent": 80.0,
+                    "passed": True,
+                    "criteria": {},
+                }
+            ],
+            "criterionColumns": [],
+        }
+
+        response = self.client.get(
+            "/api/admin/statistics/export",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        assert "Bob" not in body
+        assert "Trainee #" in body
+
+    @patch("src.services.role_store.role_store")
+    def test_statistics_export_forbidden_for_trainee(self, mock_role_store):
+        """Trainees are denied access to the export endpoint (403)."""
+        mock_role_store.get_user_role.return_value = "trainee"
+
+        response = self.client.get(
+            "/api/admin/statistics/export",
+            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+        )
+
+        assert response.status_code == 403

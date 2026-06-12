@@ -6,13 +6,20 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { FluentProvider, webLightTheme } from '@fluentui/react-components'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import App from './app/App'
+import { AdminShell } from './components/admin/AdminShell'
 import './styles/global.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <FluentProvider theme={webLightTheme}>
-      <App />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/admin/*" element={<AdminShell />} />
+          <Route path="/*" element={<App />} />
+        </Routes>
+      </BrowserRouter>
     </FluentProvider>
   </React.StrictMode>
 )

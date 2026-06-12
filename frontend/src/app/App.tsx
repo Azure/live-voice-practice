@@ -409,6 +409,7 @@ export default function App() {
         userName={user?.name}
         authenticated={authenticated}
         role={user?.role}
+        isTrainer={isTrainer}
       />
 
       {/* Branding bar - top left on non-setup views */}

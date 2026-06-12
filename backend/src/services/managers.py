@@ -19,6 +19,7 @@ from azure.cosmos import CosmosClient
 from azure.identity import CredentialUnavailableError, DefaultAzureCredential
 
 from src.config import config
+from src.services.blob_repository import BlobRepository, BlobRepositoryError
 from src.services.graph_scenario_generator import GraphScenarioGenerator
 
 # Constants
@@ -76,6 +77,10 @@ class ScenarioManager:
         """Initialize the scenario manager."""
         self.graph_generator = GraphScenarioGenerator()
         self.generated_scenarios: Dict[str, Any] = {}
+        # Transcripts live in Blob Storage (admin-managed). Built lazily so the
+        # manager still works when blob storage is unconfigured (local dev),
+        # falling back to the baked-in samples/transcripts/*.txt files.
+        self._transcript_repo: Optional[BlobRepository] = None
         # Health tracking: record the most recent failure so callers (smoke
         # tests, /api/health) can distinguish "no Cosmos configured" from
         # "Cosmos is configured but auth is broken". Without this distinction
@@ -328,7 +333,16 @@ class ScenarioManager:
         )
 
     def _load_transcript(self, transcript_id: str) -> Optional[str]:
-        """Load a transcript file by ID from the transcripts directory."""
+        """Load a transcript by ID, preferring Blob Storage then the local samples dir.
+
+        Transcripts are admin-managed in Blob Storage (the ``transcripts``
+        container). For local development without storage configured, fall back
+        to the baked-in ``samples/transcripts/*.txt`` files.
+        """
+        blob_text = self._load_transcript_from_blob(transcript_id)
+        if blob_text is not None:
+            return blob_text
+
         transcript_dir = self._determine_transcript_directory()
         path = transcript_dir / f"{transcript_id}.txt"
         if not path.is_file():
@@ -338,6 +352,23 @@ class ScenarioManager:
             return path.read_text(encoding="utf-8").strip()
         except Exception as e:
             logger.warning("Failed to read transcript %s: %s", transcript_id, e)
+            return None
+
+    def _load_transcript_from_blob(self, transcript_id: str) -> Optional[str]:
+        """Try to load a transcript from Blob Storage; ``None`` if unavailable."""
+        if self._transcript_repo is None:
+            try:
+                self._transcript_repo = BlobRepository(config.get("transcripts_storage_container", "transcripts"))
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug("Transcript blob repository unavailable: %s", e)
+                return None
+        try:
+            text = self._transcript_repo.get_text(f"{transcript_id}.txt")
+            return text.strip() if text else None
+        except BlobRepositoryError:
+            return None
+        except Exception as e:  # noqa: BLE001 - blob read is best-effort
+            logger.debug("Failed to read transcript %s from blob: %s", transcript_id, e)
             return None
 
     @staticmethod
@@ -397,6 +428,24 @@ class ScenarioManager:
         self.generated_scenarios[scenario["id"]] = scenario
 
         return scenario
+
+    def upsert_scenario_cache(self, scenario_doc: Dict[str, Any]) -> None:
+        """Hot-reload a single scenario into the in-memory cache after a write.
+
+        Lets admin edits take effect for new conversations without a pod
+        restart. Invalid documents are logged and skipped rather than raised.
+        """
+        try:
+            scenario = self._build_runtime_scenario(scenario_doc)
+            self.scenarios[scenario["id"]] = scenario
+            logger.info("Hot-reloaded scenario into cache: %s", scenario["id"])
+        except ValueError as error:
+            logger.warning("Skipping cache upsert for invalid scenario document: %s", error)
+
+    def remove_scenario_cache(self, scenario_id: str) -> None:
+        """Remove a scenario from the in-memory cache after a delete."""
+        if self.scenarios.pop(scenario_id, None) is not None:
+            logger.info("Removed scenario from cache: %s", scenario_id)
 
 
 class AgentManager:
