@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 
 from src.services.conversation_manager import ConversationManager
 
-
 SAMPLE_RUBRIC = {
     "rubricId": "contoso-rubric-billing-v1",
     "appliesTo": {"scenarioIds": ["contoso-billing-001"]},

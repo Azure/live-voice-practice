@@ -320,6 +320,12 @@ class Config:
                 app_config_key="DOCUMENTS_STORAGE_CONTAINER",
                 default="documents",
             ),
+            "materials_storage_container": self._get_setting(
+                env_var="SUPPORT_MATERIALS_STORAGE_CONTAINER",
+                app_config=app_config_values,
+                app_config_key="SUPPORT_MATERIALS_STORAGE_CONTAINER",
+                default="support-materials-src",
+            ),
             "azure_search_index": self._get_setting(
                 env_var="AZURE_SEARCH_INDEX",
                 app_config=app_config_values,

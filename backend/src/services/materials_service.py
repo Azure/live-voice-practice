@@ -5,13 +5,13 @@
 
 """Support-materials service: PDF blob storage + best-effort AI Search reindex.
 
-PDFs live in the ``documents`` blob container that the AI Search indexer reads
-from. Uploading/deleting blobs works with the container app's
-``Storage Blob Data Contributor`` role. Triggering the indexer is best-effort:
-the managed identity may only hold ``Search Index Data Reader`` (read-only), in
-which case the new document still becomes searchable on the next scheduled
-indexer run. The reindex outcome is reported back to the caller rather than
-failing the upload.
+PDFs live in the ``support-materials-src`` blob container that the AI Search
+indexer reads from. Uploading/deleting blobs works with the container app's
+``Storage Blob Data Contributor`` role. Triggering the indexer requires
+``Search Service Contributor``; when that role is absent the upload still
+succeeds and the document becomes searchable on the next scheduled indexer
+run. The reindex outcome is reported back to the caller rather than failing
+the upload.
 """
 
 import logging
@@ -31,7 +31,7 @@ class MaterialsService:
     """Manages support-material PDFs in Blob Storage and AI Search reindexing."""
 
     def __init__(self) -> None:
-        self._blobs = BlobRepository(config.get("documents_storage_container", "documents"))
+        self._blobs = BlobRepository(config.get("materials_storage_container", "support-materials-src"))
 
     def list_materials(self) -> List[Dict[str, Any]]:
         """List support-material documents (by blob name)."""
