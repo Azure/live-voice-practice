@@ -5,6 +5,25 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-22
+
+### Added
+- Replaced the README architecture section with the new Live Voice Practice architecture diagram and added the editable Visio source download link.
+- Added admin chart help tooltips and score-aware colors so low-scoring results are clearly visible instead of appearing as successful green states.
+- Added admin transcript fallback for built-in sample transcripts so sample scenarios and rubrics reference transcripts that are visible in Admin.
+
+### Changed
+- Reworked the setup screen so it no longer blocks navigation like a modal.
+- Improved the scenario and rubric admin forms with clearer sections, row-based support materials and criteria, better helper text, and stronger save labels.
+- Standardized visible product wording to use "Live Voice Agent" instead of "avatar".
+- Standardized user-facing date formatting across admin and conversation screens.
+- Reduced overly wide chart bars for sparse data.
+
+### Fixed
+- Scoring now retries transient model failures and surfaces diagnostics when asynchronous scoring cannot complete.
+- Admin scenario and rubric metadata no longer renders raw ISO timestamps.
+- The default chat deployment capacity is now 50, avoiding immediate capacity bottlenecks in the test deployment.
+
 ## [1.1.0] - 2026-06-22
 
 ### Added
@@ -78,4 +97,3 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 - Backend unit tests passing (`88 passed`).
 - Azure provisioning success after fixes (`azd provision`).
 - Full cloud workflow success after fixes (`azd up`) including container app endpoint publication.
-
