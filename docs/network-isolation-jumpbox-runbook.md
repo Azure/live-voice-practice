@@ -41,6 +41,13 @@ The hook auto-detects the situation:
 
 Egress from the jumpbox + ACR Tasks subnets is forced through Azure Firewall (`afw-<token>` / `afwp-<token>`).
 
+> **These CIDRs are defaults, not fixed.** The VNet address space and subnet prefixes ship from the AILZ submodule ([`infra/`](../infra/)). You have two supported ways to change them:
+>
+> - **Bring your own VNet.** Set `USE_EXISTING_VNET=true` and `EXISTING_VNET_RESOURCE_ID=<vnet resource id>` (see `main.parameters.json`) to deploy into a VNet you already manage, with your own address plan.
+> - **Adjust the defaults.** Override the AILZ networking parameters in the `infra/` submodule before `azd provision` to fit an existing hub/spoke or avoid overlap with on-prem or peered ranges.
+>
+> Keep the subnet names the same either way. The app and the firewall allow-list reference resources by name, not by address.
+
 ---
 
 ## Firewall allow-list (jumpbox bootstrap)
