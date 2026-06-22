@@ -29,7 +29,9 @@ In a typical session, a trainee selects a practice scenario and begins a real-ti
 
 ## Architecture
 
-![Live Voice Practice — architecture diagram](docs/diagrams/Architecture%20Diagram.png)
+![Live Voice Practice architecture diagram](docs/diagrams/Live%20Voice%20Practice%20Architecture.png)
+
+Download the editable Visio source: [Live Voice Practice Architecture.vsdx](docs/diagrams/Live%20Voice%20Practice%20Architecture.vsdx).
 
 The diagram above shows the network-isolated (ZTA) topology: the browser reaches the app through Application Gateway WAF v2, the Container App runs the React frontend + Flask/WebSocket backend, and all data-plane traffic to Azure AI Foundry / Voice Live, Speech, Cosmos DB, AI Search, Key Vault, App Configuration and Storage flows through private endpoints inside the VNet. Outbound traffic from the jumpbox subnet is forced through Azure Firewall. For a deeper dive into the runtime flow see [docs/how-it-works.md](docs/how-it-works.md).
 

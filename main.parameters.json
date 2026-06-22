@@ -71,7 +71,7 @@
           },
           "sku": {
             "name": "GlobalStandard",
-            "capacity": 1
+            "capacity": 50
           },
           "canonical_name": "CHAT_DEPLOYMENT_NAME",
           "apiVersion": "2025-01-01-preview"

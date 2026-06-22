@@ -4,15 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-    Button,
-    Card,
-    CardHeader,
-    Dropdown,
-    Label,
-    Option,
-    Text,
-    makeStyles,
-    tokens,
+  Button,
+  Card,
+  CardHeader,
+  Dropdown,
+  Label,
+  Option,
+  Text,
+  makeStyles,
+  tokens,
 } from '@fluentui/react-components'
 import { History24Regular, People24Regular } from '@fluentui/react-icons'
 import { useState } from 'react'
@@ -54,10 +54,17 @@ const useStyles = makeStyles({
   actions: {
     gridColumn: '1 / -1',
     display: 'flex',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     marginTop: tokens.spacingVerticalL,
+    paddingRight: tokens.spacingHorizontalM,
     gap: tokens.spacingHorizontalM,
     alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  practiceActions: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
   },
   avatarSelector: {
     display: 'flex',
@@ -130,24 +137,26 @@ export function ScenarioList({
       </div>
 
       <div className={styles.actions}>
-        {isAuthenticated && onNavigateToConversations && (
-          <Button
-            appearance="secondary"
-            icon={<History24Regular />}
-            onClick={onNavigateToConversations}
-          >
-            My Practices
-          </Button>
-        )}
-        {isTrainer && onNavigateToAllPractices && (
-          <Button
-            appearance="secondary"
-            icon={<People24Regular />}
-            onClick={onNavigateToAllPractices}
-          >
-            All Practices
-          </Button>
-        )}
+        <div className={styles.practiceActions}>
+          {isAuthenticated && onNavigateToConversations && (
+            <Button
+              appearance="secondary"
+              icon={<History24Regular />}
+              onClick={onNavigateToConversations}
+            >
+              My Practices
+            </Button>
+          )}
+          {isTrainer && onNavigateToAllPractices && (
+            <Button
+              appearance="secondary"
+              icon={<People24Regular />}
+              onClick={onNavigateToAllPractices}
+            >
+              All Practices
+            </Button>
+          )}
+        </div>
         <div className={styles.avatarSelector}>
           <Label htmlFor="avatar-select">Avatar:</Label>
           <Dropdown

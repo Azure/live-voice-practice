@@ -220,6 +220,7 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
   const pron = assessment.pronunciation_assessment
   const hasData = !!(ai || pron)
   const partialAssessment = !ai && !!pron
+  const scoringError = assessment.diagnostics?.scoring_error
 
   const isRubricBased = !!(
     ai?.criteria_scores && Object.keys(ai.criteria_scores).length > 0
@@ -341,8 +342,10 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                 style={{ marginTop: tokens.spacingVerticalS }}
               >
                 Pronunciation results were produced, but the AI scoring step did
-                not return results. Check the app logs for the analysis request;
-                this is usually a model deployment configuration issue.
+                not return results.
+                {scoringError
+                  ? ` ${scoringError}`
+                  : ' Check the app logs for the analysis request.'}
               </Text>
             </Card>
           )}

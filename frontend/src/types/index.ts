@@ -97,6 +97,7 @@ export interface Assessment {
     request_audio_chunks?: number
     ai_assessment_available?: boolean
     pronunciation_assessment_available?: boolean
+    scoring_error?: string | null
   }
 }
 

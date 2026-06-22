@@ -96,6 +96,11 @@ export function MaterialsTab() {
             Reference PDFs indexed for analysis. Uploads are reindexed when
             permitted, otherwise on the next scheduled indexer run.
           </Text>
+          <Text size={200}>
+            To use a PDF in scoring, reference its exact file name in a
+            scenario's Related support materials field. Rubrics use those
+            scenario materials when evaluating policy accuracy.
+          </Text>
         </div>
         <Button
           appearance="primary"
