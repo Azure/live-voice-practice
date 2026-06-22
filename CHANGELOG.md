@@ -5,6 +5,8 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-22
+
 ### Added
 - Realtime function/tool calling for locally-hosted agents (`backend/src/services/voice_tools.py`, `backend/src/services/websocket_handler.py`). The proxy now advertises a `get_scenario_context` tool in the Voice Live session for non-Azure agents, handles the `response.function_call_arguments.done` event, dispatches the call against the active scenario, and returns the result with a `FunctionCallOutputItem` followed by `response.create`. The model can ask for the current scenario name and description mid-conversation instead of relying only on the static system prompt. Azure-hosted agents are untouched because they manage their own tools. Gated by the new `ENABLE_REALTIME_FUNCTION_CALLING` config (default on).
 - `AZURE_VOICE_API_VERSION` config knob (`backend/src/config.py`) so the Voice Live API version can be overridden per environment without a code change. Defaults to the new `2026-01-01-preview`.
