@@ -281,7 +281,9 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
                         None,
                         lambda: openai_client.chat.completions.create(
                             model=config["model_deployment_name"],
-                            messages=self._build_evaluation_messages(evaluation_prompt),  # pyright: ignore[reportArgumentType]
+                            messages=self._build_evaluation_messages(
+                                evaluation_prompt
+                            ),  # pyright: ignore[reportArgumentType]
                             response_format=self._get_response_format(),  # pyright: ignore[reportArgumentType]
                         ),
                     )
@@ -475,7 +477,9 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
                 except Exception:
                     if attempt >= SCORING_RETRY_ATTEMPTS:
                         raise
-                    logger.warning("Rubric evaluation model call failed on attempt %s; retrying", attempt, exc_info=True)
+                    logger.warning(
+                        "Rubric evaluation model call failed on attempt %s; retrying", attempt, exc_info=True
+                    )
                     await asyncio.sleep(0.75 * attempt)
 
             if completion and completion.choices[0].message.content:

@@ -209,11 +209,7 @@ class AdminContentService:
         ids = set(self._sample_transcript_ids())
         try:
             names = self._transcripts.list_names()
-            ids.update(
-                _transcript_id_from_blob(name)
-                for name in names
-                if name.endswith(TRANSCRIPT_BLOB_SUFFIX)
-            )
+            ids.update(_transcript_id_from_blob(name) for name in names if name.endswith(TRANSCRIPT_BLOB_SUFFIX))
         except BlobRepositoryError as error:
             logger.warning("Blob transcript list unavailable; using baked-in samples only: %s", error)
         return sorted(ids)
@@ -238,9 +234,7 @@ class AdminContentService:
 
     def transcript_exists(self, transcript_id: str) -> bool:
         """Return whether a transcript exists in Blob Storage or built-in samples."""
-        return self._blob_transcript_exists(transcript_id) or self._sample_transcript_path(
-            transcript_id
-        ).is_file()
+        return self._blob_transcript_exists(transcript_id) or self._sample_transcript_path(transcript_id).is_file()
 
     def delete_transcript(self, transcript_id: str) -> bool:
         """Delete a transcript; refuses if a scenario or rubric references it."""
@@ -250,12 +244,8 @@ class AdminContentService:
                 f"Transcript '{transcript_id}' is referenced and cannot be deleted",
                 holders,
             )
-        if self._sample_transcript_path(transcript_id).is_file() and not self._blob_transcript_exists(
-            transcript_id
-        ):
-            raise ContentConflictError(
-                f"Transcript '{transcript_id}' is a built-in sample and cannot be deleted"
-            )
+        if self._sample_transcript_path(transcript_id).is_file() and not self._blob_transcript_exists(transcript_id):
+            raise ContentConflictError(f"Transcript '{transcript_id}' is a built-in sample and cannot be deleted")
         return self._transcripts.delete(f"{transcript_id}{TRANSCRIPT_BLOB_SUFFIX}")
 
     def _blob_transcript_exists(self, transcript_id: str) -> bool:
@@ -272,9 +262,7 @@ class AdminContentService:
         if not self._sample_transcript_dir.is_dir():
             return []
         return sorted(
-            path.stem
-            for path in self._sample_transcript_dir.glob(f"*{TRANSCRIPT_BLOB_SUFFIX}")
-            if path.is_file()
+            path.stem for path in self._sample_transcript_dir.glob(f"*{TRANSCRIPT_BLOB_SUFFIX}") if path.is_file()
         )
 
     def _get_sample_transcript(self, transcript_id: str) -> Optional[str]:
