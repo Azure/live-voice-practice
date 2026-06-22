@@ -5,6 +5,8 @@ This guide explains how to deploy **Live Voice Practice** to Azure in two modes:
 1. **Basic deployment** — public endpoints, no Azure Firewall / Bastion / jumpbox. Fastest path; suitable for development, demos, and personal sandboxes.
 2. **Network-isolated (Zero Trust) deployment** — private endpoints, Azure Firewall egress control, all data-plane traffic stays inside the VNet. Required for production-grade environments.
 
+> **Which mode should I read?** To try the app quickly, follow [Mode 1 — Basic deployment](#mode-1--basic-deployment). For production, or any environment that must keep traffic private, follow [Mode 2 — Network-isolated (Zero Trust) deployment](#mode-2--network-isolated-zero-trust-deployment). Either way, read [Prerequisites](#prerequisites-workstation-both-modes) and the [Authentication model](#authentication-model--entra-id-only-no-keys) first.
+
 ## Workflow at a glance
 
 | Step | Basic mode | Network-isolated (ZTA) mode |
@@ -22,6 +24,20 @@ For day-to-day iteration:
 azd deploy      # app code changes (workstation in basic mode, jumpbox in NI mode)
 azd provision   # infra/Bicep changes (always from workstation)
 ```
+
+---
+
+## Defaults and overrides
+
+These are the Bicep parameter defaults you get out of the box. Override any of them with `azd env set <VAR> <value>` **before** you run `azd provision`.
+
+| Setting (Bicep parameter) | Default | Override | What it does |
+|---|---|---|---|
+| Container App identity (`useUAI`) | System-assigned managed identity (both modes) | `azd env set USE_UAI true` | Switches the Container App to a user-assigned identity. The default works for both modes. |
+| ACS media egress firewall rules (`enableAcsMediaEgress`) | Enabled in NI mode (basic mode has no firewall) | `azd env set ENABLE_ACS_MEDIA_EGRESS false` | Opens UDP 3478-3481 / TCP 443+3478-3481 to `AzureCloud` through Azure Firewall so the Speech avatar, ACS Calling, and Teams Media can stream. |
+| Application Gateway WAF v2 public ingress (`publicIngress.enabled`) | Disabled, even when `NETWORK_ISOLATION=true` | `azd env set PUBLIC_INGRESS_ENABLED true` | Deploys the public entry point (gateway + Public IP + WAF policy + NSG). Only needed when testers reach the app from the public Internet with a real microphone. See the [public ingress runbook](manual-testing/public-ingress-runbook.md). |
+
+In **basic mode** there is no firewall and the Container App ingress is already public, so the ACS egress and public-ingress rows do not apply.
 
 ---
 
