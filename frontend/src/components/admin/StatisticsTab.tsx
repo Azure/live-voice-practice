@@ -23,6 +23,7 @@ import {
 import { useScenarios } from '../../hooks/useScenarios'
 import { useStatisticsFilters } from '../../hooks/useStatisticsFilters'
 import { useStatisticsOverview } from '../../hooks/useStatisticsOverview'
+import { formatShortDate } from '../../utils/formatting'
 import { ChartCard } from '../charts/ChartCard'
 import { chartColors, scoreColor } from '../charts/chartTheme'
 import { CohortCharts } from './CohortCharts'
@@ -52,8 +53,14 @@ export function StatisticsTab(): ReactElement {
   const { scenarios } = useScenarios()
   const { data, loading, error } = useStatisticsOverview(filters)
 
-  const practices = data?.practicesOverTime ?? []
-  const scores = data?.averageScoreOverTime ?? []
+  const practices = (data?.practicesOverTime ?? []).map(point => ({
+    ...point,
+    date: formatShortDate(point.date),
+  }))
+  const scores = (data?.averageScoreOverTime ?? []).map(point => ({
+    ...point,
+    date: formatShortDate(point.date),
+  }))
   const latestAverageScore =
     scores.length > 0 ? scores[scores.length - 1].avgScorePercent : undefined
   const scenarioNameById = new Map(scenarios.map(s => [s.id, s.name]))

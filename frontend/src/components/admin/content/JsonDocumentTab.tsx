@@ -31,6 +31,7 @@ import {
 } from '@fluentui/react-components'
 import { useState } from 'react'
 import { JsonDoc } from '../../../services/admin'
+import { formatDateTime } from '../../../utils/formatting'
 
 const useStyles = makeStyles({
   root: {
@@ -184,6 +185,12 @@ function metadataField(doc: JsonDoc, key: string): string {
   const metadata = doc.metadata as Record<string, unknown> | undefined
   const value = metadata?.[key]
   return typeof value === 'string' ? value : '—'
+}
+
+function metadataDateField(doc: JsonDoc, key: string): string {
+  const metadata = doc.metadata as Record<string, unknown> | undefined
+  const value = metadata?.[key]
+  return typeof value === 'string' ? formatDateTime(value) : '—'
 }
 
 export function JsonDocumentTab({
@@ -417,7 +424,7 @@ export function JsonDocumentTab({
               return (
                 <TableRow key={id}>
                   <TableCell>{id}</TableCell>
-                  <TableCell>{metadataField(doc, 'lastUpdatedAt')}</TableCell>
+                  <TableCell>{metadataDateField(doc, 'lastUpdatedAt')}</TableCell>
                   <TableCell>{metadataField(doc, 'lastUpdatedBy')}</TableCell>
                   <TableCell>
                     <div className={styles.actions}>

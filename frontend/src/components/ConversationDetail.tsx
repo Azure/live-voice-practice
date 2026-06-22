@@ -15,6 +15,7 @@ import { ArrowLeft24Regular, ChartMultipleRegular } from '@fluentui/react-icons'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { Assessment, ConversationDetailData, Scenario } from '../types'
+import { formatDateTime } from '../utils/formatting'
 
 const useStyles = makeStyles({
   card: {
@@ -169,16 +170,7 @@ export function ConversationDetail({
   if (!conversation) return null
 
   const messages = conversation.messages || []
-  const dateStr = new Date(conversation.created_at).toLocaleDateString(
-    undefined,
-    {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }
-  )
+  const dateStr = formatDateTime(conversation.created_at)
 
   return (
     <Card className={styles.card}>

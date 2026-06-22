@@ -28,6 +28,7 @@ import {
   TraineeRow,
   statisticsApi,
 } from '../../services/statistics'
+import { formatDateTime } from '../../utils/formatting'
 
 const PAGE_SIZE = 25
 
@@ -80,12 +81,6 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 
 function formatPercent(value: number | null): string {
   return value === null ? '—' : `${value}%`
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString()
 }
 
 function TrendCell({ row }: { row: TraineeRow }): ReactElement {
@@ -208,7 +203,7 @@ export function TraineesTable({ filters }: TraineesTableProps): ReactElement {
                 >
                   <TableCell>{row.displayName}</TableCell>
                   <TableCell>{row.practices}</TableCell>
-                  <TableCell>{formatDate(row.lastPracticeAt)}</TableCell>
+                  <TableCell>{formatDateTime(row.lastPracticeAt)}</TableCell>
                   <TableCell>{formatPercent(row.avgScorePercent)}</TableCell>
                   <TableCell>{formatPercent(row.passRatePercent)}</TableCell>
                   <TableCell>

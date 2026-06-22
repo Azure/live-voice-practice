@@ -5,6 +5,7 @@
 
 """Unit tests for the admin content service (scenarios, rubrics, transcripts)."""
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -66,11 +67,12 @@ class FakeBlobRepository:
 
 
 @pytest.fixture
-def service() -> AdminContentService:
+def service(tmp_path: Path) -> AdminContentService:
     svc = AdminContentService()
     svc._scenarios = FakeCosmosRepository("scenarioId")  # type: ignore[assignment]
     svc._rubrics = FakeCosmosRepository("rubricId")  # type: ignore[assignment]
     svc._transcripts = FakeBlobRepository()  # type: ignore[assignment]
+    svc._sample_transcript_dir = tmp_path  # type: ignore[assignment]
     return svc
 
 
@@ -178,3 +180,38 @@ class TestTranscriptCrud:
         service.save_transcript("transcript-009", "text")
         assert service.delete_transcript("transcript-009") is True
         assert service.list_transcripts() == []
+
+    def test_list_and_get_sample_transcript(self, service: AdminContentService) -> None:
+        service._sample_transcript_dir.joinpath("transcript-001.txt").write_text(  # type: ignore[attr-defined]
+            "Sample transcript",
+            encoding="utf-8",
+        )
+
+        assert service.list_transcripts() == ["transcript-001"]
+        assert service.get_transcript("transcript-001") == "Sample transcript"
+        assert service.transcript_exists("transcript-001") is True
+
+    def test_blob_transcript_overrides_sample_with_same_id(self, service: AdminContentService) -> None:
+        service._sample_transcript_dir.joinpath("transcript-001.txt").write_text(  # type: ignore[attr-defined]
+            "Sample transcript",
+            encoding="utf-8",
+        )
+        service.save_transcript("transcript-001", "Blob transcript")
+
+        assert service.list_transcripts() == ["transcript-001"]
+        assert service.get_transcript("transcript-001") == "Blob transcript"
+
+    def test_create_scenario_accepts_built_in_sample_transcript(self, service: AdminContentService) -> None:
+        service._sample_transcript_dir.joinpath("transcript-001.txt").write_text(  # type: ignore[attr-defined]
+            "Sample transcript",
+            encoding="utf-8",
+        )
+        scenario = {
+            "scenarioId": "s1",
+            "title": "Test scenario",
+            "exampleTranscripts": ["transcript-001"],
+        }
+
+        saved = service.create_scenario(scenario, updated_by="t")
+
+        assert saved["scenarioId"] == "s1"

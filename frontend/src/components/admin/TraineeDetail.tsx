@@ -36,6 +36,7 @@ import {
 import { useScenarios } from '../../hooks/useScenarios'
 import { useStatisticsFilters } from '../../hooks/useStatisticsFilters'
 import { useStatisticsTrainee } from '../../hooks/useStatisticsTrainee'
+import { formatShortDate } from '../../utils/formatting'
 import { ChartCard } from '../charts/ChartCard'
 import { chartColors, scoreColor } from '../charts/chartTheme'
 
@@ -82,11 +83,6 @@ function formatPercent(value: number | null): string {
   return value === null ? '—' : `${value}%`
 }
 
-function formatDate(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString()
-}
-
 /**
  * Per-trainee evolution view: totals, score-over-time, per-criterion averages,
  * scenario breakdown, and deduplicated recent recommendations. All numbers come
@@ -122,7 +118,7 @@ export function TraineeDetail(): ReactElement {
 
   const scoreSeries = data.scoreTimeSeries.map(point => ({
     ...point,
-    date: formatDate(point.date),
+    date: formatShortDate(point.date),
   }))
   const latestScore =
     scoreSeries.length > 0
