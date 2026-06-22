@@ -29,12 +29,12 @@ Mermaid overview:
 
 ```mermaid
 flowchart LR
-  Browser[Browser UI\nReact + TypeScript] -->|HTTP /api/*| Flask[Backend\nFlask API]
-  Browser -->|WebSocket /ws/voice| Flask
+  Browser["Browser UI<br/>React + TypeScript"] -->|"HTTP /api/*"| Flask["Backend<br/>Flask API"]
+  Browser -->|"WebSocket /ws/voice"| Flask
 
-  Flask -->|Voice session (SDK)| VoiceLive[Azure Voice Live]
-  Flask -->|Chat eval| AOAI[Azure OpenAI\n(AI Foundry endpoint)]
-  Flask -->|Pronunciation| Speech[Azure Speech]
+  Flask -->|"Voice session (SDK)"| VoiceLive["Azure Voice Live"]
+  Flask -->|"Chat eval"| AOAI["Azure OpenAI<br/>(AI Foundry endpoint)"]
+  Flask -->|"Pronunciation"| Speech["Azure Speech"]
 
   subgraph Azure
     VoiceLive
