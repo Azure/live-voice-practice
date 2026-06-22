@@ -94,7 +94,7 @@
           "name": "gpt-realtime",
           "model": {
             "format": "OpenAI",
-            "name": "${REALTIME_MODEL_NAME=gpt-realtime-2}",
+            "name": "${REALTIME_MODEL_NAME=gpt-realtime-1.5}",
             "version": "${REALTIME_MODEL_VERSION=2026-02-23}"
           },
           "sku": {
