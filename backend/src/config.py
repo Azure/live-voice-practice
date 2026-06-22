@@ -23,6 +23,7 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_REGION = "swedencentral"
 DEFAULT_MODEL = "chat"
 DEFAULT_API_VERSION = "2024-12-01-preview"
+DEFAULT_VOICE_API_VERSION = "2026-01-01-preview"
 DEFAULT_SPEECH_LANGUAGE = "en-US"
 DEFAULT_INPUT_TRANSCRIPTION_MODEL = "azure-speech"
 DEFAULT_INPUT_NOISE_REDUCTION_TYPE = "azure_deep_noise_suppression"
@@ -230,6 +231,20 @@ class Config:
                 app_config=app_config_values,
                 app_config_key="AZURE_VOICE_TYPE",
                 default=DEFAULT_VOICE_TYPE,
+            ),
+            "azure_voice_api_version": self._get_setting(
+                env_var="AZURE_VOICE_API_VERSION",
+                app_config=app_config_values,
+                app_config_key="AZURE_VOICE_API_VERSION",
+                default=DEFAULT_VOICE_API_VERSION,
+            ),
+            "enable_realtime_function_calling": self._parse_bool_value(
+                self._get_setting(
+                    env_var="ENABLE_REALTIME_FUNCTION_CALLING",
+                    app_config=app_config_values,
+                    app_config_key="ENABLE_REALTIME_FUNCTION_CALLING",
+                    default="true",
+                )
             ),
             "azure_avatar_character": self._get_setting(
                 env_var="AZURE_AVATAR_CHARACTER",

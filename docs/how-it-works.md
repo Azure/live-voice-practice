@@ -152,6 +152,8 @@ The frontend listens for events like:
 - transcription completion events (user/assistant transcripts)
 - session updates containing ICE servers used to establish media connectivity
 
+For locally-hosted (non-Azure) agents, `VoiceProxyHandler` can also advertise a `get_scenario_context` function tool to the Voice Live session. When the model calls it mid-conversation, the backend handles the function-call event and returns the active scenario's name and description, so the model can ask for scenario context on demand. This is gated by `ENABLE_REALTIME_FUNCTION_CALLING` (default `true`) and does not affect Azure-hosted agents.
+
 ### 4.4 Post-session analysis (evaluation + pronunciation)
 
 When the user clicks “Analyze”:
@@ -177,6 +179,9 @@ The backend reads configuration from environment variables (see `backend/src/con
 - `PROJECT_ENDPOINT` (used for Azure AI Project client)
 - `USE_AZURE_AI_AGENTS` (enables Agent Service mode when possible)
 - `COSMOS_ENDPOINT`, `COSMOS_DATABASE_NAME`, `COSMOS_SCENARIOS_CONTAINER` (scenario source)
+- `AZURE_VOICE_API_VERSION` (Voice Live API version, default `2026-01-01-preview`)
+- `ENABLE_REALTIME_FUNCTION_CALLING` (enables the `get_scenario_context` tool for locally-hosted agents, default `true`)
+- `AZURE_INPUT_TRANSCRIPTION_MODEL` / `AZURE_INPUT_TRANSCRIPTION_LANGUAGE` (input speech transcription model and language, defaults `azure-speech` / `en-US`)
 - Speech settings, voice/avatar defaults, etc.
 
 In Azure, these are set by the Container App configuration inside the Bicep templates.

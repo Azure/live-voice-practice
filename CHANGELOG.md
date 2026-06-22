@@ -5,6 +5,19 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+- Realtime function/tool calling for locally-hosted agents (`backend/src/services/voice_tools.py`, `backend/src/services/websocket_handler.py`). The proxy now advertises a `get_scenario_context` tool in the Voice Live session for non-Azure agents, handles the `response.function_call_arguments.done` event, dispatches the call against the active scenario, and returns the result with a `FunctionCallOutputItem` followed by `response.create`. The model can ask for the current scenario name and description mid-conversation instead of relying only on the static system prompt. Azure-hosted agents are untouched because they manage their own tools. Gated by the new `ENABLE_REALTIME_FUNCTION_CALLING` config (default on).
+- `AZURE_VOICE_API_VERSION` config knob (`backend/src/config.py`) so the Voice Live API version can be overridden per environment without a code change. Defaults to the new `2026-01-01-preview`.
+
+### Changed
+- Voice Live API version bumped from `2025-05-01-preview` to `2026-01-01-preview` (`backend/src/services/websocket_handler.py`, `AZURE_VOICE_API_VERSION`). The value is also overridable via the `AZURE_VOICE_API_VERSION` config for backward compatibility if a subscription does not yet expose the new version.
+- Realtime model deployment parameterized in `main.parameters.json`. The realtime `modelDeployment` now uses `${REALTIME_MODEL_NAME=gpt-realtime-1.5}` and `${REALTIME_MODEL_VERSION=2026-02-23}` so an operator can point to a different Foundry catalog name and version at provision time without editing the template. The default stays on the latest cataloged realtime model, `gpt-realtime-1.5`. When a newer realtime model appears in the Foundry catalog for the target subscription, adopt it with `azd env set REALTIME_MODEL_NAME <name>` (and `REALTIME_MODEL_VERSION <version>`).
+- Input speech transcription is now configurable instead of hard-coded to `whisper-1` (`backend/src/services/websocket_handler.py`). The session reads `AZURE_INPUT_TRANSCRIPTION_MODEL` (default `azure-speech`) and `AZURE_INPUT_TRANSCRIPTION_LANGUAGE` (default `en-US`). Operators adopting MAI-Transcribe set the exact catalog name through `AZURE_INPUT_TRANSCRIPTION_MODEL` with no code change. This also resolves a latent inconsistency where the code sent `whisper-1` while config already declared `azure-speech` as the default.
+- Infra consumption pin realigned to `bicep-ptn-aiml-landing-zone` `v2.0.14` (`manifest.json` `ailz_tag`). The `.gitmodules` branch and the submodule gitlink already pointed at `v2.0.14` (commit `90e78a9`); only `manifest.json` was stale at `v1.1.9`. `.gitmodules` and `manifest.json` now agree.
+
+### Notes
+- Model and voice names are surfaced as overridable config defaults rather than hard-coded in backend code, so an operator can adopt a newer name with `azd env set` once it appears in the Foundry catalog, and a wrong realtime name fails fast at provision time. The verified catalog defaults in this release are `gpt-realtime-1.5` (realtime), `en-US-Ava:DragonHDLatestNeural` (avatar voice), and `azure-speech` (input transcription). Names announced at Build 2026 such as `MAI-Voice-2` / `Voice-2-Flash` (text to speech) and `MAI-Transcribe-1.5` (speech to text) are not yet listed as Voice Live models; set them through the matching config knob only after confirming availability for your subscription. Native noise reduction, echo cancellation, semantic VAD turn detection, and avatar settings are unchanged and remain valid under the new API version.
+
 ## [v0.0.2]
 
 ### Added

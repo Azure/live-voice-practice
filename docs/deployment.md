@@ -36,8 +36,25 @@ These are the Bicep parameter defaults you get out of the box. Override any of t
 | Container App identity (`useUAI`) | System-assigned managed identity (both modes) | `azd env set USE_UAI true` | Switches the Container App to a user-assigned identity. The default works for both modes. |
 | ACS media egress firewall rules (`enableAcsMediaEgress`) | Enabled in NI mode (basic mode has no firewall) | `azd env set ENABLE_ACS_MEDIA_EGRESS false` | Opens UDP 3478-3481 / TCP 443+3478-3481 to `AzureCloud` through Azure Firewall so the Speech avatar, ACS Calling, and Teams Media can stream. |
 | Application Gateway WAF v2 public ingress (`publicIngress.enabled`) | Disabled, even when `NETWORK_ISOLATION=true` | `azd env set PUBLIC_INGRESS_ENABLED true` | Deploys the public entry point (gateway + Public IP + WAF policy + NSG). Only needed when testers reach the app from the public Internet with a real microphone. See the [public ingress runbook](manual-testing/public-ingress-runbook.md). |
+| Realtime model name (`REALTIME_MODEL_NAME` in `main.parameters.json`) | `gpt-realtime-1.5` | `azd env set REALTIME_MODEL_NAME <name>` | Foundry catalog name of the realtime model deployed for the Voice Live session. Defaults to the latest cataloged realtime model. Set a different name (for example a newer `gpt-realtime-*`) once it is listed in the Foundry catalog for your subscription. |
+| Realtime model version (`REALTIME_MODEL_VERSION` in `main.parameters.json`) | `2026-02-23` | `azd env set REALTIME_MODEL_VERSION <version>` | Catalog version paired with `REALTIME_MODEL_NAME`. Confirm the exact version for your subscription before provisioning. |
 
 In **basic mode** there is no firewall and the Container App ingress is already public, so the ACS egress and public-ingress rows do not apply.
+
+---
+
+## Runtime configuration keys (App Configuration)
+
+These keys are read by the backend at runtime (App Configuration in Azure, or environment variables locally). Change them without rebuilding the image; restart the Container App revision to pick up new values.
+
+| Key | Default | What it does |
+|---|---|---|
+| `AZURE_VOICE_API_VERSION` | `2026-01-01-preview` | Voice Live API version used for the realtime session. Override only to pin or roll forward the API surface. |
+| `ENABLE_REALTIME_FUNCTION_CALLING` | `true` | Advertises the `get_scenario_context` function tool to the realtime model for locally-hosted (non-Azure) agents. Azure-hosted agents are not affected. Set `false` to disable the tool. |
+| `AZURE_INPUT_TRANSCRIPTION_MODEL` | `azure-speech` | Input speech transcription model. Operators adopting MAI-Transcribe set the exact Foundry catalog name here with no code change. |
+| `AZURE_INPUT_TRANSCRIPTION_LANGUAGE` | `en-US` | Input speech transcription language. |
+
+> **Foundry catalog names and region.** The verified defaults in this release are `gpt-realtime-1.5` (realtime), `en-US-Ava:DragonHDLatestNeural` (avatar voice), and `azure-speech` (input transcription). Names announced at Build 2026 such as `MAI-Voice-2` / `Voice-2-Flash` (voice) and `MAI-Transcribe-1.5` (transcription) are not yet listed as Voice Live models; adopt them through the matching config knob only after confirming availability for your subscription. For the broadest coverage of the newest Voice Live models, deploy to `swedencentral` (or `eastus2`), which carry `gpt-realtime-1.5` and the latest GPT-5.x models with Voice Live agent support. See [Voice Live supported models and regions](https://learn.microsoft.com/azure/ai-services/speech-service/regions?tabs=voice-live).
 
 ---
 
@@ -101,6 +118,8 @@ azd env set AZURE_SEARCH_LOCATION northeurope
 ```
 
 > `azd` will prompt for subscription and location on first run if they are not set; only set them explicitly when you want to override the prompts (e.g. CI). `NETWORK_ISOLATION` defaults to `false`.
+
+> **Recommended region:** `swedencentral` (or `eastus2`) for the broadest Voice Live coverage of `gpt-realtime-1.5` and the latest GPT-5.x models. Pin it with `azd env set AZURE_LOCATION swedencentral`.
 
 ### 2. Provision and deploy
 
@@ -170,6 +189,8 @@ azd env set AZURE_SEARCH_LOCATION                northeurope
 
 > `azd` will prompt for subscription and location on first run if they are not set. Only set `AZURE_LOCATION` / `AZURE_SUBSCRIPTION_ID` explicitly when you want to override the prompt (e.g. CI). `DEPLOY_SPEECH_SERVICE` defaults to `true`.
 
+> **Recommended region:** `swedencentral` (or `eastus2`) for the broadest Voice Live coverage of `gpt-realtime-1.5` and the latest GPT-5.x models. Pin it with `azd env set AZURE_LOCATION swedencentral`.
+
 > The Bastion + Azure Firewall + jumpbox VM are part of the Bicep template (`deployVM=true`, default). The firewall policy is pre-configured with the FQDN allow-list needed to bootstrap the jumpbox (`azd`, Bicep CLI, GitHub, Speech, Foundry, ACR, …).
 
 > Since `infra/` ≥ `v1.1.9`, the optional **Application Gateway WAF v2 public ingress** is available but **disabled by default**, even when `NETWORK_ISOLATION=true`. Network isolation provisions the dedicated `AppGatewaySubnet` regardless, but the gateway/Public IP/WAF policy/NSG are only deployed when you opt in. Opt in only if you need testers to reach the app from a real workstation with a real microphone (or any other public-Internet entry point). Otherwise reach the app from the jumpbox / Bastion, an Azure Virtual Desktop in the spoke, or an ExpressRoute/VPN into the VNet — none of these require the gateway. To enable it, run `azd env set PUBLIC_INGRESS_ENABLED true` before `azd provision`, then follow [docs/manual-testing/public-ingress-runbook.md](manual-testing/public-ingress-runbook.md) to complete the BYO domain + certificate step. The jumpbox bootstrap and RBAC are already prepared for that path (win-acme preinstalled via deterministic asset URL and Key Vault certificate import role pre-granted).
@@ -227,7 +248,7 @@ The parent repo is already on disk at `C:\github\live-voice-practice`. Pull the 
 cd C:\github\live-voice-practice
 git pull
 git submodule update --init --recursive
-# verify the submodule landed on the expected pin (v1.1.4 = 40f82ae or newer)
+# verify the submodule landed on the expected pin (v2.0.14 = 90e78a9 or newer)
 git -C infra describe --tags --always
 ```
 
@@ -378,4 +399,4 @@ azd down --force
 - AI Search dataplane: [docs/ai-search-indexing-runbook.md](ai-search-indexing-runbook.md)
 - NI quick reference (subnets, FQDNs, firewall rules): [docs/network-isolation-jumpbox-runbook.md](network-isolation-jumpbox-runbook.md)
 - Scripts: [scripts/postProvision.ps1](../scripts/postProvision.ps1) · [scripts/setup_search_dataplane.ps1](../scripts/setup_search_dataplane.ps1) · [scripts/seed_cosmos_samples.py](../scripts/seed_cosmos_samples.py)
-- AILZ submodule: [`infra/`](../infra/) (pin: `v1.1.4` — first-class Speech support, Bicep CLI bootstrap FQDN)
+- AILZ submodule: [`infra/`](../infra/) (pin: `v2.0.14`)
