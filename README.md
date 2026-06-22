@@ -68,7 +68,7 @@ Override any of these with `azd env set` (e.g. `azd env set USE_UAI true`, `azd 
 
 ### Deployment guides
 
-- **[Full deployment guide](docs/deployment.md)** — prerequisites, environment variables, both deployment modes, validation, and teardown.
+- **[Full deployment guide](docs/deployment.md)** — prerequisites, environment variables, both deployment modes, validation, and&nbsp;teardown.
 - **[Network isolation quick reference](docs/network-isolation-jumpbox-runbook.md)** — workstation/jumpbox split, subnets, firewall allow-list, and troubleshooting.
 - **[Public ingress runbook](docs/manual-testing/public-ingress-runbook.md)** — BYO domain/certificate setup and real microphone validation.
 
