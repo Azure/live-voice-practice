@@ -5,10 +5,10 @@
 
 import { makeStyles, tokens } from '@fluentui/react-components'
 import type { ReactElement } from 'react'
-import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Cell, Tooltip, XAxis, YAxis } from 'recharts'
 import { StatisticsOverview } from '../../services/statistics'
 import { ChartCard } from '../charts/ChartCard'
-import { chartColors } from '../charts/chartTheme'
+import { chartColors, inverseScoreColor, scoreColor } from '../charts/chartTheme'
 
 const useStyles = makeStyles({
   grid: {
@@ -54,6 +54,7 @@ export function CohortCharts({
       <ChartCard
         title="Performance by scenario"
         subtitle="Average score (% of rubric max)"
+        info="Compares scenarios by average AI evaluation score for analyzed practices. Scores are normalized to percent of the rubric maximum, so higher bars indicate stronger trainee performance for that scenario."
         loading={loading}
         isEmpty={!loading && performance.length === 0}
       >
@@ -69,15 +70,23 @@ export function CohortCharts({
           <Bar
             dataKey="avgScorePercent"
             name="Avg score %"
-            fill={chartColors.primary}
+            maxBarSize={48}
             radius={[4, 4, 0, 0]}
-          />
+          >
+            {performance.map(row => (
+              <Cell
+                key={row.scenarioId}
+                fill={scoreColor(row.avgScorePercent)}
+              />
+            ))}
+          </Bar>
         </BarChart>
       </ChartCard>
 
       <ChartCard
         title="Weakest criteria"
         subtitle="Lowest average criterion scores (% of scale)"
+        info="Highlights the rubric criteria with the lowest average scores across analyzed practices. Use this to find skills that need coaching, such as empathy, clarity, or resolution completeness."
         loading={loading}
         isEmpty={!loading && weakest.length === 0}
       >
@@ -100,15 +109,20 @@ export function CohortCharts({
           <Bar
             dataKey="avgScorePercent"
             name="Avg score %"
-            fill={chartColors.accent}
+            barSize={24}
             radius={[0, 4, 4, 0]}
-          />
+          >
+            {weakest.map(row => (
+              <Cell key={row.name} fill={scoreColor(row.avgScorePercent)} />
+            ))}
+          </Bar>
         </BarChart>
       </ChartCard>
 
       <ChartCard
         title="Score distribution"
         subtitle="Count of analyzed practices by score band (%)"
+        info="Groups analyzed practices into score ranges, such as 20-30 or 80-90. This helps show whether results are clustered low, mixed, or trending toward stronger performance."
         loading={loading}
         isEmpty={!loading && distribution.every(bucket => bucket.count === 0)}
       >
@@ -124,15 +138,26 @@ export function CohortCharts({
           <Bar
             dataKey="count"
             name="Practices"
-            fill={chartColors.secondary}
+            maxBarSize={48}
             radius={[4, 4, 0, 0]}
-          />
+          >
+            {distribution.map(bucket => {
+              const [lower, upper] = bucket.bucket.split('-').map(Number)
+              const midpoint = Number.isFinite(upper)
+                ? (lower + upper) / 2
+                : lower
+              return (
+                <Cell key={bucket.bucket} fill={scoreColor(midpoint)} />
+              )
+            })}
+          </Bar>
         </BarChart>
       </ChartCard>
 
       <ChartCard
         title="Drop-off by scenario"
         subtitle="Started practices that were never analyzed (%)"
+        info="Shows the share of started practices that did not produce an analysis result for each scenario. High drop-off can mean users abandoned the session, audio/scoring failed, or the conversation ended before analysis completed."
         loading={loading}
         isEmpty={!loading && dropOff.length === 0}
       >
@@ -148,9 +173,16 @@ export function CohortCharts({
           <Bar
             dataKey="dropOffPercent"
             name="Drop-off %"
-            fill={chartColors.accent}
+            maxBarSize={48}
             radius={[4, 4, 0, 0]}
-          />
+          >
+            {dropOff.map(row => (
+              <Cell
+                key={row.scenarioId}
+                fill={inverseScoreColor(row.dropOffPercent)}
+              />
+            ))}
+          </Bar>
         </BarChart>
       </ChartCard>
     </div>

@@ -238,7 +238,7 @@ export function ChatPanel({
           <Switch
             checked={avatarEnabled}
             onChange={onToggleAvatar}
-            label="Show Avatar"
+            label="Show Live Voice Agent"
           />
         )}
       </div>

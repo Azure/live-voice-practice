@@ -98,7 +98,7 @@ Idempotent. Re-run any time you need to re-apply data-plane steps (e.g. after Co
 
 The jumpbox is intended for **bootstrap and admin tasks**, not as a workstation for exercising the app's voice features. **Azure Bastion does not redirect audio input** — neither the HTML5 client nor the native client (`az network bastion rdp`) forward the local microphone into the VM. The Bastion gateway drops the audio capture virtual channel before it reaches the RDP host. Source: [Azure Bastion - Remote audio](https://learn.microsoft.com/en-us/azure/bastion/vm-about#remote-audio) — *"Audio input is not supported at the moment."*
 
-Practical consequence: the **avatar renders correctly** inside an Edge session on the jumpbox (audio output works), but **`Start Recording` reports "Microphone unavailable"** — no VM-side or `.rdp` configuration changes this.
+Practical consequence: the **Live Voice Agent renders correctly** inside an Edge session on the jumpbox (audio output works), but **`Start Recording` reports "Microphone unavailable"** — no VM-side or `.rdp` configuration changes this.
 
 ### Optional path — Application Gateway public ingress (deployer-controlled, BYO domain + cert)
 
@@ -122,7 +122,7 @@ If you do not want to expose the app publicly, three alternatives preserve the d
 | **Direct RDP via temporary public IP on the VM** | Attach a public IP to the jumpbox, lock the NSG to your egress IP on 3389, RDP with `mstsc` directly (not through Bastion). Native RDP forwards mic normally. | Cheapest. Exposes RDP — keep the window short and remove the public IP afterwards. |
 | **Azure Virtual Desktop** | Replace the jumpbox with an AVD session host. AVD supports full audio I/O redirection. | Heavier. Use only if you need ongoing manual UI testing in an isolated environment. |
 
-The avatar (audio output) requires no special action beyond what Bicep already provisions — it works inside Bastion sessions because only the playback channel is needed.
+The Live Voice Agent (audio output) requires no special action beyond what Bicep already provisions — it works inside Bastion sessions because only the playback channel is needed.
 
 ---
 

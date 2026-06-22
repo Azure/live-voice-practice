@@ -85,7 +85,8 @@ export function useWebRTC(
           sdpLength: pc.localDescription.sdp.length,
         })
         onStatus?.({
-          message: 'Sending browser connection details to the avatar service',
+          message:
+            'Sending browser connection details to the Live Voice Agent service',
           browserConnection: pc.connectionState,
           networkRelay: pc.iceConnectionState,
           gathering: pc.iceGatheringState,
@@ -113,7 +114,7 @@ export function useWebRTC(
             relatedAddress: e.candidate.relatedAddress,
           })
           onStatus?.({
-            message: 'Finding a network path for the avatar video',
+            message: 'Finding a network path for the Live Voice Agent video',
             browserConnection: pc.connectionState,
             networkRelay: pc.iceConnectionState,
             gathering: pc.iceGatheringState,
@@ -147,14 +148,14 @@ export function useWebRTC(
           state: pc.iceConnectionState,
         })
         onStatus?.({
-          message: 'Checking the avatar media path',
+          message: 'Checking the Live Voice Agent media path',
           browserConnection: pc.connectionState,
           networkRelay: pc.iceConnectionState,
           gathering: pc.iceGatheringState,
           candidateTypes: [...candidateTypes],
           warning:
             pc.iceConnectionState === 'failed'
-              ? 'The browser could not establish the avatar media path.'
+              ? 'The browser could not establish the Live Voice Agent media path.'
               : undefined,
         })
       }
@@ -167,7 +168,7 @@ export function useWebRTC(
           message:
             pc.iceGatheringState === 'complete'
               ? 'Network path found'
-              : 'Finding a network path for the avatar video',
+              : 'Finding a network path for the Live Voice Agent video',
           browserConnection: pc.connectionState,
           networkRelay: pc.iceConnectionState,
           gathering: pc.iceGatheringState,
@@ -185,15 +186,15 @@ export function useWebRTC(
         onStatus?.({
           message:
             pc.connectionState === 'connected'
-              ? 'Avatar media connection established'
-              : 'Connecting the avatar media stream',
+              ? 'Live Voice Agent media connection established'
+              : 'Connecting the Live Voice Agent media stream',
           browserConnection: pc.connectionState,
           networkRelay: pc.iceConnectionState,
           gathering: pc.iceGatheringState,
           candidateTypes: [...candidateTypes],
           warning:
             pc.connectionState === 'failed'
-              ? 'The avatar media connection failed.'
+              ? 'The Live Voice Agent media connection failed.'
               : undefined,
         })
       }
@@ -213,7 +214,7 @@ export function useWebRTC(
         })
         if (e.track.kind === 'video' && videoRef.current) {
           onStatus?.({
-            message: 'Avatar video received',
+            message: 'Live Voice Agent video received',
             browserConnection: pc.connectionState,
             networkRelay: pc.iceConnectionState,
             gathering: pc.iceGatheringState,
@@ -227,7 +228,8 @@ export function useWebRTC(
               message: err?.message,
             })
             onStatus?.({
-              message: 'Avatar video was received but playback did not start',
+              message:
+                'Live Voice Agent video was received but playback did not start',
               browserConnection: pc.connectionState,
               networkRelay: pc.iceConnectionState,
               gathering: pc.iceGatheringState,
@@ -240,7 +242,7 @@ export function useWebRTC(
           const audio = audioRef.current ?? document.createElement('audio')
           const stream = e.streams[0] ?? new MediaStream([e.track])
           onStatus?.({
-            message: 'Avatar audio received',
+            message: 'Live Voice Agent audio received',
             browserConnection: pc.connectionState,
             networkRelay: pc.iceConnectionState,
             gathering: pc.iceGatheringState,
@@ -282,7 +284,7 @@ export function useWebRTC(
                 streamTrackCount: stream.getTracks().length,
               })
               onStatus?.({
-                message: 'Avatar audio playback started',
+                message: 'Live Voice Agent audio playback started',
                 browserConnection: pc.connectionState,
                 networkRelay: pc.iceConnectionState,
                 gathering: pc.iceGatheringState,
@@ -296,7 +298,8 @@ export function useWebRTC(
                 message: err?.message,
               })
               onStatus?.({
-                message: 'Avatar audio was received but playback did not start',
+                message:
+                  'Live Voice Agent audio was received but playback did not start',
                 browserConnection: pc.connectionState,
                 networkRelay: pc.iceConnectionState,
                 gathering: pc.iceGatheringState,
@@ -315,7 +318,7 @@ export function useWebRTC(
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       onStatus?.({
-        message: 'Collecting network details for the avatar service',
+        message: 'Collecting network details for the Live Voice Agent service',
         browserConnection: pc.connectionState,
         networkRelay: pc.iceConnectionState,
         gathering: pc.iceGatheringState,
@@ -354,7 +357,7 @@ export function useWebRTC(
         })
         await pcRef.current.setRemoteDescription({ type: 'answer', sdp })
         onStatus?.({
-          message: 'Avatar service accepted the browser connection',
+          message: 'Live Voice Agent service accepted the browser connection',
           browserConnection: pcRef.current.connectionState,
           networkRelay: pcRef.current.iceConnectionState,
           gathering: pcRef.current.iceGatheringState,

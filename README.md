@@ -35,7 +35,7 @@ Download the editable Visio source: [Live Voice Practice Architecture.vsdx](docs
 
 The diagram above shows the network-isolated (ZTA) topology: the browser reaches the app through Application Gateway WAF v2, the Container App runs the React frontend + Flask/WebSocket backend, and all data-plane traffic to Azure AI Foundry / Voice Live, Speech, Cosmos DB, AI Search, Key Vault, App Configuration and Storage flows through private endpoints inside the VNet. Outbound traffic from the jumpbox subnet is forced through Azure Firewall. For a deeper dive into the runtime flow see [docs/how-it-works.md](docs/how-it-works.md).
 
-> **Note:** the Azure AI **Speech** service (used by the app for the Live Voice avatar) is also deployed and reached via a private endpoint, but is not drawn in the diagram. It belongs with the *GenAI App Backing Services* group.
+> **Note:** the Azure AI **Speech** service (used by the app for the Live Voice Agent) is also deployed and reached via a private endpoint, but is not drawn in the diagram. It belongs with the *GenAI App Backing Services* group.
 
 
 ## Deployment

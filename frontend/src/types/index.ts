@@ -110,7 +110,7 @@ export interface AvatarOption {
 export const AVATAR_OPTIONS: AvatarOption[] = [
   {
     value: 'audio-only',
-    label: 'Audio Only (No Avatar)',
+    label: 'Audio only, no Live Voice Agent video',
     isPhotoAvatar: false,
   },
   {

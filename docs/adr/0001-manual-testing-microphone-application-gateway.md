@@ -12,11 +12,11 @@
 
 Live Voice Practice is deployed with full network isolation: the Azure Container Apps (ACA) environment is created with `vnetConfiguration.internal = true`, all backend services (Cosmos DB, AI Search, App Configuration, Speech, AI Foundry, Storage, ACR) are reachable only via private endpoints, and a Windows jumpbox in the same VNet is the only management plane.
 
-The app's primary user-facing flow is a **two-way voice conversation** with a synthetic avatar. Validating this flow end-to-end requires a real microphone: the browser must capture audio from the operator's machine, send it to the ACA-hosted backend over WebRTC/HTTPS, and receive synthesized speech and avatar video back.
+The app's primary user-facing flow is a **two-way voice conversation** with a Live Voice Agent. Validating this flow end-to-end requires a real microphone: the browser must capture audio from the operator's machine, send it to the ACA-hosted backend over WebRTC/HTTPS, and receive synthesized speech and Live Voice Agent video back.
 
 Inside a network-isolated environment, the only sanctioned way for an operator to reach the app is the jumpbox, which is accessed through Azure Bastion. **Azure Bastion does not redirect audio input** (microphone) — neither in the HTML5 client nor in the native client (`az network bastion rdp`). This is documented and confirmed by Microsoft: *"Audio input is not supported at the moment."* ([Azure Bastion - Remote audio](https://learn.microsoft.com/en-us/azure/bastion/vm-about#remote-audio)). The Bastion gateway drops the audio capture virtual channel before it reaches the RDP host; no VM-side configuration, `.rdp` flag, or registry change can recover the channel.
 
-The avatar (audio output, video) renders correctly inside Bastion because only the playback channel is needed. Microphone input is the missing capability.
+The Live Voice Agent (audio output, video) renders correctly inside Bastion because only the playback channel is needed. Microphone input is the missing capability.
 
 We therefore need a path that lets a designated tester reach the deployed app from their own workstation (where the microphone is physically connected) **without dismantling the network isolation that the deployment is meant to demonstrate**.
 

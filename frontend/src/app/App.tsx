@@ -232,7 +232,7 @@ export default function App() {
         })
         setConnectionStage('rendering')
         updateAvatarDiagnostics({
-          message: 'Avatar configuration received',
+          message: 'Live Voice Agent configuration received',
         })
         const session = msg.session
         const servers =
@@ -261,8 +261,9 @@ export default function App() {
           api.clientLog('warning', 'app.session_updated_no_ice_servers')
           updateAvatarDiagnostics({
             message:
-              'Avatar configuration did not include media connection details',
-            warning: 'The avatar service did not return ICE server details.',
+              'Live Voice Agent configuration did not include media connection details',
+            warning:
+              'The Live Voice Agent service did not return ICE server details.',
           })
         }
       } else if (

@@ -158,7 +158,7 @@ export function ScenarioList({
           )}
         </div>
         <div className={styles.avatarSelector}>
-          <Label htmlFor="avatar-select">Avatar:</Label>
+          <Label htmlFor="avatar-select">Live Voice Agent:</Label>
           <Dropdown
             id="avatar-select"
             className={styles.avatarDropdown}

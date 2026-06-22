@@ -13,7 +13,7 @@ Live Voice Practice is a **real-time voice training** web app. A trainee:
 
 Under the hood, the app combines:
 
-- **Real-time voice + avatar session** via Azure Voice Live (proxied through the backend WebSocket).
+- **Real-time voice + Live Voice Agent session** via Azure Voice Live (proxied through the backend WebSocket).
 - **Post-session conversation evaluation** via Azure OpenAI (through Azure AI Foundry / AIServices endpoint).
 - **Pronunciation assessment** via Azure Speech.
 
@@ -182,7 +182,7 @@ The backend reads configuration from environment variables (see `backend/src/con
 - `AZURE_VOICE_API_VERSION` (Voice Live API version, default `2026-01-01-preview`)
 - `ENABLE_REALTIME_FUNCTION_CALLING` (enables the `get_scenario_context` tool for locally-hosted agents, default `true`)
 - `AZURE_INPUT_TRANSCRIPTION_MODEL` / `AZURE_INPUT_TRANSCRIPTION_LANGUAGE` (input speech transcription model and language, defaults `azure-speech` / `en-US`)
-- Speech settings, voice/avatar defaults, etc.
+- Speech settings, voice and Live Voice Agent defaults, etc.
 
 In Azure, these are set by the Container App configuration inside the Bicep templates.
 

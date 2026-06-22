@@ -26,6 +26,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
   Tooltip,
@@ -36,7 +37,7 @@ import { useScenarios } from '../../hooks/useScenarios'
 import { useStatisticsFilters } from '../../hooks/useStatisticsFilters'
 import { useStatisticsTrainee } from '../../hooks/useStatisticsTrainee'
 import { ChartCard } from '../charts/ChartCard'
-import { chartColors } from '../charts/chartTheme'
+import { chartColors, scoreColor } from '../charts/chartTheme'
 
 const useStyles = makeStyles({
   root: {
@@ -123,6 +124,10 @@ export function TraineeDetail(): ReactElement {
     ...point,
     date: formatDate(point.date),
   }))
+  const latestScore =
+    scoreSeries.length > 0
+      ? scoreSeries[scoreSeries.length - 1].scorePercent
+      : data.totals.avgScorePercent
   const scenarioBreakdown = data.scenarioBreakdown.map(row => ({
     ...row,
     scenarioName: scenarioName(row.scenarioId),
@@ -161,6 +166,7 @@ export function TraineeDetail(): ReactElement {
         <ChartCard
           title="Score over time"
           subtitle="Score (% of rubric max) per practice"
+          info="Shows this trainee's score for each analyzed practice over time. Each point comes from the AI evaluation result and is normalized to percent of the rubric maximum."
           isEmpty={scoreSeries.length === 0}
         >
           <LineChart data={scoreSeries}>
@@ -172,7 +178,7 @@ export function TraineeDetail(): ReactElement {
               type="monotone"
               dataKey="scorePercent"
               name="Score %"
-              stroke={chartColors.primary}
+              stroke={scoreColor(latestScore)}
               strokeWidth={2}
             />
           </LineChart>
@@ -181,6 +187,7 @@ export function TraineeDetail(): ReactElement {
         <ChartCard
           title="Per-criterion averages"
           subtitle="Average score per criterion (% of scale)"
+          info="Shows this trainee's average score for each rubric criterion. Lower bars identify the skills that need the most coaching for this trainee."
           isEmpty={data.criterionAverages.length === 0}
         >
           <BarChart data={data.criterionAverages} layout="vertical">
@@ -202,9 +209,13 @@ export function TraineeDetail(): ReactElement {
             <Bar
               dataKey="avgScorePercent"
               name="Avg score %"
-              fill={chartColors.secondary}
+              barSize={24}
               radius={[0, 4, 4, 0]}
-            />
+            >
+              {data.criterionAverages.map(row => (
+                <Cell key={row.name} fill={scoreColor(row.avgScorePercent)} />
+              ))}
+            </Bar>
           </BarChart>
         </ChartCard>
       </div>

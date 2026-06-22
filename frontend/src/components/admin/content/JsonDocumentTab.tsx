@@ -56,7 +56,34 @@ const useStyles = makeStyles({
   dialogContent: {
     display: 'flex',
     flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+    maxHeight: 'calc(100vh - 220px)',
+    overflowY: 'auto',
+    paddingRight: tokens.spacingHorizontalS,
+  },
+  dialogSurface: {
+    width: 'min(960px, calc(100vw - 96px))',
+    maxWidth: '960px',
+  },
+  section: {
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
+    padding: tokens.spacingHorizontalL,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  sectionHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  sectionTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  fullWidth: {
+    gridColumn: '1 / -1',
   },
   fieldGrid: {
     display: 'grid',
@@ -66,8 +93,41 @@ const useStyles = makeStyles({
       gridTemplateColumns: '1fr',
     },
   },
+  textArea: {
+    minHeight: '96px',
+  },
+  compactTextArea: {
+    minHeight: '72px',
+  },
+  rowList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  materialRow: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(180px, 1fr) minmax(240px, 2fr) auto',
+    gap: tokens.spacingHorizontalS,
+    alignItems: 'start',
+    '@media (max-width: 720px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  criteriaRow: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(120px, 0.8fr) minmax(160px, 1fr) minmax(260px, 2fr) auto',
+    gap: tokens.spacingHorizontalS,
+    alignItems: 'start',
+    '@media (max-width: 900px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
   helperText: {
     color: tokens.colorNeutralForeground3,
+  },
+  dialogActions: {
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    paddingTop: tokens.spacingVerticalM,
   },
 })
 
@@ -112,82 +172,12 @@ function listToLines(value: unknown): string {
   return asStringList(value).join('\n')
 }
 
-function materialLinesToList(value: string): JsonDoc[] {
-  return value
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const [document, ...descriptionParts] = line.split('|')
-      return {
-        document: document.trim(),
-        description: descriptionParts.join('|').trim(),
-      }
-    })
+function asMaterials(value: unknown): JsonDoc[] {
+  return Array.isArray(value) ? (value as JsonDoc[]) : []
 }
 
-function materialListToLines(value: unknown): string {
-  if (!Array.isArray(value)) return ''
-  return value
-    .map(item => {
-      if (!item || typeof item !== 'object') return ''
-      const material = item as Record<string, unknown>
-      const document = asString(material.document)
-      const description = asString(material.description)
-      return description ? `${document} | ${description}` : document
-    })
-    .filter(Boolean)
-    .join('\n')
-}
-
-function parseRubricCriteria(value: string): JsonDoc[] {
-  return value
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const [criterionId, name, description] = line
-        .split('|')
-        .map(part => part.trim())
-      return {
-        criterionId,
-        name: name || criterionId,
-        description: description || '',
-        levels: [
-          {
-            level: 1,
-            label: 'Poor',
-            description: 'Does not meet expectations.',
-          },
-          {
-            level: 3,
-            label: 'Adequate',
-            description: 'Partially meets expectations.',
-          },
-          {
-            level: 5,
-            label: 'Excellent',
-            description: 'Fully meets expectations.',
-          },
-        ],
-      }
-    })
-}
-
-function rubricCriteriaToLines(value: unknown): string {
-  if (!Array.isArray(value)) return ''
-  return value
-    .map(item => {
-      if (!item || typeof item !== 'object') return ''
-      const criterion = item as Record<string, unknown>
-      return [
-        asString(criterion.criterionId),
-        asString(criterion.name),
-        asString(criterion.description),
-      ].join(' | ')
-    })
-    .filter(Boolean)
-    .join('\n')
+function asCriteria(value: unknown): JsonDoc[] {
+  return Array.isArray(value) ? (value as JsonDoc[]) : []
 }
 
 function metadataField(doc: JsonDoc, key: string): string {
@@ -221,6 +211,96 @@ export function JsonDocumentTab({
     setDraftDoc(prev => ({ ...prev, [key]: value }))
   }
 
+  const setMaterialField = (
+    index: number,
+    key: 'document' | 'description',
+    value: string
+  ) => {
+    const materials = asMaterials(draftDoc.relatedMaterials).map(item => ({
+      ...item,
+    }))
+    materials[index] = { ...(materials[index] ?? {}), [key]: value }
+    setDraftField('relatedMaterials', materials)
+  }
+
+  const removeMaterial = (index: number) => {
+    setDraftField(
+      'relatedMaterials',
+      asMaterials(draftDoc.relatedMaterials).filter((_, i) => i !== index)
+    )
+  }
+
+  const addMaterial = () => {
+    setDraftField('relatedMaterials', [
+      ...asMaterials(draftDoc.relatedMaterials),
+      { document: '', description: '' },
+    ])
+  }
+
+  const setCriterionField = (
+    index: number,
+    key: 'criterionId' | 'name' | 'description',
+    value: string
+  ) => {
+    const criteria = asCriteria(draftDoc.criteria).map(item => ({ ...item }))
+    const current = criteria[index] ?? {
+      levels: [
+        {
+          level: 1,
+          label: 'Poor',
+          description: 'Does not meet expectations.',
+        },
+        {
+          level: 3,
+          label: 'Adequate',
+          description: 'Partially meets expectations.',
+        },
+        {
+          level: 5,
+          label: 'Excellent',
+          description: 'Fully meets expectations.',
+        },
+      ],
+    }
+    criteria[index] = { ...current, [key]: value }
+    setDraftField('criteria', criteria)
+  }
+
+  const removeCriterion = (index: number) => {
+    setDraftField(
+      'criteria',
+      asCriteria(draftDoc.criteria).filter((_, i) => i !== index)
+    )
+  }
+
+  const addCriterion = () => {
+    setDraftField('criteria', [
+      ...asCriteria(draftDoc.criteria),
+      {
+        criterionId: '',
+        name: '',
+        description: '',
+        levels: [
+          {
+            level: 1,
+            label: 'Poor',
+            description: 'Does not meet expectations.',
+          },
+          {
+            level: 3,
+            label: 'Adequate',
+            description: 'Partially meets expectations.',
+          },
+          {
+            level: 5,
+            label: 'Excellent',
+            description: 'Fully meets expectations.',
+          },
+        ],
+      },
+    ])
+  }
+
   const openCreate = () => {
     setEditingId(null)
     setDraftId('')
@@ -252,6 +332,19 @@ export function JsonDocumentTab({
     setSaving(true)
     setDialogError(null)
     const parsed: JsonDoc = { ...draftDoc }
+    if (editorType === 'scenario') {
+      parsed.relatedMaterials = asMaterials(parsed.relatedMaterials).filter(
+        material => asString(material.document).trim()
+      )
+    }
+    if (editorType === 'rubric') {
+      parsed.criteria = asCriteria(parsed.criteria).filter(
+        criterion =>
+          asString(criterion.criterionId).trim() ||
+          asString(criterion.name).trim() ||
+          asString(criterion.description).trim()
+      )
+    }
     parsed[idField] = draftId.trim()
     if (!parsed[idField]) {
       setDialogError(`'${idField}' is required.`)
@@ -351,7 +444,7 @@ export function JsonDocumentTab({
         open={dialogOpen}
         onOpenChange={(_, data) => setDialogOpen(data.open)}
       >
-        <DialogSurface>
+        <DialogSurface className={styles.dialogSurface}>
           <DialogBody>
             <DialogTitle>
               {editingId ? `Edit ${editingId}` : `New ${singular}`}
@@ -362,296 +455,448 @@ export function JsonDocumentTab({
                   <MessageBarBody>{dialogError}</MessageBarBody>
                 </MessageBar>
               )}
-              <Field label={idField} required>
-                <Input
-                  value={draftId}
-                  disabled={!!editingId}
-                  placeholder={
-                    editorType === 'scenario'
-                      ? 'contoso-billing-001'
-                      : 'contoso-rubric-billing-v1'
-                  }
-                  onChange={(_, data) => setDraftId(data.value)}
-                />
-              </Field>
               {editorType === 'scenario' ? (
                 <>
-                  <div className={styles.fieldGrid}>
+                  <section className={styles.section}>
+                    <div className={styles.sectionHeader}>
+                      <Text className={styles.sectionTitle}>Basics</Text>
+                      <Text size={200} className={styles.helperText}>
+                        Name the scenario and define the first thing the Live
+                        Voice Agent says.
+                      </Text>
+                    </div>
+                    <div className={styles.fieldGrid}>
+                      <Field label={idField} required>
+                        <Input
+                          value={draftId}
+                          disabled={!!editingId}
+                          placeholder="contoso-billing-001"
+                          onChange={(_, data) => setDraftId(data.value)}
+                        />
+                      </Field>
+                      <Field
+                        label={
+                          <InfoLabel info="Short display name shown to trainees when they select a practice scenario.">
+                            Title
+                          </InfoLabel>
+                        }
+                        required
+                      >
+                        <Input
+                          value={asString(draftDoc.title)}
+                          placeholder="Frustrated Customer with Billing Charge"
+                          onChange={(_, data) =>
+                            setDraftField('title', data.value)
+                          }
+                        />
+                      </Field>
+                      <Field
+                        className={styles.fullWidth}
+                        label={
+                          <InfoLabel info="One opening line the Live Voice Agent can say at the start of the call.">
+                            Opening line
+                          </InfoLabel>
+                        }
+                      >
+                        <Input
+                          value={asStringList(draftDoc.openingLines)[0] ?? ''}
+                          placeholder="Hi, I am calling about a charge on my bill."
+                          onChange={(_, data) =>
+                            setDraftField('openingLines', [data.value])
+                          }
+                        />
+                      </Field>
+                    </div>
+                  </section>
+
+                  <section className={styles.section}>
+                    <div className={styles.sectionHeader}>
+                      <Text className={styles.sectionTitle}>
+                        Customer role and behavior
+                      </Text>
+                      <Text size={200} className={styles.helperText}>
+                        These fields tell the Live Voice Agent who to play and
+                        how to behave during the call.
+                      </Text>
+                    </div>
                     <Field
                       label={
-                        <InfoLabel info="Short display name shown to trainees when they select a practice scenario.">
-                          Title
+                        <InfoLabel info="Tell the Live Voice Agent who they are and why they are calling. This is not shown as JSON.">
+                          Scenario context
+                        </InfoLabel>
+                      }
+                    >
+                      <Textarea
+                        className={styles.textArea}
+                        resize="vertical"
+                        value={asString(draftDoc.scenarioContextIntro)}
+                        placeholder="You are a frustrated customer calling about an unresolved billing charge."
+                        onChange={(_, data) =>
+                          setDraftField('scenarioContextIntro', data.value)
+                        }
+                      />
+                    </Field>
+                    <div className={styles.fieldGrid}>
+                      <Field
+                        label={
+                          <InfoLabel info="One background fact per line. These guide the Live Voice Agent during the conversation.">
+                            Customer background
+                          </InfoLabel>
+                        }
+                      >
+                        <Textarea
+                          className={styles.textArea}
+                          resize="vertical"
+                          value={listToLines(draftDoc.customerBackground)}
+                          placeholder={
+                            'You have been a customer for several years.\nYou were charged incorrectly on your most recent bill.'
+                          }
+                          onChange={(_, data) =>
+                            setDraftField(
+                              'customerBackground',
+                              linesToList(data.value)
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field
+                        label={
+                          <InfoLabel info="One behavior guideline per line. Use these to make the Live Voice Agent act naturally.">
+                            Conversation guidelines
+                          </InfoLabel>
+                        }
+                      >
+                        <Textarea
+                          className={styles.textArea}
+                          resize="vertical"
+                          value={listToLines(draftDoc.conversationGuidelines)}
+                          placeholder={
+                            'Speak naturally, as a real customer would.\nAsk follow-up questions if something is unclear.'
+                          }
+                          onChange={(_, data) =>
+                            setDraftField(
+                              'conversationGuidelines',
+                              linesToList(data.value)
+                            )
+                          }
+                        />
+                      </Field>
+                    </div>
+                  </section>
+
+                  <section className={styles.section}>
+                    <div className={styles.sectionHeader}>
+                      <Text className={styles.sectionTitle}>
+                        Evaluation context
+                      </Text>
+                      <Text size={200} className={styles.helperText}>
+                        Link this scenario to skills, support files, and sample
+                        transcripts used during evaluation.
+                      </Text>
+                    </div>
+                    <div className={styles.fieldGrid}>
+                      <Field
+                        label={
+                          <InfoLabel info="One skill per line. Rubrics can score these explicitly.">
+                            Skills to probe
+                          </InfoLabel>
+                        }
+                      >
+                        <Textarea
+                          className={styles.compactTextArea}
+                          resize="vertical"
+                          value={listToLines(draftDoc.skillsToProbe)}
+                          placeholder={
+                            'Shows empathy and professionalism\nExplains steps clearly'
+                          }
+                          onChange={(_, data) =>
+                            setDraftField(
+                              'skillsToProbe',
+                              linesToList(data.value)
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field
+                        label={
+                          <InfoLabel info="Optional transcript IDs, one per line. Add transcripts in the Transcripts tab first.">
+                            Example transcripts
+                          </InfoLabel>
+                        }
+                      >
+                        <Textarea
+                          className={styles.compactTextArea}
+                          resize="vertical"
+                          value={listToLines(draftDoc.exampleTranscripts)}
+                          placeholder={'transcript-001\ntranscript-002'}
+                          onChange={(_, data) =>
+                            setDraftField(
+                              'exampleTranscripts',
+                              linesToList(data.value)
+                            )
+                          }
+                        />
+                      </Field>
+                      <Field
+                        className={styles.fullWidth}
+                        label={
+                          <InfoLabel info="Reference uploaded support material files by exact file name. The evaluator uses these when checking policy accuracy.">
+                            Related support materials
+                          </InfoLabel>
+                        }
+                      >
+                        <div className={styles.rowList}>
+                          {asMaterials(draftDoc.relatedMaterials).map(
+                            (material, index) => (
+                              <div
+                                className={styles.materialRow}
+                                key={`material-${index}`}
+                              >
+                                <Input
+                                  value={asString(material.document)}
+                                  placeholder="contoso_billing.pdf"
+                                  aria-label="Support material file name"
+                                  onChange={(_, data) =>
+                                    setMaterialField(
+                                      index,
+                                      'document',
+                                      data.value
+                                    )
+                                  }
+                                />
+                                <Input
+                                  value={asString(material.description)}
+                                  placeholder="Billing and refund policy"
+                                  aria-label="Support material description"
+                                  onChange={(_, data) =>
+                                    setMaterialField(
+                                      index,
+                                      'description',
+                                      data.value
+                                    )
+                                  }
+                                />
+                                <Button
+                                  appearance="subtle"
+                                  onClick={() => removeMaterial(index)}
+                                >
+                                  Remove
+                                </Button>
+                              </div>
+                            )
+                          )}
+                          <Button appearance="secondary" onClick={addMaterial}>
+                            Add support material
+                          </Button>
+                        </div>
+                      </Field>
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <section className={styles.section}>
+                    <div className={styles.sectionHeader}>
+                      <Text className={styles.sectionTitle}>Basics</Text>
+                      <Text size={200} className={styles.helperText}>
+                        Connect the rubric to one or more scenarios.
+                      </Text>
+                    </div>
+                    <div className={styles.fieldGrid}>
+                      <Field label={idField} required>
+                        <Input
+                          value={draftId}
+                          disabled={!!editingId}
+                          placeholder="contoso-rubric-billing-v1"
+                          onChange={(_, data) => setDraftId(data.value)}
+                        />
+                      </Field>
+                      <Field
+                        label={
+                          <InfoLabel info="Scenario IDs this rubric applies to, one per line. These must match scenario IDs in the Scenarios tab.">
+                            Scenario IDs
+                          </InfoLabel>
+                        }
+                      >
+                        <Textarea
+                          className={styles.compactTextArea}
+                          resize="vertical"
+                          value={listToLines(
+                            (draftDoc.appliesTo as JsonDoc | undefined)
+                              ?.scenarioIds
+                          )}
+                          placeholder={'contoso-billing-001\ncontoso-support-002'}
+                          onChange={(_, data) =>
+                            setDraftField('appliesTo', {
+                              scenarioIds: linesToList(data.value),
+                            })
+                          }
+                        />
+                      </Field>
+                    </div>
+                  </section>
+
+                  <section className={styles.section}>
+                    <div className={styles.sectionHeader}>
+                      <Text className={styles.sectionTitle}>
+                        Scoring criteria
+                      </Text>
+                      <Text size={200} className={styles.helperText}>
+                        Add each criterion as its own row. The default 1, 3,
+                        and 5 scoring levels are created automatically.
+                      </Text>
+                    </div>
+                    <Field
+                      label={
+                        <InfoLabel info="Each row needs a stable ID, a short display name, and a description of what good performance means.">
+                          Criteria
                         </InfoLabel>
                       }
                       required
                     >
-                      <Input
-                        value={asString(draftDoc.title)}
-                        placeholder="Frustrated Customer with Billing Charge"
-                        onChange={(_, data) =>
-                          setDraftField('title', data.value)
-                        }
-                      />
-                    </Field>
-                    <Field
-                      label={
-                        <InfoLabel info="One opening line the avatar can say at the start of the call.">
-                          Opening line
-                        </InfoLabel>
-                      }
-                    >
-                      <Input
-                        value={asStringList(draftDoc.openingLines)[0] ?? ''}
-                        placeholder="Hi, I am calling about a charge on my bill."
-                        onChange={(_, data) =>
-                          setDraftField('openingLines', [data.value])
-                        }
-                      />
-                    </Field>
-                  </div>
-                  <Field
-                    label={
-                      <InfoLabel info="Tell the avatar who they are and why they are calling. This is not shown as JSON.">
-                        Scenario context
-                      </InfoLabel>
-                    }
-                  >
-                    <Textarea
-                      resize="vertical"
-                      rows={3}
-                      value={asString(draftDoc.scenarioContextIntro)}
-                      placeholder="You are a frustrated customer calling about an unresolved billing charge."
-                      onChange={(_, data) =>
-                        setDraftField('scenarioContextIntro', data.value)
-                      }
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      <InfoLabel info="One background fact per line. These guide the customer avatar during the conversation.">
-                        Customer background
-                      </InfoLabel>
-                    }
-                  >
-                    <Textarea
-                      resize="vertical"
-                      rows={4}
-                      value={listToLines(draftDoc.customerBackground)}
-                      placeholder={
-                        'You have been a customer for several years.\nYou were charged incorrectly on your most recent bill.'
-                      }
-                      onChange={(_, data) =>
-                        setDraftField(
-                          'customerBackground',
-                          linesToList(data.value)
-                        )
-                      }
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      <InfoLabel info="One behavior guideline per line. Use these to make the avatar act naturally.">
-                        Conversation guidelines
-                      </InfoLabel>
-                    }
-                  >
-                    <Textarea
-                      resize="vertical"
-                      rows={4}
-                      value={listToLines(draftDoc.conversationGuidelines)}
-                      placeholder={
-                        'Speak naturally, as a real customer would.\nAsk follow-up questions if something is unclear.'
-                      }
-                      onChange={(_, data) =>
-                        setDraftField(
-                          'conversationGuidelines',
-                          linesToList(data.value)
-                        )
-                      }
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      <InfoLabel info="One skill per line. Rubrics can score these explicitly.">
-                        Skills to probe
-                      </InfoLabel>
-                    }
-                  >
-                    <Textarea
-                      resize="vertical"
-                      rows={3}
-                      value={listToLines(draftDoc.skillsToProbe)}
-                      placeholder={
-                        'Shows empathy and professionalism\nExplains steps clearly'
-                      }
-                      onChange={(_, data) =>
-                        setDraftField('skillsToProbe', linesToList(data.value))
-                      }
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      <InfoLabel info="Reference uploaded support material files by exact file name. Format: file.pdf | optional description. The evaluator uses these when checking policy accuracy.">
-                        Related support materials
-                      </InfoLabel>
-                    }
-                  >
-                    <Textarea
-                      resize="vertical"
-                      rows={3}
-                      value={materialListToLines(draftDoc.relatedMaterials)}
-                      placeholder={
-                        'contoso_billing.pdf | Contoso Billing and Refund Policy\ncontoso_support_tone_guide.pdf | Support tone guidelines'
-                      }
-                      onChange={(_, data) =>
-                        setDraftField(
-                          'relatedMaterials',
-                          materialLinesToList(data.value)
-                        )
-                      }
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      <InfoLabel info="Optional transcript IDs, one per line. Add transcripts in the Transcripts tab first.">
-                        Example transcripts
-                      </InfoLabel>
-                    }
-                  >
-                    <Textarea
-                      resize="vertical"
-                      rows={2}
-                      value={listToLines(draftDoc.exampleTranscripts)}
-                      placeholder={'transcript-001\ntranscript-002'}
-                      onChange={(_, data) =>
-                        setDraftField(
-                          'exampleTranscripts',
-                          linesToList(data.value)
-                        )
-                      }
-                    />
-                  </Field>
-                </>
-              ) : (
-                <>
-                  <Field
-                    label={
-                      <InfoLabel info="Scenario IDs this rubric applies to, one per line. These must match scenario IDs in the Scenarios tab.">
-                        Scenario IDs
-                      </InfoLabel>
-                    }
-                  >
-                    <Textarea
-                      resize="vertical"
-                      rows={3}
-                      value={listToLines(
-                        (draftDoc.appliesTo as JsonDoc | undefined)?.scenarioIds
-                      )}
-                      placeholder={'contoso-billing-001\ncontoso-support-002'}
-                      onChange={(_, data) =>
-                        setDraftField('appliesTo', {
-                          scenarioIds: linesToList(data.value),
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      <InfoLabel info="One criterion per line using: id | display name | description. The app creates the rubric JSON and default 1, 3, 5 scoring levels automatically.">
-                        Criteria
-                      </InfoLabel>
-                    }
-                    required
-                  >
-                    <Textarea
-                      resize="vertical"
-                      rows={6}
-                      value={rubricCriteriaToLines(draftDoc.criteria)}
-                      placeholder={
-                        'empathy | Empathy | Shows empathy and professionalism.\nclarity | Clarity | Explains next steps clearly.'
-                      }
-                      onChange={(_, data) =>
-                        setDraftField(
-                          'criteria',
-                          parseRubricCriteria(data.value)
-                        )
-                      }
-                    />
-                  </Field>
-                  <div className={styles.fieldGrid}>
-                    <Field
-                      label={
-                        <InfoLabel info="Score range used by all criteria. Keep 1-5 unless your rubric intentionally uses another scale.">
-                          Scale
-                        </InfoLabel>
-                      }
-                    >
-                      <Input
-                        value={
-                          asString(
-                            (draftDoc.scoring as JsonDoc | undefined)?.scale
-                          ) || '1-5'
-                        }
-                        onChange={(_, data) =>
-                          setDraftField('scoring', {
-                            ...(draftDoc.scoring as JsonDoc | undefined),
-                            scale: data.value,
-                          })
-                        }
-                      />
-                    </Field>
-                    <Field
-                      label={
-                        <InfoLabel info="Minimum average score needed to pass. Example: 3.5 on a 1-5 scale.">
-                          Pass threshold
-                        </InfoLabel>
-                      }
-                    >
-                      <Input
-                        type="number"
-                        value={String(
-                          (draftDoc.scoring as JsonDoc | undefined)
-                            ?.passThreshold ?? 3.5
+                      <div className={styles.rowList}>
+                        {asCriteria(draftDoc.criteria).map(
+                          (criterion, index) => (
+                            <div
+                              className={styles.criteriaRow}
+                              key={`criterion-${index}`}
+                            >
+                              <Input
+                                value={asString(criterion.criterionId)}
+                                placeholder="empathy"
+                                aria-label="Criterion ID"
+                                onChange={(_, data) =>
+                                  setCriterionField(
+                                    index,
+                                    'criterionId',
+                                    data.value
+                                  )
+                                }
+                              />
+                              <Input
+                                value={asString(criterion.name)}
+                                placeholder="Empathy"
+                                aria-label="Criterion display name"
+                                onChange={(_, data) =>
+                                  setCriterionField(index, 'name', data.value)
+                                }
+                              />
+                              <Textarea
+                                className={styles.compactTextArea}
+                                resize="vertical"
+                                value={asString(criterion.description)}
+                                placeholder="Shows empathy and professionalism."
+                                aria-label="Criterion description"
+                                onChange={(_, data) =>
+                                  setCriterionField(
+                                    index,
+                                    'description',
+                                    data.value
+                                  )
+                                }
+                              />
+                              <Button
+                                appearance="subtle"
+                                onClick={() => removeCriterion(index)}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          )
                         )}
-                        onChange={(_, data) =>
-                          setDraftField('scoring', {
-                            ...(draftDoc.scoring as JsonDoc | undefined),
-                            passThreshold: Number(data.value),
-                            overallScoreMethod:
-                              (draftDoc.scoring as JsonDoc | undefined)
-                                ?.overallScoreMethod ?? 'average',
-                          })
-                        }
-                      />
+                        <Button appearance="secondary" onClick={addCriterion}>
+                          Add criterion
+                        </Button>
+                      </div>
                     </Field>
-                  </div>
-                  <Field
-                    label={
-                      <InfoLabel info="Optional transcript IDs used as references, one per line. Add transcripts in the Transcripts tab first.">
-                        Reference transcripts
-                      </InfoLabel>
-                    }
-                  >
-                    <Textarea
-                      resize="vertical"
-                      rows={2}
-                      value={listToLines(draftDoc.referenceTranscripts)}
-                      placeholder={'transcript-001\ntranscript-002'}
-                      onChange={(_, data) =>
-                        setDraftField(
-                          'referenceTranscripts',
-                          linesToList(data.value)
-                        )
-                      }
-                    />
-                  </Field>
+                  </section>
+
+                  <section className={styles.section}>
+                    <div className={styles.sectionHeader}>
+                      <Text className={styles.sectionTitle}>
+                        Pass rules and references
+                      </Text>
+                      <Text size={200} className={styles.helperText}>
+                        Define the pass mark and optional transcript examples
+                        used as scoring references.
+                      </Text>
+                    </div>
+                    <div className={styles.fieldGrid}>
+                      <Field
+                        label={
+                          <InfoLabel info="Score range used by all criteria. Keep 1-5 unless your rubric intentionally uses another scale.">
+                            Scale
+                          </InfoLabel>
+                        }
+                      >
+                        <Input
+                          value={
+                            asString(
+                              (draftDoc.scoring as JsonDoc | undefined)?.scale
+                            ) || '1-5'
+                          }
+                          onChange={(_, data) =>
+                            setDraftField('scoring', {
+                              ...(draftDoc.scoring as JsonDoc | undefined),
+                              scale: data.value,
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field
+                        label={
+                          <InfoLabel info="Minimum average score needed to pass. Example: 3.5 on a 1-5 scale.">
+                            Pass threshold
+                          </InfoLabel>
+                        }
+                      >
+                        <Input
+                          type="number"
+                          value={String(
+                            (draftDoc.scoring as JsonDoc | undefined)
+                              ?.passThreshold ?? 3.5
+                          )}
+                          onChange={(_, data) =>
+                            setDraftField('scoring', {
+                              ...(draftDoc.scoring as JsonDoc | undefined),
+                              passThreshold: Number(data.value),
+                              overallScoreMethod:
+                                (draftDoc.scoring as JsonDoc | undefined)
+                                  ?.overallScoreMethod ?? 'average',
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field
+                        className={styles.fullWidth}
+                        label={
+                          <InfoLabel info="Optional transcript IDs used as references, one per line. Add transcripts in the Transcripts tab first.">
+                            Reference transcripts
+                          </InfoLabel>
+                        }
+                      >
+                        <Textarea
+                          className={styles.compactTextArea}
+                          resize="vertical"
+                          value={listToLines(draftDoc.referenceTranscripts)}
+                          placeholder={'transcript-001\ntranscript-002'}
+                          onChange={(_, data) =>
+                            setDraftField(
+                              'referenceTranscripts',
+                              linesToList(data.value)
+                            )
+                          }
+                        />
+                      </Field>
+                    </div>
+                  </section>
                 </>
               )}
               <Text size={200} className={styles.helperText}>
-                The app stores this as the required JSON document automatically.
+                We'll save this in the right format automatically.
               </Text>
             </DialogContent>
-            <DialogActions>
+            <DialogActions className={styles.dialogActions}>
               <Button
                 appearance="secondary"
                 onClick={() => setDialogOpen(false)}
@@ -663,7 +908,11 @@ export function JsonDocumentTab({
                 disabled={saving}
                 onClick={handleSave}
               >
-                {saving ? 'Saving…' : 'Save'}
+                {saving
+                  ? 'Saving…'
+                  : editorType === 'scenario'
+                    ? 'Save scenario'
+                    : 'Save rubric'}
               </Button>
             </DialogActions>
           </DialogBody>
