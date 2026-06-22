@@ -36,8 +36,25 @@ These are the Bicep parameter defaults you get out of the box. Override any of t
 | Container App identity (`useUAI`) | System-assigned managed identity (both modes) | `azd env set USE_UAI true` | Switches the Container App to a user-assigned identity. The default works for both modes. |
 | ACS media egress firewall rules (`enableAcsMediaEgress`) | Enabled in NI mode (basic mode has no firewall) | `azd env set ENABLE_ACS_MEDIA_EGRESS false` | Opens UDP 3478-3481 / TCP 443+3478-3481 to `AzureCloud` through Azure Firewall so the Speech avatar, ACS Calling, and Teams Media can stream. |
 | Application Gateway WAF v2 public ingress (`publicIngress.enabled`) | Disabled, even when `NETWORK_ISOLATION=true` | `azd env set PUBLIC_INGRESS_ENABLED true` | Deploys the public entry point (gateway + Public IP + WAF policy + NSG). Only needed when testers reach the app from the public Internet with a real microphone. See the [public ingress runbook](manual-testing/public-ingress-runbook.md). |
+| Realtime model name (`REALTIME_MODEL_NAME` in `main.parameters.json`) | `gpt-realtime-2` | `azd env set REALTIME_MODEL_NAME <name>` | Foundry catalog name of the realtime model deployed for the Voice Live session. Confirm the exact catalog name for your subscription before provisioning. |
+| Realtime model version (`REALTIME_MODEL_VERSION` in `main.parameters.json`) | `2026-02-23` | `azd env set REALTIME_MODEL_VERSION <version>` | Catalog version paired with `REALTIME_MODEL_NAME`. Confirm the exact version for your subscription before provisioning. |
 
 In **basic mode** there is no firewall and the Container App ingress is already public, so the ACS egress and public-ingress rows do not apply.
+
+---
+
+## Runtime configuration keys (App Configuration)
+
+These keys are read by the backend at runtime (App Configuration in Azure, or environment variables locally). Change them without rebuilding the image; restart the Container App revision to pick up new values.
+
+| Key | Default | What it does |
+|---|---|---|
+| `AZURE_VOICE_API_VERSION` | `2026-01-01-preview` | Voice Live API version used for the realtime session. Override only to pin or roll forward the API surface. |
+| `ENABLE_REALTIME_FUNCTION_CALLING` | `true` | Advertises the `get_scenario_context` function tool to the realtime model for locally-hosted (non-Azure) agents. Azure-hosted agents are not affected. Set `false` to disable the tool. |
+| `AZURE_INPUT_TRANSCRIPTION_MODEL` | `azure-speech` | Input speech transcription model. Operators adopting MAI-Transcribe set the exact Foundry catalog name here with no code change. |
+| `AZURE_INPUT_TRANSCRIPTION_LANGUAGE` | `en-US` | Input speech transcription language. |
+
+> **Confirm Foundry catalog names for your subscription.** The exact catalog names and versions for `gpt-realtime-2`, the avatar voice (MAI-Voice-2 / Voice-2-Flash), and the transcription model (MAI-Transcribe-1.5) must be confirmed for the target subscription before you adopt them. If a new name is not yet available, the prior known-good values remain valid defaults: `en-US-Ava:DragonHDLatestNeural` for the avatar voice and `azure-speech` for transcription.
 
 ---
 
@@ -227,7 +244,7 @@ The parent repo is already on disk at `C:\github\live-voice-practice`. Pull the 
 cd C:\github\live-voice-practice
 git pull
 git submodule update --init --recursive
-# verify the submodule landed on the expected pin (v1.1.4 = 40f82ae or newer)
+# verify the submodule landed on the expected pin (v2.0.14 = 90e78a9 or newer)
 git -C infra describe --tags --always
 ```
 
@@ -378,4 +395,4 @@ azd down --force
 - AI Search dataplane: [docs/ai-search-indexing-runbook.md](ai-search-indexing-runbook.md)
 - NI quick reference (subnets, FQDNs, firewall rules): [docs/network-isolation-jumpbox-runbook.md](network-isolation-jumpbox-runbook.md)
 - Scripts: [scripts/postProvision.ps1](../scripts/postProvision.ps1) · [scripts/setup_search_dataplane.ps1](../scripts/setup_search_dataplane.ps1) · [scripts/seed_cosmos_samples.py](../scripts/seed_cosmos_samples.py)
-- AILZ submodule: [`infra/`](../infra/) (pin: `v1.1.4` — first-class Speech support, Bicep CLI bootstrap FQDN)
+- AILZ submodule: [`infra/`](../infra/) (pin: `v2.0.14`)

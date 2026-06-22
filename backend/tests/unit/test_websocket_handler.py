@@ -243,3 +243,115 @@ class TestVoiceProxyHandler:
 
             assert credential is not None
             mock_default_credential.assert_called_once()
+
+    @patch("src.services.websocket_handler.config")
+    def test_create_request_session_registers_tools_for_local_agent(self, mock_config):
+        """Local agents get function tools registered when the feature is enabled."""
+        mock_config.get.side_effect = lambda key, default=None: {
+            "azure_input_transcription_model": "azure-speech",
+            "azure_input_transcription_language": "en-US",
+            "enable_realtime_function_calling": True,
+        }.get(key, default)
+
+        handler = VoiceProxyHandler(Mock())
+        agent_config = {"is_azure_agent": False, "instructions": "x", "temperature": 0.7, "max_tokens": 500}
+
+        session = handler._create_request_session("voice", "azure-standard", None, agent_config)
+
+        assert "tools" in session
+        assert session["tool_choice"] == "auto"
+        assert session["tools"][0].name == "get_scenario_context"
+
+    @patch("src.services.websocket_handler.config")
+    def test_create_request_session_skips_tools_when_disabled(self, mock_config):
+        """The function-calling feature flag suppresses tool registration."""
+        mock_config.get.side_effect = lambda key, default=None: {
+            "azure_input_transcription_model": "azure-speech",
+            "azure_input_transcription_language": "en-US",
+            "enable_realtime_function_calling": False,
+        }.get(key, default)
+
+        handler = VoiceProxyHandler(Mock())
+        agent_config = {"is_azure_agent": False, "instructions": "x", "temperature": 0.7, "max_tokens": 500}
+
+        session = handler._create_request_session("voice", "azure-standard", None, agent_config)
+
+        assert session.get("tools") is None
+
+    @patch("src.services.websocket_handler.config")
+    def test_create_request_session_skips_tools_for_azure_agent(self, mock_config):
+        """Azure-hosted agents manage their own tools, so none are registered here."""
+        mock_config.get.side_effect = lambda key, default=None: {
+            "azure_input_transcription_model": "azure-speech",
+            "azure_input_transcription_language": "en-US",
+            "enable_realtime_function_calling": True,
+        }.get(key, default)
+
+        handler = VoiceProxyHandler(Mock())
+        agent_config = {"is_azure_agent": True}
+
+        session = handler._create_request_session("voice", "azure-standard", None, agent_config)
+
+        assert session.get("tools") is None
+
+    @patch("src.services.websocket_handler.config")
+    def test_create_request_session_wires_transcription_config(self, mock_config):
+        """Input transcription model and language come from configuration."""
+        mock_config.get.side_effect = lambda key, default=None: {
+            "azure_input_transcription_model": "mai-transcribe-1",
+            "azure_input_transcription_language": "en-GB",
+            "enable_realtime_function_calling": False,
+        }.get(key, default)
+
+        handler = VoiceProxyHandler(Mock())
+
+        session = handler._create_request_session("voice", "azure-standard", None, None)
+
+        assert session["input_audio_transcription"].model == "mai-transcribe-1"
+        assert session["input_audio_transcription"].language == "en-GB"
+
+    @pytest.mark.asyncio
+    async def test_handle_function_call_returns_output_and_continues(self):
+        """A function call is dispatched and the result is fed back to Azure."""
+        agent_manager = Mock()
+        agent_manager.get_agent.return_value = {"scenario_id": "scenario-1"}
+        scenario_manager = Mock()
+        scenario_manager.get_scenario.return_value = {"name": "Billing", "description": "Double charge."}
+
+        handler = VoiceProxyHandler(agent_manager, scenario_manager)
+
+        azure_conn = Mock()
+        azure_conn.conversation.item.create = AsyncMock()
+        azure_conn.response.create = AsyncMock()
+
+        event = Mock()
+        event.call_id = "call-1"
+        event.name = "get_scenario_context"
+        event.arguments = ""
+
+        await handler._handle_function_call(azure_conn, event, "agent-1")
+
+        azure_conn.conversation.item.create.assert_awaited_once()
+        azure_conn.response.create.assert_awaited_once()
+        sent_item = azure_conn.conversation.item.create.call_args.kwargs["item"]
+        assert sent_item.call_id == "call-1"
+        assert "Billing" in sent_item.output
+
+    @pytest.mark.asyncio
+    async def test_handle_function_call_skips_when_missing_identifiers(self):
+        """A malformed function-call event is ignored without calling Azure."""
+        handler = VoiceProxyHandler(Mock(), Mock())
+
+        azure_conn = Mock()
+        azure_conn.conversation.item.create = AsyncMock()
+        azure_conn.response.create = AsyncMock()
+
+        event = Mock()
+        event.call_id = None
+        event.name = None
+        event.arguments = ""
+
+        await handler._handle_function_call(azure_conn, event, "agent-1")
+
+        azure_conn.conversation.item.create.assert_not_awaited()
+        azure_conn.response.create.assert_not_awaited()

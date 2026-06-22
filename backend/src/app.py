@@ -149,7 +149,7 @@ def _initialize_search_service():
 search_service = _initialize_search_service()
 conversation_analyzer = ConversationAnalyzer(search_service=search_service)
 pronunciation_assessor = PronunciationAssessor()
-voice_proxy_handler = VoiceProxyHandler(agent_manager)
+voice_proxy_handler = VoiceProxyHandler(agent_manager, scenario_manager)
 
 # Wire admin content-management routes and hot-reload caches so trainer edits
 # take effect for new conversations without restarting the pod.

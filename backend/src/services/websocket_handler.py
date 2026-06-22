@@ -24,6 +24,7 @@ from azure.ai.voicelive.models import (
     AvatarConfig,
     AzureSemanticVad,
     AzureStandardVoice,
+    FunctionCallOutputItem,
     Modality,
     RequestSession,
     ServerEventType,
@@ -33,12 +34,13 @@ from azure.identity import DefaultAzureCredential
 
 from src.config import config
 from src.services.audio_store import session_audio_store
-from src.services.managers import AgentManager
+from src.services.managers import AgentManager, ScenarioManager
+from src.services.voice_tools import build_function_tools, dispatch_tool_call
 
 logger = logging.getLogger(__name__)
 
 # WebSocket constants
-AZURE_VOICE_API_VERSION = "2025-05-01-preview"
+AZURE_VOICE_API_VERSION = "2026-01-01-preview"
 AZURE_COGNITIVE_SERVICES_DOMAIN = "cognitiveservices.azure.com"
 
 # Session configuration defaults
@@ -64,14 +66,18 @@ LOG_MESSAGE_MAX_LENGTH = 100
 class VoiceProxyHandler:
     """Handles WebSocket proxy connections between client and Azure Voice API using VoiceLive SDK."""
 
-    def __init__(self, agent_manager: AgentManager):
+    def __init__(self, agent_manager: AgentManager, scenario_manager: Optional[ScenarioManager] = None):
         """
         Initialize the voice proxy handler.
 
         Args:
             agent_manager: Agent manager instance
+            scenario_manager: Optional scenario manager used by realtime function
+                tools to read scenario data. When omitted, function tools that
+                need scenario data return a graceful "not available" result.
         """
         self.agent_manager = agent_manager
+        self.scenario_manager = scenario_manager
 
     async def handle_connection(self, client_ws: simple_websocket.ws.Server) -> None:
         """
@@ -99,7 +105,7 @@ class VoiceProxyHandler:
                 endpoint=endpoint,
                 credential=credential,
                 model=model,
-                api_version=AZURE_VOICE_API_VERSION,
+                api_version=config.get("azure_voice_api_version", AZURE_VOICE_API_VERSION),
                 query=query_params,
             ) as azure_conn:
                 logger.info("Connected to Azure Voice API via SDK with agent: %s", current_agent_id or "default")
@@ -227,10 +233,16 @@ class VoiceProxyHandler:
         agent_config: Optional[Dict[str, Any]],
     ) -> RequestSession:
         """Create the RequestSession with all configuration."""
+        transcription_model = config.get("azure_input_transcription_model", "azure-speech")
+        transcription_language = config.get("azure_input_transcription_language", "en-US")
+
         session = RequestSession(
             modalities=[Modality.TEXT, Modality.AUDIO, Modality.AVATAR],
             turn_detection=AzureSemanticVad(type=DEFAULT_TURN_DETECTION_TYPE),
-            input_audio_transcription=AudioInputTranscriptionOptions(model="whisper-1"),
+            input_audio_transcription=AudioInputTranscriptionOptions(
+                model=transcription_model,
+                language=transcription_language,
+            ),
             input_audio_noise_reduction=AudioNoiseReduction(type=DEFAULT_NOISE_REDUCTION_TYPE),
             input_audio_echo_cancellation=AudioEchoCancellation(type=DEFAULT_ECHO_CANCELLATION_TYPE),
             voice=AzureStandardVoice(name=voice_name, type=voice_type),
@@ -241,6 +253,12 @@ class VoiceProxyHandler:
             session["instructions"] = agent_config.get("instructions")
             session["temperature"] = agent_config.get("temperature")
             session["max_response_output_tokens"] = agent_config.get("max_tokens")
+
+            # Register realtime function tools for locally-hosted agents. Azure-hosted
+            # agents manage their own tools, so we leave their session tools untouched.
+            if config.get("enable_realtime_function_calling", True):
+                session["tools"] = build_function_tools()
+                session["tool_choice"] = "auto"
 
         return session
 
@@ -328,11 +346,51 @@ class VoiceProxyHandler:
                     logger.info("Session created: %s", event_dict.get("session", {}).get("id"))
                 elif event.type == ServerEventType.SESSION_UPDATED:
                     logger.info("Session updated")
+                elif event.type == ServerEventType.RESPONSE_FUNCTION_CALL_ARGUMENTS_DONE:
+                    await self._handle_function_call(azure_conn, event, current_agent_id)
 
         except ConnectionClosed as e:
             logger.debug("Azure connection closed: code=%s, reason=%s", e.code, e.reason)
         except Exception as e:
             logger.debug("Error forwarding Azure messages: %s", e)
+
+    async def _handle_function_call(
+        self,
+        azure_conn: VoiceLiveConnection,
+        event: Any,
+        current_agent_id: Optional[str],
+    ) -> None:
+        """Resolve a realtime function call and feed the result back to Azure.
+
+        The model emits ``response.function_call_arguments.done`` when it wants a
+        tool result. We dispatch the call against backend scenario data, return the
+        output as a ``function_call_output`` conversation item, then ask the model
+        to continue with ``response.create``.
+        """
+        call_id = getattr(event, "call_id", None)
+        name = getattr(event, "name", None)
+        arguments = getattr(event, "arguments", "") or ""
+
+        if not call_id or not name:
+            logger.warning("Function call event missing call_id or name; skipping")
+            return
+
+        agent_config = self.agent_manager.get_agent(current_agent_id) if current_agent_id else None
+
+        try:
+            result = dispatch_tool_call(name, arguments, self.scenario_manager, agent_config)
+        except Exception as e:
+            logger.error("Error dispatching realtime tool '%s': %s", name, e)
+            result = {"error": "Tool execution failed."}
+
+        try:
+            await azure_conn.conversation.item.create(
+                item=FunctionCallOutputItem(call_id=call_id, output=json.dumps(result))
+            )
+            await azure_conn.response.create()
+            logger.info("Handled realtime function call '%s'", name)
+        except Exception as e:
+            logger.error("Failed to return function call output for '%s': %s", name, e)
 
     def _store_transcript_event(self, current_agent_id: Optional[str], event_dict: Dict[str, Any]) -> None:
         """Store transcript turns server-side so analysis requests stay small."""
