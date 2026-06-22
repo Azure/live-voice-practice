@@ -116,7 +116,8 @@ const useStyles = makeStyles({
   },
   criteriaRow: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(120px, 0.8fr) minmax(160px, 1fr) minmax(260px, 2fr) auto',
+    gridTemplateColumns:
+      'minmax(120px, 0.8fr) minmax(160px, 1fr) minmax(260px, 2fr) auto',
     gap: tokens.spacingHorizontalS,
     alignItems: 'start',
     '@media (max-width: 900px)': {
@@ -424,7 +425,9 @@ export function JsonDocumentTab({
               return (
                 <TableRow key={id}>
                   <TableCell>{id}</TableCell>
-                  <TableCell>{metadataDateField(doc, 'lastUpdatedAt')}</TableCell>
+                  <TableCell>
+                    {metadataDateField(doc, 'lastUpdatedAt')}
+                  </TableCell>
                   <TableCell>{metadataField(doc, 'lastUpdatedBy')}</TableCell>
                   <TableCell>
                     <div className={styles.actions}>
@@ -732,7 +735,9 @@ export function JsonDocumentTab({
                             (draftDoc.appliesTo as JsonDoc | undefined)
                               ?.scenarioIds
                           )}
-                          placeholder={'contoso-billing-001\ncontoso-support-002'}
+                          placeholder={
+                            'contoso-billing-001\ncontoso-support-002'
+                          }
                           onChange={(_, data) =>
                             setDraftField('appliesTo', {
                               scenarioIds: linesToList(data.value),
@@ -749,8 +754,8 @@ export function JsonDocumentTab({
                         Scoring criteria
                       </Text>
                       <Text size={200} className={styles.helperText}>
-                        Add each criterion as its own row. The default 1, 3,
-                        and 5 scoring levels are created automatically.
+                        Add each criterion as its own row. The default 1, 3, and
+                        5 scoring levels are created automatically.
                       </Text>
                     </div>
                     <Field

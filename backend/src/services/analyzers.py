@@ -77,6 +77,7 @@ SCORING_RETRY_ATTEMPTS = 3
 class ConversationScoringError(RuntimeError):
     """Raised when conversation scoring fails after retryable attempts."""
 
+
 # Fallback evaluation prompt for custom scenarios
 FALLBACK_EVALUATION_PROMPT = """You are an expert communication coach evaluating a role-play conversation.
 

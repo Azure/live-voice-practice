@@ -5,10 +5,22 @@
 
 import { makeStyles, tokens } from '@fluentui/react-components'
 import type { ReactElement } from 'react'
-import { Bar, BarChart, CartesianGrid, Cell, Tooltip, XAxis, YAxis } from 'recharts'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { StatisticsOverview } from '../../services/statistics'
 import { ChartCard } from '../charts/ChartCard'
-import { chartColors, inverseScoreColor, scoreColor } from '../charts/chartTheme'
+import {
+  chartColors,
+  inverseScoreColor,
+  scoreColor,
+} from '../charts/chartTheme'
 
 const useStyles = makeStyles({
   grid: {
@@ -146,9 +158,7 @@ export function CohortCharts({
               const midpoint = Number.isFinite(upper)
                 ? (lower + upper) / 2
                 : lower
-              return (
-                <Cell key={bucket.bucket} fill={scoreColor(midpoint)} />
-              )
+              return <Cell key={bucket.bucket} fill={scoreColor(midpoint)} />
             })}
           </Bar>
         </BarChart>
