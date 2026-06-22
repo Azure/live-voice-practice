@@ -74,6 +74,10 @@ const useStyles = makeStyles({
   setupDialog: {
     maxWidth: '600px',
     width: '90vw',
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusLarge,
+    boxShadow: tokens.shadow64,
+    padding: tokens.spacingVerticalXL,
   },
   loadingContent: {
     gridColumn: '1 / -1',
@@ -426,35 +430,26 @@ export default function App() {
         </div>
       )}
 
-      {/* Setup dialog (home screen) */}
-      <Dialog
-        open={currentView === 'setup'}
-        onOpenChange={(_, data) => {
-          if (!data.open && currentView === 'setup') {
-            // Prevent closing via overlay click on the setup screen
-          }
-        }}
-      >
-        <DialogSurface className={styles.setupDialog}>
-          <DialogBody>
-            {loading ? (
-              <Spinner label="Loading scenarios..." />
-            ) : (
-              <ScenarioList
-                scenarios={scenarios}
-                selectedScenario={selectedScenario}
-                onSelect={setSelectedScenario}
-                onStart={handleStart}
-                isAuthenticated={authenticated}
-                onNavigateToConversations={navigateToConversations}
-                isTrainer={isTrainer}
-                onNavigateToAllPractices={navigateToAllPractices}
-                appName={appName}
-              />
-            )}
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
+      {/* Setup home screen */}
+      {currentView === 'setup' && (
+        <div className={styles.setupDialog}>
+          {loading ? (
+            <Spinner label="Loading scenarios..." />
+          ) : (
+            <ScenarioList
+              scenarios={scenarios}
+              selectedScenario={selectedScenario}
+              onSelect={setSelectedScenario}
+              onStart={handleStart}
+              isAuthenticated={authenticated}
+              onNavigateToConversations={navigateToConversations}
+              isTrainer={isTrainer}
+              onNavigateToAllPractices={navigateToAllPractices}
+              appName={appName}
+            />
+          )}
+        </div>
+      )}
 
       {/* Loading overlay */}
       <Dialog open={showLoading}>
