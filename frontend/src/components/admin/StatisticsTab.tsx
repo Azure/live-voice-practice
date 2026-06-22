@@ -23,8 +23,9 @@ import {
 import { useScenarios } from '../../hooks/useScenarios'
 import { useStatisticsFilters } from '../../hooks/useStatisticsFilters'
 import { useStatisticsOverview } from '../../hooks/useStatisticsOverview'
+import { formatShortDate } from '../../utils/formatting'
 import { ChartCard } from '../charts/ChartCard'
-import { chartColors } from '../charts/chartTheme'
+import { chartColors, scoreColor } from '../charts/chartTheme'
 import { CohortCharts } from './CohortCharts'
 import { KpiCards } from './KpiCards'
 import { StatisticsFiltersBar } from './StatisticsFiltersBar'
@@ -52,8 +53,16 @@ export function StatisticsTab(): ReactElement {
   const { scenarios } = useScenarios()
   const { data, loading, error } = useStatisticsOverview(filters)
 
-  const practices = data?.practicesOverTime ?? []
-  const scores = data?.averageScoreOverTime ?? []
+  const practices = (data?.practicesOverTime ?? []).map(point => ({
+    ...point,
+    date: formatShortDate(point.date),
+  }))
+  const scores = (data?.averageScoreOverTime ?? []).map(point => ({
+    ...point,
+    date: formatShortDate(point.date),
+  }))
+  const latestAverageScore =
+    scores.length > 0 ? scores[scores.length - 1].avgScorePercent : undefined
   const scenarioNameById = new Map(scenarios.map(s => [s.id, s.name]))
 
   return (
@@ -85,6 +94,7 @@ export function StatisticsTab(): ReactElement {
         <ChartCard
           title="Practices over time"
           subtitle="Completed practices per day"
+          info="Shows completed practices grouped by day for the selected filters. The value comes from conversation records that reached an analyzed/completed state, so it reflects training volume over time."
           loading={loading}
           isEmpty={!loading && practices.length === 0}
         >
@@ -101,6 +111,7 @@ export function StatisticsTab(): ReactElement {
               dataKey="count"
               name="Practices"
               fill={chartColors.primary}
+              maxBarSize={48}
               radius={[4, 4, 0, 0]}
             />
           </BarChart>
@@ -109,6 +120,7 @@ export function StatisticsTab(): ReactElement {
         <ChartCard
           title="Average score over time"
           subtitle="Mean score (% of rubric max) per day"
+          info="Shows the daily mean AI evaluation score for analyzed practices. Rubric scores are converted to a 0-100 percentage so different 1-5 rubric scales can be compared consistently."
           loading={loading}
           isEmpty={!loading && scores.length === 0}
         >
@@ -121,7 +133,7 @@ export function StatisticsTab(): ReactElement {
               type="monotone"
               dataKey="avgScorePercent"
               name="Avg score %"
-              stroke={chartColors.secondary}
+              stroke={scoreColor(latestAverageScore)}
               strokeWidth={2}
               dot={false}
             />

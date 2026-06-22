@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See LICENSE in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Button, Link, Text, makeStyles, tokens } from '@fluentui/react-components'
-import { SignOut24Regular } from '@fluentui/react-icons'
+import { Button, Text, makeStyles, tokens } from '@fluentui/react-components'
+import { Settings24Regular, SignOut24Regular } from '@fluentui/react-icons'
 import { useNavigate } from 'react-router-dom'
 
 const useStyles = makeStyles({
@@ -27,7 +27,12 @@ interface Props {
   isTrainer?: boolean
 }
 
-export function UserHeader({ userName, authenticated, role, isTrainer }: Props) {
+export function UserHeader({
+  userName,
+  authenticated,
+  role,
+  isTrainer,
+}: Props) {
   const styles = useStyles()
   const navigate = useNavigate()
 
@@ -36,7 +41,14 @@ export function UserHeader({ userName, authenticated, role, isTrainer }: Props) 
   return (
     <div className={styles.header}>
       {isTrainer && (
-        <Link onClick={() => navigate('/admin')}>Admin</Link>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={<Settings24Regular />}
+          onClick={() => navigate('/admin')}
+        >
+          Admin
+        </Button>
       )}
       <Text size={300} weight="semibold">
         {userName || 'User'}

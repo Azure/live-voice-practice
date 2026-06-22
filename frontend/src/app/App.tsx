@@ -74,6 +74,10 @@ const useStyles = makeStyles({
   setupDialog: {
     maxWidth: '600px',
     width: '90vw',
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusLarge,
+    boxShadow: tokens.shadow64,
+    padding: tokens.spacingVerticalXL,
   },
   loadingContent: {
     gridColumn: '1 / -1',
@@ -228,7 +232,7 @@ export default function App() {
         })
         setConnectionStage('rendering')
         updateAvatarDiagnostics({
-          message: 'Avatar configuration received',
+          message: 'Live Voice Agent configuration received',
         })
         const session = msg.session
         const servers =
@@ -257,8 +261,9 @@ export default function App() {
           api.clientLog('warning', 'app.session_updated_no_ice_servers')
           updateAvatarDiagnostics({
             message:
-              'Avatar configuration did not include media connection details',
-            warning: 'The avatar service did not return ICE server details.',
+              'Live Voice Agent configuration did not include media connection details',
+            warning:
+              'The Live Voice Agent service did not return ICE server details.',
           })
         }
       } else if (
@@ -426,35 +431,26 @@ export default function App() {
         </div>
       )}
 
-      {/* Setup dialog (home screen) */}
-      <Dialog
-        open={currentView === 'setup'}
-        onOpenChange={(_, data) => {
-          if (!data.open && currentView === 'setup') {
-            // Prevent closing via overlay click on the setup screen
-          }
-        }}
-      >
-        <DialogSurface className={styles.setupDialog}>
-          <DialogBody>
-            {loading ? (
-              <Spinner label="Loading scenarios..." />
-            ) : (
-              <ScenarioList
-                scenarios={scenarios}
-                selectedScenario={selectedScenario}
-                onSelect={setSelectedScenario}
-                onStart={handleStart}
-                isAuthenticated={authenticated}
-                onNavigateToConversations={navigateToConversations}
-                isTrainer={isTrainer}
-                onNavigateToAllPractices={navigateToAllPractices}
-                appName={appName}
-              />
-            )}
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
+      {/* Setup home screen */}
+      {currentView === 'setup' && (
+        <div className={styles.setupDialog}>
+          {loading ? (
+            <Spinner label="Loading scenarios..." />
+          ) : (
+            <ScenarioList
+              scenarios={scenarios}
+              selectedScenario={selectedScenario}
+              onSelect={setSelectedScenario}
+              onStart={handleStart}
+              isAuthenticated={authenticated}
+              onNavigateToConversations={navigateToConversations}
+              isTrainer={isTrainer}
+              onNavigateToAllPractices={navigateToAllPractices}
+              appName={appName}
+            />
+          )}
+        </div>
+      )}
 
       {/* Loading overlay */}
       <Dialog open={showLoading}>

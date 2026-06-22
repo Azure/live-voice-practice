@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
+  InfoLabel,
   Spinner,
   Text,
   Title3,
@@ -29,6 +30,12 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+  },
   body: {
     width: '100%',
   },
@@ -46,6 +53,7 @@ export interface ChartCardProps {
   isEmpty?: boolean
   emptyLabel?: string
   height?: number
+  info?: string
   /** A single Recharts chart element (e.g. <LineChart>…</LineChart>). */
   children: ReactElement
 }
@@ -63,6 +71,7 @@ export function ChartCard({
   isEmpty = false,
   emptyLabel = 'No data for the selected filters.',
   height = 280,
+  info,
   children,
 }: ChartCardProps): ReactElement {
   const styles = useStyles()
@@ -70,7 +79,10 @@ export function ChartCard({
   return (
     <div className={styles.card}>
       <div className={styles.header}>
-        <Title3>{title}</Title3>
+        <div className={styles.titleRow}>
+          <Title3>{title}</Title3>
+          {info && <InfoLabel info={info} size="medium" />}
+        </div>
         {subtitle && <Text size={200}>{subtitle}</Text>}
       </div>
       <div className={styles.body} style={{ height }}>

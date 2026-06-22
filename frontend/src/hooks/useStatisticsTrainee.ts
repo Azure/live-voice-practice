@@ -31,7 +31,11 @@ export function useStatisticsTrainee(
 
   useEffect(() => {
     if (!identifier) {
-      setState({ data: null, loading: false, error: 'Missing trainee identifier' })
+      setState({
+        data: null,
+        loading: false,
+        error: 'Missing trainee identifier',
+      })
       return
     }
     let cancelled = false

@@ -71,6 +71,13 @@ SUPPORT_MATERIAL_KEYWORDS = [
     "knowledge base",
 ]
 
+SCORING_RETRY_ATTEMPTS = 3
+
+
+class ConversationScoringError(RuntimeError):
+    """Raised when conversation scoring fails after retryable attempts."""
+
+
 # Fallback evaluation prompt for custom scenarios
 FALLBACK_EVALUATION_PROMPT = """You are an expert communication coach evaluating a role-play conversation.
 
@@ -260,33 +267,44 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
         """
 
         if not self.openai_client:
-            logger.error("OpenAI client not configured")
-            return None
+            raise ConversationScoringError("OpenAI client is not configured.")
         openai_client = self.openai_client
 
         try:
             supporting_materials = await self._fetch_supporting_materials_for_scenario(scenario)
             evaluation_prompt = self._build_evaluation_prompt(scenario, transcript, supporting_materials)
 
-            completion = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: openai_client.chat.completions.create(
-                    model=config["model_deployment_name"],
-                    messages=self._build_evaluation_messages(evaluation_prompt),  # pyright: ignore[reportArgumentType]
-                    response_format=self._get_response_format(),  # pyright: ignore[reportArgumentType]
-                ),
-            )
+            completion = None
+            for attempt in range(1, SCORING_RETRY_ATTEMPTS + 1):
+                try:
+                    completion = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: openai_client.chat.completions.create(
+                            model=config["model_deployment_name"],
+                            messages=self._build_evaluation_messages(
+                                evaluation_prompt
+                            ),  # pyright: ignore[reportArgumentType]
+                            response_format=self._get_response_format(),  # pyright: ignore[reportArgumentType]
+                        ),
+                    )
+                    break
+                except Exception:
+                    if attempt >= SCORING_RETRY_ATTEMPTS:
+                        raise
+                    logger.warning("Evaluation model call failed on attempt %s; retrying", attempt, exc_info=True)
+                    await asyncio.sleep(0.75 * attempt)
 
-            if completion.choices[0].message.content:
+            if completion and completion.choices[0].message.content:
                 evaluation_json = json.loads(completion.choices[0].message.content)
                 return self._process_evaluation_result(evaluation_json)
 
-            logger.error("No content received from OpenAI")
-            return None
+            raise ConversationScoringError("No content received from OpenAI.")
 
         except Exception as e:
-            logger.error("Error in evaluation model: %s", e)
-            return None
+            logger.exception("Error in evaluation model")
+            if isinstance(e, ConversationScoringError):
+                raise
+            raise ConversationScoringError(str(e)) from e
 
     def _build_evaluation_messages(self, evaluation_prompt: str) -> List[Dict[str, str]]:
         """Build the messages for the evaluation API call."""
@@ -426,8 +444,7 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
     ) -> Optional[Dict[str, Any]]:
         """Run evaluation using rubric criteria and structured output."""
         if not self.openai_client:
-            logger.error("OpenAI client not configured")
-            return None
+            raise ConversationScoringError("OpenAI client is not configured.")
         openai_client = self.openai_client
 
         try:
@@ -435,34 +452,46 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
             prompt = self._build_rubric_evaluation_prompt(scenario, transcript, rubric, supporting_materials)
             response_format = self._get_rubric_response_format(rubric)
 
-            completion = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: openai_client.chat.completions.create(
-                    model=config["model_deployment_name"],
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are an expert conversation evaluator. "
-                                "Score the trainee's performance using the rubric criteria provided. "
-                                "Return a structured evaluation."
-                            ),
-                        },
-                        {"role": "user", "content": prompt},
-                    ],  # pyright: ignore[reportArgumentType]
-                    response_format=response_format,  # pyright: ignore[reportArgumentType]
-                ),
-            )
+            completion = None
+            for attempt in range(1, SCORING_RETRY_ATTEMPTS + 1):
+                try:
+                    completion = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: openai_client.chat.completions.create(
+                            model=config["model_deployment_name"],
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "You are an expert conversation evaluator. "
+                                        "Score the trainee's performance using the rubric criteria provided. "
+                                        "Return a structured evaluation."
+                                    ),
+                                },
+                                {"role": "user", "content": prompt},
+                            ],  # pyright: ignore[reportArgumentType]
+                            response_format=response_format,  # pyright: ignore[reportArgumentType]
+                        ),
+                    )
+                    break
+                except Exception:
+                    if attempt >= SCORING_RETRY_ATTEMPTS:
+                        raise
+                    logger.warning(
+                        "Rubric evaluation model call failed on attempt %s; retrying", attempt, exc_info=True
+                    )
+                    await asyncio.sleep(0.75 * attempt)
 
-            if completion.choices[0].message.content:
+            if completion and completion.choices[0].message.content:
                 result = json.loads(completion.choices[0].message.content)
                 return self._process_rubric_evaluation_result(result, rubric)
 
-            logger.error("No content received from OpenAI (rubric evaluation)")
-            return None
+            raise ConversationScoringError("No content received from OpenAI for rubric evaluation.")
         except Exception as e:
-            logger.error("Error in rubric evaluation model: %s", e)
-            return None
+            logger.exception("Error in rubric evaluation model")
+            if isinstance(e, ConversationScoringError):
+                raise
+            raise ConversationScoringError(str(e)) from e
 
     def _build_rubric_evaluation_prompt(
         self,

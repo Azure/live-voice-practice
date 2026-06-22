@@ -27,6 +27,7 @@ import {
 import { useConversations } from '../hooks/useConversations'
 import { api } from '../services/api'
 import { Assessment, ConversationSummary } from '../types'
+import { formatDateTime } from '../utils/formatting'
 
 const useStyles = makeStyles({
   card: {
@@ -114,17 +115,6 @@ function renderSortIcon(
   ) : (
     <ArrowSortDownRegular fontSize={12} />
   )
-}
-
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr)
-  return date.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 export function ConversationList({
@@ -232,7 +222,7 @@ export function ConversationList({
                     onClick={() => onSelectConversation(conv.id)}
                   >
                     <TableCell>
-                      <Text size={300}>{formatDate(conv.created_at)}</Text>
+                      <Text size={300}>{formatDateTime(conv.created_at)}</Text>
                     </TableCell>
                     <TableCell>
                       <Text size={300}>

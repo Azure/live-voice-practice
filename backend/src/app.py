@@ -22,7 +22,7 @@ from flask_sock import Sock  # pyright: ignore[reportMissingTypeStubs]
 
 from src.services.auth import UserIdentity, get_current_user, require_auth, require_trainer
 from src.config import config
-from src.services.analyzers import ConversationAnalyzer, PronunciationAssessor
+from src.services.analyzers import ConversationAnalyzer, ConversationScoringError, PronunciationAssessor
 from src.services.anonymize import (
     anonymize_conversation_record,
     anonymize_trainee_row,
@@ -557,9 +557,18 @@ def _perform_conversation_analysis(
         results = loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
 
         ai_assessment, pronunciation = results
+        scoring_error = None
 
         if isinstance(ai_assessment, Exception):
-            logger.error("AI assessment failed: %s", ai_assessment)
+            logger.error(
+                "AI assessment failed",
+                exc_info=(type(ai_assessment), ai_assessment, ai_assessment.__traceback__),
+            )
+            scoring_error = (
+                str(ai_assessment)
+                if isinstance(ai_assessment, ConversationScoringError)
+                else "Conversation scoring failed. Check application logs for details."
+            )
             ai_assessment = None
 
         if isinstance(pronunciation, Exception):
@@ -575,6 +584,7 @@ def _perform_conversation_analysis(
                 "request_audio_chunks": len(audio_data or []),
                 "ai_assessment_available": isinstance(ai_assessment, dict),
                 "pronunciation_assessment_available": isinstance(pronunciation, dict),
+                "scoring_error": scoring_error,
             },
         }
 

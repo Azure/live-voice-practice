@@ -167,6 +167,24 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusLarge,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
+  calculationDetails: {
+    display: 'grid',
+    gap: tokens.spacingVerticalXS,
+    marginTop: tokens.spacingVerticalS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  calculationRow: {
+    display: 'grid',
+    gridTemplateColumns: '110px 1fr',
+    gap: tokens.spacingHorizontalS,
+    lineHeight: 1.4,
+    '@media (max-width: 600px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
   scoreCalculationToggle: {
     width: 'fit-content',
     paddingLeft: 0,
@@ -220,6 +238,7 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
   const pron = assessment.pronunciation_assessment
   const hasData = !!(ai || pron)
   const partialAssessment = !ai && !!pron
+  const scoringError = assessment.diagnostics?.scoring_error
 
   const isRubricBased = !!(
     ai?.criteria_scores && Object.keys(ai.criteria_scores).length > 0
@@ -341,8 +360,10 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                 style={{ marginTop: tokens.spacingVerticalS }}
               >
                 Pronunciation results were produced, but the AI scoring step did
-                not return results. Check the app logs for the analysis request;
-                this is usually a model deployment configuration issue.
+                not return results.
+                {scoringError
+                  ? ` ${scoringError}`
+                  : ' Check the app logs for the analysis request.'}
               </Text>
             </Card>
           )}
@@ -406,21 +427,36 @@ export function AssessmentPanel({ open, assessment, onClose }: Props) {
                     calculated?
                   </Button>
                   {scoreCalculationExpanded && (
-                    <Text
-                      size={200}
-                      style={{
-                        marginTop: '2px',
-                        color: tokens.colorNeutralForeground3,
-                      }}
-                    >
-                      Raw score: average of {criteriaCount} criteria ={' '}
-                      {criteriaScoreFormula} / {scaleMax}. Progress is
-                      normalized because the scale starts at {scaleMin}: (score
-                      - {scaleMin}) ÷ ({scaleMax} - {scaleMin}).{' '}
-                      {ai.passed
-                        ? `A score of ${passThreshold} or above is considered passing.`
-                        : `A score below ${passThreshold} is considered failing.`}
-                    </Text>
+                    <div className={styles.calculationDetails}>
+                      <div className={styles.calculationRow}>
+                        <Text size={200} weight="semibold">
+                          Raw score
+                        </Text>
+                        <Text size={200}>
+                          Average of {criteriaCount} criteria:{' '}
+                          {criteriaScoreFormula} / {scaleMax}.
+                        </Text>
+                      </div>
+                      <div className={styles.calculationRow}>
+                        <Text size={200} weight="semibold">
+                          Progress bar
+                        </Text>
+                        <Text size={200}>
+                          Normalized from {scaleMin} to {scaleMax}, because the
+                          scale starts at {scaleMin}.
+                        </Text>
+                      </div>
+                      <div className={styles.calculationRow}>
+                        <Text size={200} weight="semibold">
+                          Pass mark
+                        </Text>
+                        <Text size={200}>
+                          {ai.passed
+                            ? `${passThreshold} or above is considered passing.`
+                            : `Below ${passThreshold} is considered failing.`}
+                        </Text>
+                      </div>
+                    </div>
                   )}
                 </>
               )}

@@ -12,6 +12,7 @@ import {
   DialogSurface,
   DialogTitle,
   Field,
+  InfoLabel,
   Input,
   MessageBar,
   MessageBarBody,
@@ -196,7 +197,14 @@ export function TranscriptsTab() {
                   <MessageBarBody>{dialogError}</MessageBarBody>
                 </MessageBar>
               )}
-              <Field label="Transcript ID" required>
+              <Field
+                label={
+                  <InfoLabel info="Unique transcript name. Scenarios and rubrics reference this ID, so keep it stable after creation.">
+                    Transcript ID
+                  </InfoLabel>
+                }
+                required
+              >
                 <Input
                   value={draftId}
                   disabled={!!editingId}
@@ -204,11 +212,21 @@ export function TranscriptsTab() {
                   onChange={(_, data) => setDraftId(data.value)}
                 />
               </Field>
-              <Field label="Transcript text" required>
+              <Field
+                label={
+                  <InfoLabel info="Paste the conversation with speaker labels. Use one turn per line, for example: Customer: I need help with my bill. Agent: I can help with that.">
+                    Transcript text
+                  </InfoLabel>
+                }
+                required
+              >
                 <Textarea
                   resize="vertical"
                   rows={16}
                   value={draftText}
+                  placeholder={
+                    'Customer: Hi, I am calling about a charge on my bill.\nAgent: I can help with that. Can you tell me which charge looks wrong?\nCustomer: It is the late fee from last month.'
+                  }
                   onChange={(_, data) => setDraftText(data.value)}
                 />
               </Field>

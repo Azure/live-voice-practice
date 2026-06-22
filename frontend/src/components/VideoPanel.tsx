@@ -45,10 +45,10 @@ export interface AvatarConnectionDiagnostics {
 const STAGES: Record<ConnectionStage, StageInfo> = {
   creating: { label: 'Creating session...', progress: 0.1 },
   connecting: { label: 'Connecting to voice service...', progress: 0.3 },
-  configuring: { label: 'Configuring avatar...', progress: 0.5 },
+  configuring: { label: 'Configuring Live Voice Agent...', progress: 0.5 },
   rendering: {
     label:
-      'Getting your avatar ready. Thanks for your patience, this can take around 30 seconds...',
+      'Getting your Live Voice Agent ready. Thanks for your patience, this can take around 30 seconds...',
     progress: 0.7,
   },
   ready: { label: 'Ready!', progress: 1.0 },
@@ -235,7 +235,7 @@ export function VideoPanel({
     !diagnostics?.warning &&
     connectionStage === 'rendering' &&
     elapsedSeconds >= 45
-      ? 'Still waiting for avatar media. If this does not finish, retry and share this status.'
+      ? 'Still waiting for Live Voice Agent media. If this does not finish, retry and share this status.'
       : diagnostics?.warning
   const isVideoReady =
     videoReady.ready && videoReady.startedAt === diagnostics?.startedAt

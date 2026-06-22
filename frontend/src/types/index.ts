@@ -97,6 +97,7 @@ export interface Assessment {
     request_audio_chunks?: number
     ai_assessment_available?: boolean
     pronunciation_assessment_available?: boolean
+    scoring_error?: string | null
   }
 }
 
@@ -109,7 +110,7 @@ export interface AvatarOption {
 export const AVATAR_OPTIONS: AvatarOption[] = [
   {
     value: 'audio-only',
-    label: 'Audio Only (No Avatar)',
+    label: 'Audio only, no Live Voice Agent video',
     isPhotoAvatar: false,
   },
   {

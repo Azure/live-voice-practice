@@ -13,6 +13,7 @@ import {
 } from '@fluentui/react-components'
 import type { ReactElement } from 'react'
 import { OverviewKpis } from '../../services/statistics'
+import { scoreColor } from '../charts/chartTheme'
 
 const useStyles = makeStyles({
   grid: {
@@ -38,6 +39,7 @@ const useStyles = makeStyles({
 interface KpiSpec {
   label: string
   value: string
+  color?: string
 }
 
 function formatPercent(value: number | null): string {
@@ -72,8 +74,16 @@ export function KpiCards({ kpis, loading }: KpiCardsProps): ReactElement {
     { label: 'Total practices', value: String(kpis.totalPractices) },
     { label: 'Analyzed', value: String(kpis.analyzedPractices) },
     { label: 'Unique trainees', value: String(kpis.uniqueTrainees) },
-    { label: 'Average score', value: formatPercent(kpis.averageScorePercent) },
-    { label: 'Pass rate', value: formatPercent(kpis.passRatePercent) },
+    {
+      label: 'Average score',
+      value: formatPercent(kpis.averageScorePercent),
+      color: scoreColor(kpis.averageScorePercent),
+    },
+    {
+      label: 'Pass rate',
+      value: formatPercent(kpis.passRatePercent),
+      color: scoreColor(kpis.passRatePercent),
+    },
   ]
 
   return (
@@ -83,7 +93,9 @@ export function KpiCards({ kpis, loading }: KpiCardsProps): ReactElement {
           <Text size={200} className={styles.label}>
             {spec.label}
           </Text>
-          <Title2>{spec.value}</Title2>
+          <Title2 style={spec.color ? { color: spec.color } : undefined}>
+            {spec.value}
+          </Title2>
         </div>
       ))}
     </div>

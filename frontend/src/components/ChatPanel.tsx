@@ -4,25 +4,25 @@
  *--------------------------------------------------------------------------------------------*/
 
 import {
-    Button,
-    Card,
-    MessageBar,
-    MessageBarActions,
-    MessageBarBody,
-    MessageBarTitle,
-    Switch,
-    Text,
-    makeStyles,
-    tokens,
+  Button,
+  Card,
+  MessageBar,
+  MessageBarActions,
+  MessageBarBody,
+  MessageBarTitle,
+  Switch,
+  Text,
+  makeStyles,
+  tokens,
 } from '@fluentui/react-components'
 import {
-    ChartMultipleRegular,
-    DeleteRegular,
-    DismissRegular,
-    History20Regular,
-    MicOffRegular,
-    MicRegular,
-    People20Regular,
+  ChartMultipleRegular,
+  DeleteRegular,
+  DismissRegular,
+  History20Regular,
+  MicOffRegular,
+  MicRegular,
+  People20Regular,
 } from '@fluentui/react-icons'
 import { Message, Scenario } from '../types'
 
@@ -238,7 +238,7 @@ export function ChatPanel({
           <Switch
             checked={avatarEnabled}
             onChange={onToggleAvatar}
-            label="Show Avatar"
+            label="Show Live Voice Agent"
           />
         )}
       </div>

@@ -16,16 +16,18 @@ in by ``configure()`` from ``src.app`` so this module stays import-cycle free.
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from src.config import config
-from src.services.blob_repository import BlobRepository
+from src.services.blob_repository import BlobRepository, BlobRepositoryError
 from src.services.content_validation import validate_rubric, validate_scenario
 from src.services.cosmos_repository import CosmosRepository
 
 logger = logging.getLogger(__name__)
 
 TRANSCRIPT_BLOB_SUFFIX = ".txt"
+SAMPLE_TRANSCRIPTS_DIR = Path("samples/transcripts")
 
 
 class ContentValidationError(ValueError):
@@ -58,6 +60,7 @@ class AdminContentService:
         self._scenarios = CosmosRepository(config.get("cosmos_scenarios_container", "scenarios"), id_field="scenarioId")
         self._rubrics = CosmosRepository(config.get("cosmos_rubrics_container", "rubrics"), id_field="rubricId")
         self._transcripts = BlobRepository(config.get("transcripts_storage_container", "transcripts"))
+        self._sample_transcript_dir = SAMPLE_TRANSCRIPTS_DIR
         # Cache-invalidation callbacks, injected by configure().
         self._on_scenario_change: Optional[Callable[[Dict[str, Any]], None]] = None
         self._on_scenario_delete: Optional[Callable[[str], None]] = None
@@ -202,13 +205,24 @@ class AdminContentService:
     # ------------------------------------------------------------- transcripts
 
     def list_transcripts(self) -> List[str]:
-        """Return available transcript ids (blob names without the .txt suffix)."""
-        names = self._transcripts.list_names()
-        return sorted(_transcript_id_from_blob(name) for name in names if name.endswith(TRANSCRIPT_BLOB_SUFFIX))
+        """Return transcript ids from Blob Storage plus baked-in sample files."""
+        ids = set(self._sample_transcript_ids())
+        try:
+            names = self._transcripts.list_names()
+            ids.update(_transcript_id_from_blob(name) for name in names if name.endswith(TRANSCRIPT_BLOB_SUFFIX))
+        except BlobRepositoryError as error:
+            logger.warning("Blob transcript list unavailable; using baked-in samples only: %s", error)
+        return sorted(ids)
 
     def get_transcript(self, transcript_id: str) -> Optional[str]:
         """Return the text of a transcript, or ``None`` if it does not exist."""
-        return self._transcripts.get_text(f"{transcript_id}{TRANSCRIPT_BLOB_SUFFIX}")
+        try:
+            text = self._transcripts.get_text(f"{transcript_id}{TRANSCRIPT_BLOB_SUFFIX}")
+            if text is not None:
+                return text
+        except BlobRepositoryError as error:
+            logger.warning("Blob transcript read unavailable; checking baked-in samples: %s", error)
+        return self._get_sample_transcript(transcript_id)
 
     def save_transcript(self, transcript_id: str, text: str) -> None:
         """Create or replace a transcript's text."""
@@ -219,8 +233,8 @@ class AdminContentService:
         self._transcripts.upload_text(f"{transcript_id}{TRANSCRIPT_BLOB_SUFFIX}", text)
 
     def transcript_exists(self, transcript_id: str) -> bool:
-        """Return whether a transcript blob exists."""
-        return self._transcripts.exists(f"{transcript_id}{TRANSCRIPT_BLOB_SUFFIX}")
+        """Return whether a transcript exists in Blob Storage or built-in samples."""
+        return self._blob_transcript_exists(transcript_id) or self._sample_transcript_path(transcript_id).is_file()
 
     def delete_transcript(self, transcript_id: str) -> bool:
         """Delete a transcript; refuses if a scenario or rubric references it."""
@@ -230,7 +244,32 @@ class AdminContentService:
                 f"Transcript '{transcript_id}' is referenced and cannot be deleted",
                 holders,
             )
+        if self._sample_transcript_path(transcript_id).is_file() and not self._blob_transcript_exists(transcript_id):
+            raise ContentConflictError(f"Transcript '{transcript_id}' is a built-in sample and cannot be deleted")
         return self._transcripts.delete(f"{transcript_id}{TRANSCRIPT_BLOB_SUFFIX}")
+
+    def _blob_transcript_exists(self, transcript_id: str) -> bool:
+        try:
+            return self._transcripts.exists(f"{transcript_id}{TRANSCRIPT_BLOB_SUFFIX}")
+        except BlobRepositoryError as error:
+            logger.warning("Blob transcript exists check unavailable: %s", error)
+            return False
+
+    def _sample_transcript_path(self, transcript_id: str) -> Path:
+        return self._sample_transcript_dir / f"{transcript_id}{TRANSCRIPT_BLOB_SUFFIX}"
+
+    def _sample_transcript_ids(self) -> List[str]:
+        if not self._sample_transcript_dir.is_dir():
+            return []
+        return sorted(
+            path.stem for path in self._sample_transcript_dir.glob(f"*{TRANSCRIPT_BLOB_SUFFIX}") if path.is_file()
+        )
+
+    def _get_sample_transcript(self, transcript_id: str) -> Optional[str]:
+        path = self._sample_transcript_path(transcript_id)
+        if not path.is_file():
+            return None
+        return path.read_text(encoding="utf-8")
 
     def _transcript_holders(self, transcript_id: str) -> List[str]:
         """List scenarios/rubrics that reference a transcript id."""
