@@ -71,7 +71,9 @@ SUPPORT_MATERIAL_KEYWORDS = [
     "knowledge base",
 ]
 
-SCORING_RETRY_ATTEMPTS = 3
+SCORING_RETRY_ATTEMPTS = 2
+SCORING_PER_ATTEMPT_TIMEOUT_S = 45.0
+PRONUNCIATION_TIMEOUT_S = 90.0
 
 
 class ConversationScoringError(RuntimeError):
@@ -277,22 +279,25 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
             completion = None
             for attempt in range(1, SCORING_RETRY_ATTEMPTS + 1):
                 try:
-                    completion = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda: openai_client.chat.completions.create(
-                            model=config["model_deployment_name"],
-                            messages=self._build_evaluation_messages(
-                                evaluation_prompt
-                            ),  # pyright: ignore[reportArgumentType]
-                            response_format=self._get_response_format(),  # pyright: ignore[reportArgumentType]
+                    completion = await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: openai_client.chat.completions.create(
+                                model=config["model_deployment_name"],
+                                messages=self._build_evaluation_messages(
+                                    evaluation_prompt
+                                ),  # pyright: ignore[reportArgumentType]
+                                response_format=self._get_response_format(),  # pyright: ignore[reportArgumentType]
+                            ),
                         ),
+                        timeout=SCORING_PER_ATTEMPT_TIMEOUT_S,
                     )
                     break
                 except Exception:
                     if attempt >= SCORING_RETRY_ATTEMPTS:
                         raise
                     logger.warning("Evaluation model call failed on attempt %s; retrying", attempt, exc_info=True)
-                    await asyncio.sleep(0.75 * attempt)
+                    await asyncio.sleep(0.5 * attempt)
 
             if completion and completion.choices[0].message.content:
                 evaluation_json = json.loads(completion.choices[0].message.content)
@@ -455,23 +460,26 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
             completion = None
             for attempt in range(1, SCORING_RETRY_ATTEMPTS + 1):
                 try:
-                    completion = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda: openai_client.chat.completions.create(
-                            model=config["model_deployment_name"],
-                            messages=[
-                                {
-                                    "role": "system",
-                                    "content": (
-                                        "You are an expert conversation evaluator. "
-                                        "Score the trainee's performance using the rubric criteria provided. "
-                                        "Return a structured evaluation."
-                                    ),
-                                },
-                                {"role": "user", "content": prompt},
-                            ],  # pyright: ignore[reportArgumentType]
-                            response_format=response_format,  # pyright: ignore[reportArgumentType]
+                    completion = await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: openai_client.chat.completions.create(
+                                model=config["model_deployment_name"],
+                                messages=[
+                                    {
+                                        "role": "system",
+                                        "content": (
+                                            "You are an expert conversation evaluator. "
+                                            "Score the trainee's performance using the rubric criteria provided. "
+                                            "Return a structured evaluation."
+                                        ),
+                                    },
+                                    {"role": "user", "content": prompt},
+                                ],  # pyright: ignore[reportArgumentType]
+                                response_format=response_format,  # pyright: ignore[reportArgumentType]
+                            ),
                         ),
+                        timeout=SCORING_PER_ATTEMPT_TIMEOUT_S,
                     )
                     break
                 except Exception:
@@ -480,7 +488,7 @@ SUPPORTING MATERIALS (use these as reference when evaluating policy adherence an
                     logger.warning(
                         "Rubric evaluation model call failed on attempt %s; retrying", attempt, exc_info=True
                     )
-                    await asyncio.sleep(0.75 * attempt)
+                    await asyncio.sleep(0.5 * attempt)
 
             if completion and completion.choices[0].message.content:
                 result = json.loads(completion.choices[0].message.content)
@@ -825,12 +833,19 @@ class PronunciationAssessor:
         return speech_config
 
     def _create_pronunciation_config(self, reference_text: Optional[str]) -> speechsdk.PronunciationAssessmentConfig:
-        """Create pronunciation assessment configuration."""
+        """Create pronunciation assessment configuration.
+
+        We deliberately run in unscripted (reference-less) mode because the
+        recorded session typically contains many user utterances separated by
+        silence and assistant turns. Forcing a single reference text against a
+        long multi-turn buffer with enable_miscue=True caused every word to
+        score 0%, since the recognized text never matched the full transcript.
+        """
         pronunciation_config = speechsdk.PronunciationAssessmentConfig(
-            reference_text=reference_text or "",
+            reference_text="",
             grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
             granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme,
-            enable_miscue=True,
+            enable_miscue=False,
         )
         pronunciation_config.enable_prosody_assessment()
         return pronunciation_config
@@ -939,7 +954,14 @@ class PronunciationAssessor:
         return combined_audio
 
     async def _perform_assessment(self, wav_audio: bytes, reference_text: Optional[str]) -> Optional[Dict[str, Any]]:
-        """Perform the actual pronunciation assessment."""
+        """Perform pronunciation assessment using continuous recognition.
+
+        Continuous recognition streams the whole buffer, so multi-utterance
+        sessions are evaluated end-to-end instead of being truncated at the
+        first silence the way recognize_once() does. Results are aggregated
+        across all recognized phrases, weighted by recognized word count, to
+        produce session-level pronunciation scores.
+        """
         self._log_assessment_info(wav_audio, reference_text)
 
         speech_config = self._create_speech_config()
@@ -953,10 +975,100 @@ class PronunciationAssessor:
         )
         pronunciation_config.apply_to(speech_recognizer)
 
-        result = await asyncio.get_event_loop().run_in_executor(None, speech_recognizer.recognize_once)
+        loop = asyncio.get_event_loop()
+        done_future: "asyncio.Future[None]" = loop.create_future()
+        phrase_results: List[Dict[str, Any]] = []
 
-        pronunciation_result = speechsdk.PronunciationAssessmentResult(result)
-        return self._build_assessment_result(pronunciation_result, result)
+        def _on_recognized(evt: speechsdk.SpeechRecognitionEventArgs) -> None:
+            try:
+                if evt.result.reason != speechsdk.ResultReason.RecognizedSpeech:
+                    return
+                if not evt.result.text:
+                    return
+                pron = speechsdk.PronunciationAssessmentResult(evt.result)
+                words = self._extract_word_details(evt.result)
+                phrase_results.append(
+                    {
+                        "text": evt.result.text,
+                        "accuracy": pron.accuracy_score or 0.0,
+                        "fluency": pron.fluency_score or 0.0,
+                        "completeness": pron.completeness_score or 0.0,
+                        "prosody": getattr(pron, "prosody_score", None),
+                        "pronunciation": pron.pronunciation_score or 0.0,
+                        "words": words,
+                    }
+                )
+            except Exception:
+                logger.exception("Failed to parse pronunciation event")
+
+        def _signal_done(_evt: Any = None) -> None:
+            if not done_future.done():
+                loop.call_soon_threadsafe(done_future.set_result, None)
+
+        speech_recognizer.recognized.connect(_on_recognized)
+        speech_recognizer.session_stopped.connect(_signal_done)
+        speech_recognizer.canceled.connect(_signal_done)
+
+        await loop.run_in_executor(None, speech_recognizer.start_continuous_recognition)
+        try:
+            await asyncio.wait_for(done_future, timeout=PRONUNCIATION_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.warning("Pronunciation continuous recognition timed out after %ss", PRONUNCIATION_TIMEOUT_S)
+        finally:
+            await loop.run_in_executor(None, speech_recognizer.stop_continuous_recognition)
+
+        if not phrase_results:
+            logger.warning("Pronunciation assessment returned no recognized phrases")
+            return None
+
+        return self._aggregate_phrase_results(phrase_results)
+
+    @staticmethod
+    def _aggregate_phrase_results(phrases: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Combine per-phrase pronunciation results into a single session score.
+
+        Each phrase contributes weight equal to the number of words it
+        contains, so longer utterances dominate the session score and short
+        filler phrases ('hi', 'yeah') do not skew the average.
+        """
+        weighted: Dict[str, float] = {
+            "accuracy_score": 0.0,
+            "fluency_score": 0.0,
+            "completeness_score": 0.0,
+            "prosody_score": 0.0,
+            "pronunciation_score": 0.0,
+        }
+        total_weight = 0
+        prosody_weight = 0
+        all_words: List[Dict[str, Any]] = []
+
+        for phrase in phrases:
+            weight = max(len(phrase.get("words") or []), 1)
+            weighted["accuracy_score"] += float(phrase.get("accuracy", 0) or 0) * weight
+            weighted["fluency_score"] += float(phrase.get("fluency", 0) or 0) * weight
+            weighted["completeness_score"] += float(phrase.get("completeness", 0) or 0) * weight
+            weighted["pronunciation_score"] += float(phrase.get("pronunciation", 0) or 0) * weight
+            total_weight += weight
+            prosody = phrase.get("prosody")
+            if prosody is not None:
+                weighted["prosody_score"] += float(prosody) * weight
+                prosody_weight += weight
+            all_words.extend(phrase.get("words") or [])
+
+        if total_weight == 0:
+            total_weight = 1
+
+        result: Dict[str, Any] = {
+            "accuracy_score": round(weighted["accuracy_score"] / total_weight, 1),
+            "fluency_score": round(weighted["fluency_score"] / total_weight, 1),
+            "completeness_score": round(weighted["completeness_score"] / total_weight, 1),
+            "pronunciation_score": round(weighted["pronunciation_score"] / total_weight, 1),
+            "prosody_score": (
+                round(weighted["prosody_score"] / prosody_weight, 1) if prosody_weight else None
+            ),
+            "words": all_words,
+        }
+        return result
 
     def _extract_word_details(self, result: speechsdk.SpeechRecognitionResult) -> List[Dict[str, Any]]:
         """Extract word-level pronunciation details."""
