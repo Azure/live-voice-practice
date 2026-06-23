@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 SAFE_AGENT_ID = re.compile(r"[^A-Za-z0-9_.-]")
 DEFAULT_MAX_AGE_SECONDS = 2 * 60 * 60
+AUDIO_SAMPLE_RATE = 24000
+AUDIO_SAMPLE_WIDTH_BYTES = 2
+DEFAULT_MAX_AUDIO_SECONDS = 3 * 60
+DEFAULT_MAX_AUDIO_BYTES = AUDIO_SAMPLE_RATE * AUDIO_SAMPLE_WIDTH_BYTES * DEFAULT_MAX_AUDIO_SECONDS
 
 
 class SessionAudioStore:
@@ -44,9 +48,18 @@ class SessionAudioStore:
                 audio_file.write(audio_bytes)
 
             current = self._metadata.get(agent_id, {})
+            total_bytes = int(current.get("bytes", 0)) + len(audio_bytes)
+            if total_bytes > DEFAULT_MAX_AUDIO_BYTES:
+                self._trim_audio_file(path, DEFAULT_MAX_AUDIO_BYTES)
+                total_bytes = min(total_bytes, DEFAULT_MAX_AUDIO_BYTES)
+                logger.warning(
+                    "Trimmed session audio for agent %s to the last %s seconds",
+                    agent_id,
+                    DEFAULT_MAX_AUDIO_SECONDS,
+                )
             self._metadata[agent_id] = {
                 "path": str(path),
-                "bytes": int(current.get("bytes", 0)) + len(audio_bytes),
+                "bytes": total_bytes,
                 "chunks": int(current.get("chunks", 0)) + 1,
                 "updated_at": now,
             }
@@ -126,6 +139,13 @@ class SessionAudioStore:
     def _path_for_agent(self, agent_id: str) -> Path:
         safe_agent_id = SAFE_AGENT_ID.sub("_", agent_id)
         return self.base_dir / f"{safe_agent_id}.pcm"
+
+    @staticmethod
+    def _trim_audio_file(path: Path, max_bytes: int) -> None:
+        audio_bytes = path.read_bytes()
+        if len(audio_bytes) <= max_bytes:
+            return
+        path.write_bytes(audio_bytes[-max_bytes:])
 
 
 session_audio_store = SessionAudioStore()

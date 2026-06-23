@@ -211,7 +211,7 @@ export function ChatPanel({
           onClick={onAnalyze}
           disabled={!canAnalyze}
         >
-          Analyze Performance
+          {recording ? 'Stop recording to analyze' : 'Analyze Performance'}
         </Button>
 
         {isAuthenticated && onNavigateToConversations && (

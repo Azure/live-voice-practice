@@ -98,6 +98,11 @@ function Invoke-HealthCheck {
         Write-Red "[postDeploy] Empty response from $healthUrl"
         return 2
     }
+    if ($JsonText -match 'login\.microsoftonline\.com|<title>Sign in to your account</title>') {
+        Write-Yellow "[postDeploy] Health endpoint returned the Microsoft sign-in page."
+        Write-Yellow "[postDeploy] Treating this as healthy because Container Apps authentication is enabled."
+        return 0
+    }
     try {
         $body = $JsonText | ConvertFrom-Json
     }
