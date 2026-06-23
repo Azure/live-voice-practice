@@ -315,6 +315,7 @@ export default function App() {
     recordingError,
     clearRecordingError,
     toggleRecording,
+    stopRecording,
     getAudioRecording,
   } = useRecorder(sendAudioChunk)
 
@@ -362,6 +363,13 @@ export default function App() {
 
   const handleAnalyze = async () => {
     if (!selectedScenario) return
+    if (recording) {
+      stopRecording()
+      setAnalysisError(
+        'Recording was still running, so the microphone was stopped. Click Analyze Performance again after recording stops.'
+      )
+      return
+    }
 
     const recordings = getRecordings()
     const audioData = getAudioRecording()
@@ -538,7 +546,7 @@ export default function App() {
             recordingError={recordingError}
             onDismissRecordingError={clearRecordingError}
             connected={connected}
-            canAnalyze={messages.length > 0}
+            canAnalyze={messages.length > 0 && !recording}
             onToggleRecording={toggleRecording}
             onClear={clearMessages}
             onAnalyze={handleAnalyze}

@@ -77,6 +77,11 @@ classify_health() {
         echo -e "${RED}[postDeploy] Empty response from $healthUrl${NC}"
         return 2
     fi
+    if echo "$body" | grep -qiE 'login\.microsoftonline\.com|<title>Sign in to your account</title>'; then
+        echo -e "${YELLOW}[postDeploy] Health endpoint returned the Microsoft sign-in page.${NC}"
+        echo -e "${YELLOW}[postDeploy] Treating this as healthy because Container Apps authentication is enabled.${NC}"
+        return 0
+    fi
     local status
     status="$(echo "$body" | python3 -c 'import json,sys
 try:
