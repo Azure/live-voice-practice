@@ -72,20 +72,20 @@ def build_frame(image_path: Path, title: str, caption: str) -> Image.Image:
     canvas.paste(fg, ((W - nw) // 2, (H - nh) // 2))
 
     # Bottom caption bar — light translucent gray over the image
-    title_font = load_font(34)
-    body_font = load_font(22)
+    title_font = load_font(28)
+    body_font = load_font(19)
     tmp_draw = ImageDraw.Draw(canvas)
     body_lines = wrap(tmp_draw, caption, body_font, W - 80)
-    line_h = 30
-    bar_h = 30 + 44 + 8 + line_h * len(body_lines) + 22
+    line_h = 24
+    bar_h = 14 + 32 + 4 + line_h * len(body_lines) + 12
 
     overlay = Image.new("RGBA", (W, bar_h), (235, 238, 245, 140))
     canvas.paste(overlay, (0, H - bar_h), overlay)
 
     draw = ImageDraw.Draw(canvas, "RGBA")
-    y = H - bar_h + 22
+    y = H - bar_h + 12
     draw.text((40, y), title, font=title_font, fill=(20, 28, 42, 255))
-    y += 48
+    y += 34
     for line in body_lines:
         draw.text((40, y), line, font=body_font, fill=(45, 55, 72, 255))
         y += line_h
