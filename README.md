@@ -31,14 +31,7 @@ In a typical session, a trainee selects a practice scenario and begins a real-ti
 
 A typical session takes a trainee from picking a scenario, through a real voice conversation, and into structured feedback. Trainers get an admin surface to author scenarios and watch progress.
 
-| | |
-|---|---|
-| ![Pick a scenario](docs/images/tour/01-pick-scenario.png) | ![Live conversation](docs/images/tour/02-live-conversation.png) |
-| **1. Pick a scenario.** The trainee opens the app, reads the scenario brief, picks a Live Voice Agent persona, and starts the session. | **2. Practice live.** The avatar speaks and listens in real time. The transcript builds on the right while the trainee records, and Analyze Performance is one click away. |
-| ![Overall score](docs/images/tour/03-overall-score.png) | ![Recommendations](docs/images/tour/04-recommendations.png) |
-| **3. See the score.** A rubric-driven Performance Assessment opens with an overall score, pass/fail, and per-criterion breakdown with explanations. | **4. Drill into feedback.** Recommendations highlight the weakest criteria with evidence quoted straight from the conversation. |
-| ![Trainer statistics](docs/images/tour/05-trainer-stats.png) | ![Scenario editor](docs/images/tour/06-scenario-editor.png) |
-| **5. Trainer dashboard.** Admin stats show practices over time, average score, pass rate, weakest criteria, and drop-off by scenario. | **6. Author scenarios.** Trainers create or edit scenarios with the customer's role, background, opening line, and conversation guidelines. |
+![Guided tour of Live Voice Practice](docs/images/tour/guided-tour.gif)
 
 
 ## Architecture
