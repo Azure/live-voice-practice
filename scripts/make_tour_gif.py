@@ -71,20 +71,23 @@ def build_frame(image_path: Path, title: str, caption: str) -> Image.Image:
     canvas = bg.copy()
     canvas.paste(fg, ((W - nw) // 2, (H - nh) // 2))
 
-    # Bottom caption bar
-    draw = ImageDraw.Draw(canvas, "RGBA")
+    # Bottom caption bar — light translucent gray over the image
     title_font = load_font(34)
     body_font = load_font(22)
-    body_lines = wrap(draw, caption, body_font, W - 80)
+    tmp_draw = ImageDraw.Draw(canvas)
+    body_lines = wrap(tmp_draw, caption, body_font, W - 80)
     line_h = 30
     bar_h = 30 + 44 + 8 + line_h * len(body_lines) + 22
-    draw.rectangle([(0, H - bar_h), (W, H)], fill=(15, 20, 30, 215))
 
+    overlay = Image.new("RGBA", (W, bar_h), (235, 238, 245, 140))
+    canvas.paste(overlay, (0, H - bar_h), overlay)
+
+    draw = ImageDraw.Draw(canvas, "RGBA")
     y = H - bar_h + 22
-    draw.text((40, y), title, font=title_font, fill=(255, 255, 255, 255))
+    draw.text((40, y), title, font=title_font, fill=(20, 28, 42, 255))
     y += 48
     for line in body_lines:
-        draw.text((40, y), line, font=body_font, fill=(220, 230, 245, 255))
+        draw.text((40, y), line, font=body_font, fill=(45, 55, 72, 255))
         y += line_h
 
     # Step indicator dots (top-right)
