@@ -606,3 +606,135 @@ class TestPronunciationAssessor:
         # Should include some audio data (user chunks are processed)
         assert isinstance(result, (bytes, bytearray))
         # The actual filtering logic depends on implementation details
+
+    def test_aggregate_phrase_results_weighted_by_word_count(self):
+        """Longer phrases dominate the aggregated session score."""
+        phrases = [
+            {
+                # Short filler: 1 word, all zeros. Should be swamped by the long phrase.
+                "text": "hi",
+                "accuracy": 0.0,
+                "fluency": 0.0,
+                "completeness": 0.0,
+                "pronunciation": 0.0,
+                "prosody": 0.0,
+                "words": [{"word": "hi"}],
+            },
+            {
+                # Long, well-scored phrase: 9 words, all 90s.
+                "text": "the quick brown fox jumps over the lazy dog",
+                "accuracy": 90.0,
+                "fluency": 90.0,
+                "completeness": 90.0,
+                "pronunciation": 90.0,
+                "prosody": 80.0,
+                "words": [{"word": w} for w in "the quick brown fox jumps over the lazy dog".split()],
+            },
+        ]
+
+        result = PronunciationAssessor._aggregate_phrase_results(phrases)
+
+        assert result is not None
+        # Weighted average: (0*1 + 90*9) / (1 + 9) = 81.0
+        assert result["accuracy_score"] == 81.0
+        assert result["fluency_score"] == 81.0
+        assert result["completeness_score"] == 81.0
+        assert result["pronunciation_score"] == 81.0
+        # Prosody: (0*1 + 80*9) / 10 = 72.0
+        assert result["prosody_score"] == 72.0
+        # All words from both phrases are surfaced.
+        assert len(result["words"]) == 10
+
+    def test_aggregate_phrase_results_empty_returns_none(self):
+        """Empty phrase list produces None, not a fake all-zero session score."""
+        assert PronunciationAssessor._aggregate_phrase_results([]) is None
+
+    def test_aggregate_phrase_results_prosody_none_excluded(self):
+        """Phrases without prosody are excluded from the prosody average and yield None when all are absent."""
+        phrases = [
+            {
+                "text": "hello",
+                "accuracy": 80.0,
+                "fluency": 80.0,
+                "completeness": 80.0,
+                "pronunciation": 80.0,
+                "prosody": None,
+                "words": [{"word": "hello"}],
+            },
+        ]
+        result = PronunciationAssessor._aggregate_phrase_results(phrases)
+        assert result is not None
+        assert result["prosody_score"] is None
+
+    @pytest.mark.asyncio
+    async def test_perform_assessment_logs_reason_when_no_speech_recognized(self, caplog):
+        """A recognizer that only emits non-RecognizedSpeech events logs the reason and returns None."""
+        import logging as _logging
+
+        import src.services.analyzers as analyzers_module
+
+        assessor = PronunciationAssessor()
+        assessor.speech_key = "test-key"
+        assessor.speech_region = "test-region"
+
+        # Fake result whose `.reason` is not RecognizedSpeech.
+        class _FakeReason:
+            def __repr__(self) -> str:
+                return "NoMatch"
+
+        no_match_reason = _FakeReason()
+
+        class _FakeResult:
+            reason = no_match_reason
+            text = ""
+
+        class _FakeEvt:
+            result = _FakeResult()
+
+        # Fake recognizer that fires one recognized(NoMatch) event, then session_stopped.
+        class _FakeSignal:
+            def __init__(self):
+                self._handlers = []
+
+            def connect(self, handler):
+                self._handlers.append(handler)
+
+            def fire(self, evt=None):
+                for h in list(self._handlers):
+                    h(evt)
+
+        class _FakeRecognizer:
+            def __init__(self):
+                self.recognized = _FakeSignal()
+                self.session_stopped = _FakeSignal()
+                self.canceled = _FakeSignal()
+
+            def start_continuous_recognition(self):
+                # Deliver events synchronously as if the SDK worker fired them.
+                self.recognized.fire(_FakeEvt())
+                self.session_stopped.fire(None)
+
+            def stop_continuous_recognition(self):
+                return None
+
+        fake_recognizer = _FakeRecognizer()
+
+        with patch.object(analyzers_module.speechsdk, "SpeechRecognizer", return_value=fake_recognizer), patch.object(
+            analyzers_module.speechsdk, "ResultReason"
+        ) as mock_reason, patch.object(assessor, "_create_speech_config", return_value=Mock()), patch.object(
+            assessor, "_create_audio_config", return_value=Mock()
+        ), patch.object(
+            assessor, "_create_pronunciation_config"
+        ) as mock_pc:
+            # Ensure our fake reason will NOT compare equal to RecognizedSpeech.
+            mock_reason.RecognizedSpeech = object()
+            mock_pc.return_value.apply_to = Mock()
+
+            with caplog.at_level(_logging.INFO, logger="src.services.analyzers"):
+                result = await assessor._perform_assessment(b"wav", None)
+
+        assert result is None
+        # The NoMatch reason must appear in the logs so 0.0 scores are never silently reported.
+        joined = " ".join(record.getMessage() for record in caplog.records)
+        assert "reason=" in joined
+        assert "NoMatch" in joined

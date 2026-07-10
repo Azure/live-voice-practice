@@ -545,9 +545,9 @@ def _perform_conversation_analysis(
 
     try:
         pronunciation_task = (
-            pronunciation_assessor.assess_pronunciation_pcm(session_audio, reference_text)
+            pronunciation_assessor.assess_pronunciation_pcm(session_audio)
             if session_audio
-            else pronunciation_assessor.assess_pronunciation(audio_data, reference_text)
+            else pronunciation_assessor.assess_pronunciation(audio_data)
         )
         tasks = [
             conversation_analyzer.analyze_conversation(scenario_id, transcript, rubric=rubric),

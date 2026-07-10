@@ -72,6 +72,7 @@ SUPPORT_MATERIAL_KEYWORDS = [
 ]
 
 SCORING_RETRY_ATTEMPTS = 3
+PRONUNCIATION_TIMEOUT_S = 90.0
 
 
 class ConversationScoringError(RuntimeError):
@@ -825,12 +826,21 @@ class PronunciationAssessor:
         return speech_config
 
     def _create_pronunciation_config(self, reference_text: Optional[str]) -> speechsdk.PronunciationAssessmentConfig:
-        """Create pronunciation assessment configuration."""
+        """Create pronunciation assessment configuration.
+
+        We run in unscripted (reference-less) mode because a recorded session
+        contains many user utterances separated by silence and assistant turns.
+        Forcing a single reference_text against a long multi-turn buffer with
+        ``enable_miscue=True`` caused every word to score 0%, since the
+        recognized text never matched the full concatenated transcript.
+        ``reference_text`` is accepted for backward compatibility but ignored.
+        """
+        del reference_text  # unused in unscripted mode
         pronunciation_config = speechsdk.PronunciationAssessmentConfig(
-            reference_text=reference_text or "",
+            reference_text="",
             grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
             granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme,
-            enable_miscue=True,
+            enable_miscue=False,
         )
         pronunciation_config.enable_prosody_assessment()
         return pronunciation_config
@@ -849,21 +859,6 @@ class PronunciationAssessor:
         push_stream.close()
 
         return speechsdk.audio.AudioConfig(stream=push_stream)
-
-    def _build_assessment_result(
-        self,
-        pronunciation_result: speechsdk.PronunciationAssessmentResult,
-        result: speechsdk.SpeechRecognitionResult,
-    ) -> Dict[str, Any]:
-        """Build the final assessment result."""
-        return {
-            "accuracy_score": pronunciation_result.accuracy_score,
-            "fluency_score": pronunciation_result.fluency_score,
-            "completeness_score": pronunciation_result.completeness_score,
-            "prosody_score": getattr(pronunciation_result, "prosody_score", None),
-            "pronunciation_score": pronunciation_result.pronunciation_score,
-            "words": self._extract_word_details(result),
-        }
 
     async def assess_pronunciation(
         self, audio_data: List[Dict[str, Any]], reference_text: Optional[str] = None
@@ -939,7 +934,19 @@ class PronunciationAssessor:
         return combined_audio
 
     async def _perform_assessment(self, wav_audio: bytes, reference_text: Optional[str]) -> Optional[Dict[str, Any]]:
-        """Perform the actual pronunciation assessment."""
+        """Perform pronunciation assessment using continuous recognition.
+
+        Continuous recognition streams the whole buffer, so multi-utterance
+        sessions are evaluated end-to-end instead of being truncated at the
+        first silence the way ``recognize_once()`` does. Each ``recognized``
+        event carries its own ``PronunciationAssessmentResult``; results are
+        aggregated across all phrases and weighted by recognized word count
+        to produce a session-level score.
+
+        Any non-``RecognizedSpeech`` event is logged with its ``reason`` and
+        (when present) ``cancellation_details`` so that empty or ``NoMatch``
+        outcomes are visible in logs instead of silently reporting 0.0.
+        """
         self._log_assessment_info(wav_audio, reference_text)
 
         speech_config = self._create_speech_config()
@@ -953,10 +960,117 @@ class PronunciationAssessor:
         )
         pronunciation_config.apply_to(speech_recognizer)
 
-        result = await asyncio.get_event_loop().run_in_executor(None, speech_recognizer.recognize_once)
+        loop = asyncio.get_event_loop()
+        done_future: "asyncio.Future[None]" = loop.create_future()
+        phrase_results: List[Dict[str, Any]] = []
 
-        pronunciation_result = speechsdk.PronunciationAssessmentResult(result)
-        return self._build_assessment_result(pronunciation_result, result)
+        def _on_recognized(evt: speechsdk.SpeechRecognitionEventArgs) -> None:
+            try:
+                reason = getattr(evt.result, "reason", None)
+                if reason != speechsdk.ResultReason.RecognizedSpeech:
+                    logger.info(
+                        "Pronunciation recognized event skipped: reason=%s text=%r",
+                        reason,
+                        getattr(evt.result, "text", ""),
+                    )
+                    return
+                if not evt.result.text:
+                    logger.info("Pronunciation recognized event had empty text; skipping")
+                    return
+                pron = speechsdk.PronunciationAssessmentResult(evt.result)
+                phrase_results.append(
+                    {
+                        "text": evt.result.text,
+                        "accuracy": pron.accuracy_score or 0.0,
+                        "fluency": pron.fluency_score or 0.0,
+                        "completeness": pron.completeness_score or 0.0,
+                        "prosody": getattr(pron, "prosody_score", None),
+                        "pronunciation": pron.pronunciation_score or 0.0,
+                        "words": self._extract_word_details(evt.result),
+                    }
+                )
+            except Exception:
+                logger.exception("Failed to parse pronunciation recognized event")
+
+        def _on_canceled(evt: speechsdk.SpeechRecognitionCanceledEventArgs) -> None:
+            logger.warning(
+                "Pronunciation continuous recognition canceled: reason=%s details=%s",
+                getattr(evt, "reason", None),
+                getattr(evt, "error_details", None),
+            )
+            if not done_future.done():
+                loop.call_soon_threadsafe(done_future.set_result, None)
+
+        def _on_session_stopped(_evt: Any = None) -> None:
+            if not done_future.done():
+                loop.call_soon_threadsafe(done_future.set_result, None)
+
+        speech_recognizer.recognized.connect(_on_recognized)
+        speech_recognizer.session_stopped.connect(_on_session_stopped)
+        speech_recognizer.canceled.connect(_on_canceled)
+
+        await loop.run_in_executor(None, speech_recognizer.start_continuous_recognition)
+        try:
+            await asyncio.wait_for(done_future, timeout=PRONUNCIATION_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.warning("Pronunciation continuous recognition timed out after %ss", PRONUNCIATION_TIMEOUT_S)
+        finally:
+            await loop.run_in_executor(None, speech_recognizer.stop_continuous_recognition)
+
+        if not phrase_results:
+            logger.warning("Pronunciation assessment returned no recognized phrases; reporting no result")
+            return None
+
+        return self._aggregate_phrase_results(phrase_results)
+
+    @staticmethod
+    def _aggregate_phrase_results(phrases: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Combine per-phrase pronunciation results into a single session score.
+
+        Each phrase contributes weight equal to its recognized word count, so
+        longer utterances dominate the session score and short filler phrases
+        ("hi", "yeah") do not skew the average. Returns ``None`` if the input
+        list is empty, so callers can distinguish "no recognized speech" from
+        an all-zero score.
+        """
+        if not phrases:
+            return None
+
+        totals = {
+            "accuracy_score": 0.0,
+            "fluency_score": 0.0,
+            "completeness_score": 0.0,
+            "pronunciation_score": 0.0,
+        }
+        prosody_total = 0.0
+        total_weight = 0
+        prosody_weight = 0
+        all_words: List[Dict[str, Any]] = []
+
+        for phrase in phrases:
+            weight = max(len(phrase.get("words") or []), 1)
+            totals["accuracy_score"] += float(phrase.get("accuracy", 0) or 0) * weight
+            totals["fluency_score"] += float(phrase.get("fluency", 0) or 0) * weight
+            totals["completeness_score"] += float(phrase.get("completeness", 0) or 0) * weight
+            totals["pronunciation_score"] += float(phrase.get("pronunciation", 0) or 0) * weight
+            total_weight += weight
+
+            prosody = phrase.get("prosody")
+            if prosody is not None:
+                prosody_total += float(prosody) * weight
+                prosody_weight += weight
+
+            all_words.extend(phrase.get("words") or [])
+
+        # total_weight is at least 1 here because weight is max(..., 1) per phrase.
+        return {
+            "accuracy_score": round(totals["accuracy_score"] / total_weight, 1),
+            "fluency_score": round(totals["fluency_score"] / total_weight, 1),
+            "completeness_score": round(totals["completeness_score"] / total_weight, 1),
+            "pronunciation_score": round(totals["pronunciation_score"] / total_weight, 1),
+            "prosody_score": (round(prosody_total / prosody_weight, 1) if prosody_weight else None),
+            "words": all_words,
+        }
 
     def _extract_word_details(self, result: speechsdk.SpeechRecognitionResult) -> List[Dict[str, Any]]:
         """Extract word-level pronunciation details."""
