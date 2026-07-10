@@ -5,6 +5,8 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-07-10
+
 ### Fixed
 - Pronunciation assessment no longer returns 0.0 for every score on real multi-turn sessions. The assessor now uses continuous recognition in unscripted (reference-less) mode, aggregates each recognized phrase weighted by word count, and logs `result.reason` on non-`RecognizedSpeech` events so `NoMatch` outcomes are visible instead of being silently reported as all-zero scores. A 90 s bounded timeout on continuous recognition prevents the analyze flow from hanging when the SDK never emits `session_stopped`. Fixes #55.
 
