@@ -18,12 +18,12 @@
     "@fluentui/react-components": "9.74.7",
     "globals": "17.11.0",
     "react": "19.2.8",
-    "react-dom": "19.2.3",
+    "react-dom": "19.2.8",
     "typescript-eslint": "8.50.0"
   },
   "devDependencies": {
     "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.3",
+    "@types/react-dom": "19.2.7",
     "@typescript-eslint/eslint-plugin": "8.68.0",
     "@typescript-eslint/parser": "8.68.0",
     "@vitejs/plugin-react": "5.1.2",
