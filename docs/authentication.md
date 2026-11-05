@@ -26,7 +26,16 @@ development. Do not configure a client-provided or forwarded origin dynamically.
 The application fails startup if any setting is missing or invalid. Both
 `scripts/deploy.ps1` and `scripts/deploy.sh`, invoked by `azd deploy`, validate the
 settings before building and pass them to Container Apps together with the image.
-Deployment hosts need Python 3 for this local configuration check. Infrastructure
+Deployment hosts need Python 3 for this configuration check. Before building,
+both hooks also run `scripts/check_auth.py` to verify that the existing platform
+provider requires authentication, uses HTTPS and the configured tenant, requests
+the delegated API scope, and references configured client and token-store
+secrets. Only `/api/health` may be excluded from platform authentication.
+Missing settings stop deployment with explicit setup instructions. The check
+reads secret names, never secret values. Application registration and consent
+remain administrator prerequisites, not credentials created by the deploy hook.
+The hooks enforce single-revision mode and one replica when updating the image.
+The supplied Docker entrypoint runs one Python application process. Infrastructure
 is a separately versioned submodule; do not invent a submodule revision to apply
 application configuration. A provisioned but unconfigured image will not become
 ready. Authentication provider setup below must be completed before browser use.
@@ -44,7 +53,8 @@ An administrator must configure a single-tenant API application registration:
    URI `https://<public-host>/.auth/login/aad/callback` to the web registration.
    Store the web client credential in the platform's secret configuration, never
    in this repository.
-4. Enable the provider's token store. Configure its login parameters to request
+4. Enable the provider's token store with its Azure Blob storage SAS secret
+   reference. Configure its login parameters to request
    `openid profile offline_access api://<API-client-ID>/access_as_user`.
    Confirm `/.auth/me` returns an `access_token` for the API, with `ver=2.0`,
    `tid=<tenant>`, `aud=<API-client-ID>`, and `scp` containing `access_as_user`.

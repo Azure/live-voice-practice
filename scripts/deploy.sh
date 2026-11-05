@@ -120,6 +120,7 @@ echo "   CONTAINER_REGISTRY_LOGIN_SERVER = $acrServer"
 echo "   AZURE_RESOURCE_GROUP = $rg"
 echo "   VOICELAB_APP_NAME = $appName"
 echo
+python3 "$(dirname "$0")/check_auth.py" --name "$appName" --resource-group "$rg"
 #endregion
 
 #region Decide agent pool
@@ -224,6 +225,7 @@ echo
 #endregion
 
 #region Update container app
+az containerapp revision set-mode --name "$appName" --resource-group "$rg" --mode single
 echo -e "${GREEN}Updating container app...${NC}"
 # Retry loop for the AcrPull race: when SystemAssigned MI was just bound to
 # the Container Registry, the AcrPull role assignment can take 30-120s to
@@ -236,6 +238,7 @@ updateOk=false
 for attempt in $(seq 1 "$maxAttempts"); do
     errFile="$(mktemp)"
     if az containerapp update --name "$appName" --resource-group "$rg" --image "$imageName" \
+        --min-replicas 1 --max-replicas 1 \
         --set-env-vars "AUTH_TENANT_ID=$AUTH_TENANT_ID" "AUTH_AUDIENCE=$AUTH_AUDIENCE" \
         "AUTH_PUBLIC_ORIGIN=$AUTH_PUBLIC_ORIGIN" 2>"$errFile"; then
         cat "$errFile"

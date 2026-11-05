@@ -144,6 +144,8 @@ Write-Host "   CONTAINER_REGISTRY_LOGIN_SERVER = $acrServer"
 Write-Host "   AZURE_RESOURCE_GROUP = $rg"
 Write-Host "   VOICELAB_APP_NAME = $appName"
 Write-Host ""
+python "$PSScriptRoot\check_auth.py" --name $appName --resource-group $rg
+if ($LASTEXITCODE -ne 0) { throw "Required platform authentication is not configured; deployment stopped." }
 #endregion
 
 #region Decide agent pool
@@ -268,6 +270,8 @@ Write-Host ""
 #endregion
 
 #region Update container app
+az containerapp revision set-mode --name $appName --resource-group $rg --mode single
+if ($LASTEXITCODE -ne 0) { throw "Cannot enforce single revision mode; deployment stopped." }
 Write-Green "Updating container app..."
 # Retry loop for the AcrPull race: when SystemAssigned MI was just bound to
 # the Container Registry, the AcrPull role assignment can take 30-120s to
@@ -279,7 +283,7 @@ $backoffSeconds = @(15, 30, 60, 120)
 $updateOk = $false
 for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
     $tmpErr = New-TemporaryFile
-    az containerapp update --name $appName --resource-group $rg --image $imageName --set-env-vars "AUTH_TENANT_ID=$env:AUTH_TENANT_ID" "AUTH_AUDIENCE=$env:AUTH_AUDIENCE" "AUTH_PUBLIC_ORIGIN=$env:AUTH_PUBLIC_ORIGIN" 2>$tmpErr
+    az containerapp update --name $appName --resource-group $rg --image $imageName --min-replicas 1 --max-replicas 1 --set-env-vars "AUTH_TENANT_ID=$env:AUTH_TENANT_ID" "AUTH_AUDIENCE=$env:AUTH_AUDIENCE" "AUTH_PUBLIC_ORIGIN=$env:AUTH_PUBLIC_ORIGIN" 2>$tmpErr
     $exit = $LASTEXITCODE
     $errText = ''
     try { $errText = (Get-Content $tmpErr -Raw -ErrorAction SilentlyContinue) } catch { $errText = '' }
