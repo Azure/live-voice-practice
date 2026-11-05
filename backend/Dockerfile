@@ -9,7 +9,7 @@
 # pass `--build-arg REGISTRY=docker.io --build-arg NODE_IMAGE=library/node:20-alpine`.
 ARG REGISTRY=mcr.microsoft.com
 ARG NODE_IMAGE=devcontainers/javascript-node:20
-ARG PYTHON_IMAGE=devcontainers/python:3.11-bullseye
+ARG PYTHON_IMAGE=devcontainers/python:3.11-bookworm
 
 FROM ${REGISTRY}/${NODE_IMAGE} AS frontend-builder
 
@@ -32,7 +32,7 @@ COPY frontend/.prettierignore ./
 
 RUN npx --yes tsc && npx --yes vite build
 
-# Stage 2: Python runtime (using Ubuntu 20.04 base to avoid OpenSSL 3 issues with speechsdk)
+# Stage 2: Python runtime on Debian 12, supported by the current Speech SDK.
 FROM ${REGISTRY}/${PYTHON_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -42,7 +42,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app
 
-# The mcr.microsoft.com/devcontainers/python:3.11-bullseye image ships with a
+# Some devcontainer images ship with a
 # yarnpkg apt source whose signing key is no longer trusted by current apt.
 # We don't need yarn at runtime, so drop the source before `apt-get update` to
 # avoid a hard failure on `NO_PUBKEY 62D54FD4003F6525` / unsigned repository.
@@ -61,6 +61,7 @@ WORKDIR /app
 
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+RUN python -c "import azure.cognitiveservices.speech as speech; speech.SpeechConfig(subscription='build-check', region='eastus')"
 
 COPY --chown=app:app backend/src/ ./src/
 COPY --chown=app:app data/scenarios/ ./data/scenarios/
