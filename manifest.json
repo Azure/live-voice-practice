@@ -1,12 +1,12 @@
 {
-  "tag": "v2.0.0",
+  "tag": "v2.0.1",
   "repo": "https://github.com/Azure/live-voice-practice.git",
   "ailz_tag": "v2.0.14",
   "components": [
     {
       "name": "live-voice-practice",
       "repo": "https://github.com/Azure/live-voice-practice.git",
-      "tag": "v2.0.0"
+      "tag": "v2.0.1"
     }
   ]
 }

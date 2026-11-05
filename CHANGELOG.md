@@ -5,6 +5,14 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-05
+
+### Changed
+- Updated React and React DOM to 19.2.8 with matching type definitions, React Router to 6.30.6, and Vite to 8.3.5.
+- Updated the TypeScript ESLint packages together to 8.69.0, React Hooks linting to 7.1.1, and lint globals to 17.12.0. ESLint remains on the compatible 9.x release.
+- Updated transitive frontend dependencies including `@humanfs/node`, `js-yaml`, `brace-expansion`, and `source-map-js`.
+- Updated Black to 26.10.1, Pylint to 4.0.9, and the compatible Buildx, Docker build/push, and Node setup Actions.
+
 ## [2.0.0] - 2026-11-05
 
 ### Changed
