@@ -61,7 +61,7 @@ RUN useradd --create-home --shell /bin/bash app
 WORKDIR /app
 
 COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=app:app backend/src/ ./src/
 COPY --chown=app:app data/scenarios/ ./data/scenarios/
@@ -69,6 +69,7 @@ COPY --chown=app:app data/graph-api-canned.json ./data/
 
 COPY --from=frontend-builder --chown=app:app /app/static/ ./static/
 
+RUN mkdir -p /app/.runtime/audio && chown -R app:app /app/.runtime
 USER app
 EXPOSE 8000
 

@@ -92,9 +92,6 @@ export interface Assessment {
     }>
   }
   diagnostics?: {
-    audio_source?: string
-    session_audio_bytes?: number
-    request_audio_chunks?: number
     ai_assessment_available?: boolean
     pronunciation_assessment_available?: boolean
     scoring_error?: string | null

@@ -8,9 +8,11 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+from threading import Lock
+from typing import Any, Callable, Dict, Optional
 
 import simple_websocket.ws  # pyright: ignore[reportMissingTypeStubs]
+from simple_websocket import ConnectionClosed as ClientConnectionClosed
 from azure.ai.voicelive.aio import (
     ConnectionClosed,
     ConnectionError as VoiceLiveConnectionError,
@@ -78,8 +80,12 @@ class VoiceProxyHandler:
         """
         self.agent_manager = agent_manager
         self.scenario_manager = scenario_manager
+        self._active_agents: set[str] = set()
+        self._connection_lock = Lock()
 
-    async def handle_connection(self, client_ws: simple_websocket.ws.Server) -> None:
+    async def handle_connection(
+        self, client_ws: simple_websocket.ws.Server, owner_id: str, is_authorized: Callable[[], bool]
+    ) -> None:
         """
         Handle a WebSocket connection from a client.
 
@@ -87,10 +93,21 @@ class VoiceProxyHandler:
             client_ws: The client WebSocket connection
         """
         current_agent_id = None
+        admitted = False
 
         try:
             current_agent_id = await self._get_agent_id_from_client(client_ws)
             agent_config = self.agent_manager.get_agent(current_agent_id) if current_agent_id else None
+            if not is_authorized() or not agent_config or agent_config.get("owner_id") != owner_id:
+                await self._send_error(client_ws, "Resource not found")
+                return
+            with self._connection_lock:
+                if current_agent_id not in self._active_agents:
+                    self._active_agents.add(current_agent_id)
+                    admitted = True
+            if not admitted:
+                await self._send_error(client_ws, "Session is already connected")
+                return
 
             endpoint = self._build_endpoint()
             credential = self._get_credential()
@@ -116,23 +133,31 @@ class VoiceProxyHandler:
                 )
 
                 await self._send_initial_config(azure_conn, agent_config)
-                await self._handle_message_forwarding(client_ws, azure_conn, current_agent_id)
+                await self._handle_message_forwarding(client_ws, azure_conn, current_agent_id, is_authorized)
 
         except ConnectionClosed as e:
             logger.info("VoiceLive connection closed: code=%s, reason=%s", e.code, e.reason)
         except VoiceLiveConnectionError as e:
-            logger.error("VoiceLive connection error: %s", e)
-            await self._send_error(client_ws, str(e))
+            logger.error("VoiceLive connection failed (%s)", type(e).__name__)
+            await self._send_error(client_ws, "Voice connection failed")
         except Exception as e:
-            logger.error("Proxy error: %s", e)
-            await self._send_error(client_ws, str(e))
+            logger.error("Voice proxy failed (%s)", type(e).__name__)
+            await self._send_error(client_ws, "Voice connection failed")
+        finally:
+            if admitted:
+                with self._connection_lock:
+                    self._active_agents.discard(current_agent_id)
+            try:
+                client_ws.close()
+            except ClientConnectionClosed:
+                pass
 
     async def _get_agent_id_from_client(self, client_ws: simple_websocket.ws.Server) -> Optional[str]:
         """Get agent ID from initial client message."""
         try:
             first_message: str | None = await asyncio.get_event_loop().run_in_executor(
                 None,
-                client_ws.receive,  # pyright: ignore[reportUnknownArgumentType,reportUnknownMemberType]
+                lambda: client_ws.receive(timeout=10),
             )
             if first_message:
                 msg = json.loads(first_message)
@@ -267,23 +292,34 @@ class VoiceProxyHandler:
         client_ws: simple_websocket.ws.Server,
         azure_conn: VoiceLiveConnection,
         current_agent_id: Optional[str],
+        is_authorized: Callable[[], bool],
     ) -> None:
         """Handle bidirectional message forwarding."""
         tasks = [
-            asyncio.create_task(self._forward_client_to_azure(client_ws, azure_conn, current_agent_id)),
-            asyncio.create_task(self._forward_azure_to_client(azure_conn, client_ws, current_agent_id)),
+            asyncio.create_task(self._forward_client_to_azure(client_ws, azure_conn, current_agent_id, is_authorized)),
+            asyncio.create_task(self._forward_azure_to_client(azure_conn, client_ws, current_agent_id, is_authorized)),
+            asyncio.create_task(self._monitor_authorization(client_ws, current_agent_id, is_authorized)),
         ]
 
         _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 
         for task in pending:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _monitor_authorization(
+        self, client_ws: simple_websocket.ws.Server, agent_id: Optional[str], is_authorized: Callable[[], bool]
+    ) -> None:
+        while is_authorized() and self.agent_manager.get_agent(agent_id):
+            await asyncio.sleep(0.5)
+        client_ws.close()
 
     async def _forward_client_to_azure(
         self,
         client_ws: simple_websocket.ws.Server,
         azure_conn: VoiceLiveConnection,
         current_agent_id: Optional[str],
+        is_authorized: Callable[[], bool],
     ) -> None:
         """Forward messages from client to Azure using SDK."""
         try:
@@ -294,12 +330,42 @@ class VoiceProxyHandler:
                 )
                 if message is None:
                     break
-
-                logger.debug("Client->Azure: %s", str(message)[:LOG_MESSAGE_MAX_LENGTH])
+                if not is_authorized():
+                    client_ws.close()
+                    break
 
                 if isinstance(message, str):
                     parsed = json.loads(message)
                     message_type = parsed.get("type")
+                    if message_type == SESSION_UPDATE_TYPE:
+                        await self._send_error(client_ws, "Session configuration is server managed")
+                        client_ws.close()
+                        break
+                    if not self.agent_manager.get_agent(current_agent_id):
+                        client_ws.close()
+                        break
+                    if message_type not in {
+                        CLIENT_PING_TYPE,
+                        "input_audio_buffer.append",
+                        "input_audio_buffer.commit",
+                        "input_audio_buffer.clear",
+                        "response.create",
+                        "response.cancel",
+                        "session.avatar.connect",
+                    }:
+                        await self._send_error(client_ws, "Unsupported message")
+                        client_ws.close()
+                        break
+                    if message_type == "response.create":
+                        parsed = {"type": "response.create"}
+                    elif message_type in {"input_audio_buffer.commit", "input_audio_buffer.clear", "response.cancel"}:
+                        parsed = {"type": message_type}
+                    elif message_type == "session.avatar.connect":
+                        sdp = parsed.get("client_sdp")
+                        if not isinstance(sdp, str) or len(sdp) > 262144:
+                            client_ws.close()
+                            break
+                        parsed = {"type": message_type, "client_sdp": sdp}
                     if message_type == CLIENT_PING_TYPE:
                         # Application-level keep-alive: answer the client and do
                         # not forward to upstream Voice Live to avoid polluting
@@ -308,12 +374,19 @@ class VoiceProxyHandler:
                         continue
                     if message_type == "input_audio_buffer.append" and current_agent_id:
                         try:
-                            session_audio_store.append_user_audio(current_agent_id, str(parsed.get("audio", "")))
-                        except Exception as error:
-                            logger.warning("Failed to store user audio chunk for analysis: %s", error)
+                            audio = parsed.get("audio")
+                            if not isinstance(audio, str):
+                                raise ValueError("Invalid audio")
+                            session_audio_store.append_user_audio(current_agent_id, audio)
+                            parsed = {"type": message_type, "audio": audio}
+                        except (ValueError, TypeError):
+                            await self._send_error(client_ws, "Invalid audio")
+                            client_ws.close()
+                            break
                     await azure_conn.send(parsed)
                 else:
-                    await azure_conn.send(message)
+                    client_ws.close()
+                    break
 
         except ConnectionClosed:
             logger.debug("Azure connection closed during client forwarding")
@@ -325,14 +398,20 @@ class VoiceProxyHandler:
         azure_conn: VoiceLiveConnection,
         client_ws: simple_websocket.ws.Server,
         current_agent_id: Optional[str],
+        is_authorized: Callable[[], bool],
     ) -> None:
         """Forward messages from Azure to client using SDK typed events."""
         try:
             async for event in azure_conn:
                 event_dict = event.as_dict() if hasattr(event, "as_dict") else dict(event)
+                if not is_authorized() or not self.agent_manager.get_agent(current_agent_id):
+                    client_ws.close()
+                    break
+                if event.type == ServerEventType.ERROR:
+                    await self._send_error(client_ws, "Voice service failed")
+                    continue
                 self._store_transcript_event(current_agent_id, event_dict)
                 message = json.dumps(event_dict)
-                logger.debug("Azure->Client: %s", message[:LOG_MESSAGE_MAX_LENGTH])
 
                 await asyncio.get_event_loop().run_in_executor(
                     None,
@@ -340,9 +419,7 @@ class VoiceProxyHandler:
                     message,
                 )
 
-                if event.type == ServerEventType.ERROR:
-                    logger.warning("Azure error event: %s", event_dict)
-                elif event.type == ServerEventType.SESSION_CREATED:
+                if event.type == ServerEventType.SESSION_CREATED:
                     logger.info("Session created: %s", event_dict.get("session", {}).get("id"))
                 elif event.type == ServerEventType.SESSION_UPDATED:
                     logger.info("Session updated")

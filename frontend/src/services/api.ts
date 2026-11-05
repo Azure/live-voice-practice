@@ -10,6 +10,7 @@ import {
   ConversationListResponse,
   Scenario,
 } from '../types'
+import { authenticatedFetch as fetch } from './authenticatedFetch'
 
 const MAX_LEGACY_ANALYZE_AUDIO_PAYLOAD_CHARS = 60000
 
@@ -178,6 +179,7 @@ export const api = {
 
   async createConversation(
     scenarioId: string,
+    agentId: string,
     messages: any[] = []
   ): Promise<{ conversation_id: string }> {
     const res = await fetch('/api/conversations', {
@@ -185,6 +187,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         scenario_id: scenarioId,
+        agent_id: agentId,
         messages,
       }),
     })

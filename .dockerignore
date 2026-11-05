@@ -51,6 +51,7 @@ pids
 *.pid.lock
 .azure/
 .temp/
+**/.runtime/
 
 # Coverage directory used by tools like istanbul
 coverage/

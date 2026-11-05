@@ -4,6 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "test": "node --test tests/authenticatedFetch.test.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

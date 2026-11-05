@@ -805,7 +805,7 @@ class PronunciationAssessor:
     def _log_assessment_info(self, wav_audio: bytes, reference_text: Optional[str]) -> None:
         """Log information about the assessment being performed."""
         logger.info("Starting pronunciation assessment with audio size: %s bytes", len(wav_audio))
-        logger.info("Reference text: %s", reference_text or "None")
+        logger.info("Pronunciation reference supplied: %s", bool(reference_text))
         logger.info("Speech key configured: %s", "Yes" if self.speech_key else "No")
         logger.info("Speech endpoint configured: %s", "Yes" if self.speech_endpoint else "No")
         logger.info("Speech region: %s", self.speech_region)
@@ -969,9 +969,8 @@ class PronunciationAssessor:
                 reason = getattr(evt.result, "reason", None)
                 if reason != speechsdk.ResultReason.RecognizedSpeech:
                     logger.info(
-                        "Pronunciation recognized event skipped: reason=%s text=%r",
+                        "Pronunciation recognized event skipped: reason=%s",
                         reason,
-                        getattr(evt.result, "text", ""),
                     )
                     return
                 if not evt.result.text:
@@ -990,13 +989,12 @@ class PronunciationAssessor:
                     }
                 )
             except Exception:
-                logger.exception("Failed to parse pronunciation recognized event")
+                logger.error("Failed to parse pronunciation recognized event")
 
         def _on_canceled(evt: speechsdk.SpeechRecognitionCanceledEventArgs) -> None:
             logger.warning(
-                "Pronunciation continuous recognition canceled: reason=%s details=%s",
+                "Pronunciation continuous recognition canceled: reason=%s",
                 getattr(evt, "reason", None),
-                getattr(evt, "error_details", None),
             )
             if not done_future.done():
                 loop.call_soon_threadsafe(done_future.set_result, None)

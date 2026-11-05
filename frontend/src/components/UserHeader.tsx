@@ -36,7 +36,19 @@ export function UserHeader({
   const styles = useStyles()
   const navigate = useNavigate()
 
-  if (!authenticated) return null
+  if (!authenticated) {
+    return (
+      <div className={styles.header}>
+        <Button
+          onClick={() => {
+            window.location.href = '/.auth/login/aad'
+          }}
+        >
+          Sign in to practice
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className={styles.header}>
@@ -62,7 +74,8 @@ export function UserHeader({
         appearance="subtle"
         size="small"
         icon={<SignOut24Regular />}
-        onClick={() => {
+        onClick={async () => {
+          await window.fetch('/api/auth/logout', { method: 'POST' })
           window.location.href = '/.auth/logout'
         }}
       >

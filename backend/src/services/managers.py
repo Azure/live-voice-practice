@@ -25,7 +25,6 @@ from src.services.graph_scenario_generator import GraphScenarioGenerator
 # Constants
 AGENT_ID_PREFIX = "local-agent"
 AZURE_AGENT_NAME_PREFIX = "agent"
-UUID_SHORT_LENGTH = 8
 MAX_RESPONSE_LENGTH_SENTENCES = 3
 DEFAULT_SCENARIO_DESCRIPTION = "Practice a customer support conversation scenario."
 
@@ -617,12 +616,12 @@ CRITICAL INTERACTION GUIDELINES:
 
     def _generate_agent_name(self, scenario_id: str) -> str:
         """Generate a unique agent name."""
-        short_uuid = uuid.uuid4().hex[:UUID_SHORT_LENGTH]
+        short_uuid = uuid.uuid4().hex
         return f"{AZURE_AGENT_NAME_PREFIX}-{scenario_id}-{short_uuid}"
 
     def _generate_local_agent_id(self, scenario_id: str) -> str:
         """Generate a unique local agent ID."""
-        short_uuid = uuid.uuid4().hex[:UUID_SHORT_LENGTH]
+        short_uuid = uuid.uuid4().hex
         return f"{AGENT_ID_PREFIX}-{scenario_id}-{short_uuid}"
 
     def _create_agent_config(

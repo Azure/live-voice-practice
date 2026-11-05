@@ -24,6 +24,14 @@ echo
 
 #region Load azd env
 envValues="$(azd env get-values 2>/dev/null || true)"
+for name in AUTH_TENANT_ID AUTH_AUDIENCE AUTH_PUBLIC_ORIGIN; do
+    value="${!name:-}"
+    if [[ -z "$value" ]]; then
+        value="$(echo "$envValues" | grep "^${name}=" | cut -d'=' -f2- | tr -d '"' || true)"
+    fi
+    export "$name=$value"
+done
+python3 "$(dirname "$0")/../backend/src/auth_config.py"
 niFlag="$(echo "$envValues" | grep -i '^NETWORK_ISOLATION=' | cut -d'=' -f2- | tr -d '"' | tr -d '[:space:]' || true)"
 agentPool="$(echo "$envValues" | grep -i '^ACR_TASK_AGENT_POOL=' | cut -d'=' -f2- | tr -d '"' | tr -d '[:space:]' || true)"
 #endregion
@@ -227,7 +235,9 @@ backoffSeconds=(15 30 60 120 120)
 updateOk=false
 for attempt in $(seq 1 "$maxAttempts"); do
     errFile="$(mktemp)"
-    if az containerapp update --name "$appName" --resource-group "$rg" --image "$imageName" 2>"$errFile"; then
+    if az containerapp update --name "$appName" --resource-group "$rg" --image "$imageName" \
+        --set-env-vars "AUTH_TENANT_ID=$AUTH_TENANT_ID" "AUTH_AUDIENCE=$AUTH_AUDIENCE" \
+        "AUTH_PUBLIC_ORIGIN=$AUTH_PUBLIC_ORIGIN" 2>"$errFile"; then
         cat "$errFile"
         rm -f "$errFile"
         updateOk=true

@@ -1,185 +1,133 @@
-# Configure user authentication with Microsoft Entra ID
+# Required Microsoft Entra authentication
 
-Live Voice Practice can run with or without user sign-in.
+Practice, voice, analysis, conversation history, and training administration require
+sign-in. Anonymous practice is no longer supported. Caller identity is validated
+by the application using signed Microsoft Entra **access tokens**, not identity
+headers or an ID token. The backend's managed identity authenticates the backend
+to Azure services; it does not authenticate a browser user.
 
-- Without authentication, users can practice and run analysis, but the app cannot safely show persistent **Past Practices** because there is no trusted user identity.
-- With Microsoft Entra ID authentication enabled, the app receives Container Apps authentication headers, associates conversations with the signed-in user, and shows **Past Practices** for that user. Trainers can also see broader practice history when their role is configured.
+## Required configuration
 
-The application expects Azure Container Apps built-in authentication, sometimes called Easy Auth. The backend reads the `x-ms-client-principal` headers injected by the platform; the frontend only calls `/api/me` to decide whether to show authenticated features.
-
-## Prerequisites
-
-- Azure CLI and Azure Developer CLI installed.
-- The app already deployed with `azd up` or `azd deploy`.
-- Permission to create or update Microsoft Entra app registrations.
-- The public app hostname you want users to open, for example `https://<your-hostname>`.
-
-Run the commands below from your workstation with the correct `azd` environment selected. You do not need to run them from the jumpbox.
-
-## 1. Find the deployed Container App
-
-Run this from the workstation where your `azd` environment is selected:
+Set these values in the selected `azd` environment before deploying:
 
 ```bash
-RESOURCE_GROUP=$(azd env get-value AZURE_RESOURCE_GROUP)
-CONTAINER_APP_NAME=$(az containerapp list \
-  --resource-group "$RESOURCE_GROUP" \
-  --query "[?tags.\"azd-service-name\" == 'voicelab'].name | [0]" \
-  --output tsv)
-
-echo "$RESOURCE_GROUP"
-echo "$CONTAINER_APP_NAME"
+azd env set AUTH_TENANT_ID "<single Entra tenant UUID>"
+azd env set AUTH_AUDIENCE "<API application client ID>"
+azd env set AUTH_PUBLIC_ORIGIN "https://<public app hostname>"
 ```
 
-## 2. Create the Entra app registration
+`AUTH_TENANT_ID` must be a canonical lowercase UUID. `AUTH_AUDIENCE` is the audience
+of the delegated v2 access token issued **for this API**, never Microsoft Graph.
+`AUTH_PUBLIC_ORIGIN` is exactly the externally accessed origin, including any
+non-default port, with no trailing slash, path, query, or fragment. HTTPS is
+required except for `http://localhost:<port>` or `http://127.0.0.1:<port>` in local
+development. Do not configure a client-provided or forwarded origin dynamically.
 
-Use a web app registration. The redirect URI must use the public hostname that users will access and the built-in authentication callback path:
+The application fails startup if any setting is missing or invalid. Both
+`scripts/deploy.ps1` and `scripts/deploy.sh`, invoked by `azd deploy`, validate the
+settings before building and pass them to Container Apps together with the image.
+Deployment hosts need Python 3 for this local configuration check. Infrastructure
+is a separately versioned submodule; do not invent a submodule revision to apply
+application configuration. A provisioned but unconfigured image will not become
+ready. Authentication provider setup below must be completed before browser use.
 
-```bash
-APP_HOSTNAME="https://<your-hostname>"
-APP_NAME="Live Voice Practice"
+## Entra application and Container Apps provider
 
-APP_ID=$(az ad app create \
-  --display-name "$APP_NAME" \
-  --sign-in-audience AzureADMyOrg \
-  --web-redirect-uris "$APP_HOSTNAME/.auth/login/aad/callback" \
-  --query appId \
-  --output tsv)
+An administrator must configure a single-tenant API application registration:
 
-TENANT_ID=$(az account show --query tenantId --output tsv)
+1. Set `api.requestedAccessTokenVersion` to `2`.
+2. Expose a delegated scope named `access_as_user`, usually
+   `api://<API-client-ID>/access_as_user`. Grant and consent to that permission for
+   the web client. Do not substitute `openid`, `profile`, or Graph permissions.
+3. Configure the Container Apps built-in Entra provider (Easy Auth) with the
+   tenant-specific issuer and its web client registration. Add the exact redirect
+   URI `https://<public-host>/.auth/login/aad/callback` to the web registration.
+   Store the web client credential in the platform's secret configuration, never
+   in this repository.
+4. Enable the provider's token store. Configure its login parameters to request
+   `openid profile offline_access api://<API-client-ID>/access_as_user`.
+   Confirm `/.auth/me` returns an `access_token` for the API, with `ver=2.0`,
+   `tid=<tenant>`, `aud=<API-client-ID>`, and `scp` containing `access_as_user`.
+   An ID token is not accepted. If the provider returns only an ID token or a
+   Graph access token, correct the provider scope and consent; do not weaken the
+   API validation.
+5. Require authentication in the platform as defense in depth. The application
+   validates caller credentials independently even when the platform is bypassed.
+   Permit only the intended tenant. Keep TLS certificate verification enabled.
+   If external readiness probes are used, exclude only `/api/health` from the
+   platform login requirement so the deployment smoke check can read its minimal
+   status response without an interactive login.
 
-echo "Application (client) ID: $APP_ID"
-echo "Tenant ID: $TENANT_ID"
-```
+The backend fetches signing keys only from the fixed tenant's Microsoft login
+JWKS endpoint and validates RS256 signature, issuer, audience, tenant, expiry,
+not-before, object ID, delegated scope, and token version. Network-isolated
+deployments must allow outbound HTTPS to `login.microsoftonline.com`; key-discovery
+failure denies access.
 
-Enable ID tokens for Container Apps authentication and create the service principal:
+## Browser and API protocol
 
-```bash
-az ad app update \
-  --id "$APP_ID" \
-  --enable-id-token-issuance true
+The browser reads the provider's access token only in memory and exchanges it via
+same-origin `POST /api/auth/session`. The response sets an opaque HttpOnly,
+Secure, SameSite=Strict `__Host-voice-session` cookie. Tokens never go into URLs,
+local storage, session storage, logs, or WebSocket subprotocols. Browser API calls
+and `/ws/voice` use this cookie. Non-browser API clients can instead use
+`Authorization: Bearer <API-access-token>`.
 
-az ad sp create --id "$APP_ID"
-```
+Cookie-authenticated mutations require the exact configured `Origin`.
+WebSockets also require that origin, authentication before upgrade, and an owned
+agent in the first `session.update` message before an Azure connection is opened.
+Subsequent session configuration changes are not allowed; voice configuration is
+server managed. HTTP requests are limited to 4 MiB and WebSocket frames to 1 MiB.
+Delete completed agents to release their temporary state. Session audio and
+transcripts are bounded.
+Each agent admits one voice connection at a time. Connections close when their
+session is revoked or expires, the agent is deleted, or the 15-minute voice lease
+ends; reconnecting requires authorization again.
 
-If users also access the direct Container App hostname, add that callback too:
+Application browser sessions expire after at most one hour, never beyond token
+expiry. `POST /api/auth/logout` revokes the cookie session before platform logout.
+Session state, live agent ownership, and audio are local to the application
+process. Use **one replica and one application worker** for this release. Restart,
+scale-out, or worker changes invalidate active sessions; reauthenticate and create
+a fresh agent. Multi-replica use requires a shared server-side session and agent
+registry with atomic ownership checks; sticky routing alone is not sufficient.
 
-```bash
-CONTAINER_APP_FQDN=$(az containerapp show \
-  --resource-group "$RESOURCE_GROUP" \
-  --name "$CONTAINER_APP_NAME" \
-  --query properties.configuration.ingress.fqdn \
-  --output tsv)
+For local development set the three variables before starting the backend. The
+backend must serve the public origin (or be behind a same-origin development
+proxy). Real bearer clients can test locally using a delegated API token.
+Unit tests use local signing keys and mocked provider services and need no Azure
+credentials. Never add a development authentication bypass to deployed code.
 
-az ad app update \
-  --id "$APP_ID" \
-  --web-redirect-uris \
-    "$APP_HOSTNAME/.auth/login/aad/callback" \
-    "https://$CONTAINER_APP_FQDN/.auth/login/aad/callback"
-```
+## Ownership, trainer access, and upgrades
 
-## 3. Create a client secret
+New ownership keys are `tenant-ID:object-ID`, derived solely from verified claims.
+Agent/session creation binds ownership on the server. Conversation creation must
+include its owned `agent_id`; when analysis supplies both an agent and a
+conversation, they must refer to the same context. Client-provided owner IDs have
+no authority. Only the owner can mutate session audio, connect, append messages,
+or analyze a conversation.
 
-```bash
-CLIENT_SECRET=$(az ad app credential reset \
-  --id "$APP_ID" \
-  --display-name container-app-auth \
-  --years 1 \
-  --query password \
-  --output tsv)
-```
+The signed `admin` application role allows authorized cross-owner conversation
+read/deletion. Trainer access is resolved from the trusted Cosmos
+`role_assignments` container using the **tenant-scoped key** and retains
+anonymized history/statistics/export and content-management behavior. Only
+authorized operators may write role assignments. Privileged access remains
+within the configured tenant and never includes ownerless records.
 
-Save the secret securely. Azure shows it only once.
+Before upgrading:
 
-## 4. Enable Container Apps authentication
+1. Configure the API, web provider, required settings, consent, and network egress.
+2. Back up persistent data through your approved administrative process.
+3. Stop old workers and invalidate all old in-memory sessions.
+4. Recreate trainer assignments using verified tenant-scoped IDs.
+5. Quarantine pre-existing records whose owner is missing or an unscoped ID.
+   They are not accessible through the application, including privileged views.
+   Do not automatically claim or reassign records using a caller-supplied ID.
+   An operator may migrate only after independently establishing both the tenant
+   and object ID from authoritative records; otherwise delete under the relevant
+   retention policy. No automatic migration is provided.
+6. Deploy through `azd deploy`, then separately approve and perform your normal
+   environment validation. Local tests do not establish deployment or rollout.
 
-Configure the Microsoft identity provider:
-
-```bash
-az containerapp auth microsoft update \
-  --resource-group "$RESOURCE_GROUP" \
-  --name "$CONTAINER_APP_NAME" \
-  --client-id "$APP_ID" \
-  --client-secret "$CLIENT_SECRET" \
-  --tenant-id "$TENANT_ID" \
-  --issuer "https://login.microsoftonline.com/$TENANT_ID/v2.0" \
-  --allowed-audiences "$APP_ID" \
-  --yes
-```
-
-Then enable auth for the app. The recommended default is to allow anonymous traffic so unauthenticated users can still practice, while signed-in users get history:
-
-```bash
-az containerapp auth update \
-  --resource-group "$RESOURCE_GROUP" \
-  --name "$CONTAINER_APP_NAME" \
-  --enabled true \
-  --unauthenticated-client-action AllowAnonymous \
-  --require-https true \
-  --proxy-convention Standard \
-  --yes
-```
-
-Use `AllowAnonymous` when you want optional sign-in. If every user must sign in before using the app, use `RedirectToLoginPage` instead:
-
-```bash
-az containerapp auth update \
-  --resource-group "$RESOURCE_GROUP" \
-  --name "$CONTAINER_APP_NAME" \
-  --unauthenticated-client-action RedirectToLoginPage \
-  --set globalValidation.redirectToProvider=azureActiveDirectory \
-  --yes
-```
-
-## 5. Sign in and validate
-
-Open:
-
-```text
-https://<your-hostname>/.auth/login/aad
-```
-
-After sign-in, validate that the app sees the user:
-
-```bash
-curl -s https://<your-hostname>/api/me
-```
-
-Expected authenticated shape:
-
-```json
-{
-  "authenticated": true,
-  "user_id": "<entra-user-object-id>",
-  "name": "<display-name>",
-  "email": "<user-email>",
-  "role": "trainee"
-}
-```
-
-In the UI, authenticated users see **Past Practices**. Anonymous users do not see persistent history.
-
-## Trainer access
-
-By default, authenticated users are trainees. The app stores trainer assignments in the `role_assignments` Cosmos DB container. Add a document for each trainer:
-
-```json
-{
-  "id": "<entra-user-object-id>",
-  "userId": "<entra-user-object-id>",
-  "role": "trainer"
-}
-```
-
-After the trainer signs in again, the UI shows trainer actions such as **All Practices**.
-
-## Troubleshooting
-
-| Symptom | What to check |
-|---|---|
-| Sign-in fails with a redirect URI error | The Entra app registration must include `https://<your-hostname>/.auth/login/aad/callback`. |
-| `/api/me` returns `{"authenticated": false}` after sign-in | Confirm Container Apps auth is enabled and the Microsoft provider is configured on the same Container App serving the backend. |
-| Redirects use the Container App hostname instead of the public hostname | Keep `--proxy-convention Standard` enabled and make sure the gateway/proxy forwards `X-Forwarded-Host` and `X-Forwarded-Proto`. |
-| Past Practices is not visible | The user must be signed in; anonymous sessions do not have persistent user history. |
-| Trainer cannot see All Practices | Add or fix the `role_assignments` document for that user's Entra object ID. |
-
+The SPA, `/api/config`, `/api/health`, and unauthenticated `/api/me` are public;
+they expose no conversation content. All other API routes are authenticated.

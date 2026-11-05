@@ -29,10 +29,7 @@ def client() -> FlaskClient:
     return flask_app.test_client()
 
 
-_AUTH_HEADERS = {
-    "x-ms-client-principal-id": "user-1",
-    "x-ms-client-principal-name": "Test User",
-}
+_AUTH_HEADERS = {"Authorization": "Bearer local-test"}
 
 
 class TestRequireTrainer:
@@ -47,7 +44,9 @@ class TestRequireTrainer:
 
         assert response.status_code == 200
         assert json.loads(response.data) == {"ok": True}
-        mock_role_store.get_user_role.assert_called_once_with("user-1")
+        mock_role_store.get_user_role.assert_called_once_with(
+            "11111111-1111-1111-1111-111111111111:33333333-3333-3333-3333-333333333333"
+        )
 
     @patch("src.services.role_store.role_store")
     def test_trainee_forbidden(self, mock_role_store, client: FlaskClient):

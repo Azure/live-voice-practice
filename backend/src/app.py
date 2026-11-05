@@ -20,9 +20,19 @@ import simple_websocket.ws  # pyright: ignore[reportMissingTypeStubs]
 from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_sock import Sock  # pyright: ignore[reportMissingTypeStubs]
 
-from src.services.auth import UserIdentity, get_current_user, require_auth, require_trainer
+from src.services.auth import (
+    UserIdentity,
+    create_browser_session,
+    get_current_user,
+    require_auth,
+    require_trainer,
+    revoke_browser_session,
+    same_origin,
+    validate_auth_configuration,
+    websocket_authorizer,
+)
 from src.config import config
-from src.services.analyzers import ConversationAnalyzer, ConversationScoringError, PronunciationAssessor
+from src.services.analyzers import ConversationAnalyzer, PronunciationAssessor
 from src.services.anonymize import (
     anonymize_conversation_record,
     anonymize_trainee_row,
@@ -59,11 +69,6 @@ API_STATISTICS_EXPORT_ENDPOINT = "/api/admin/statistics/export"
 API_GRAPH_SCENARIO_ENDPOINT = "/api/scenarios/graph"
 API_CLIENT_LOG_ENDPOINT = "/api/client-log"
 
-# Whitelist of client-log levels that map to logger methods.
-_CLIENT_LOG_LEVELS = {"debug", "info", "warning", "error"}
-# Hard cap on payload size to keep noisy clients from filling logs.
-_CLIENT_LOG_MAX_DETAIL_CHARS = 2000
-
 # Error messages
 SCENARIO_ID_REQUIRED = "scenario_id is required"
 SCENARIO_NOT_FOUND = "Scenario not found"
@@ -94,7 +99,68 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask application
 app = Flask(__name__, static_folder=STATIC_FOLDER, static_url_path=STATIC_URL_PATH)
+validate_auth_configuration()
+app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
+app.config["SOCK_SERVER_OPTIONS"] = {"max_message_size": 1024 * 1024}
 sock = Sock(app)
+
+
+@app.before_request
+def authenticate_protected_routes():
+    """Authenticate before parsing, storage, and upstream service calls."""
+    public = {API_CONFIG_ENDPOINT, API_HEALTH_ENDPOINT, "/api/me", "/api/auth/session"}
+    if request.path.startswith("/api/") and request.path not in public:
+        if get_current_user() is None:
+            return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
+    if request.path == WEBSOCKET_ENDPOINT:
+        if not same_origin():
+            return jsonify({"error": ACCESS_DENIED}), HTTP_FORBIDDEN
+        if get_current_user() is None:
+            return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
+    if request.path.startswith("/api/") and request.is_json:
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "A JSON object is required"}), HTTP_BAD_REQUEST
+        for field in ("agent_id", "conversation_id", "scenario_id"):
+            value = body.get(field)
+            if value is not None and (not isinstance(value, str) or not value or len(value) > 256):
+                return jsonify({"error": "Invalid resource identifier"}), HTTP_BAD_REQUEST
+    return None
+
+
+@app.route("/api/auth/session", methods=["POST"])
+def authenticate_browser():
+    """Exchange a validated API token for a same-origin browser session."""
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict) or not isinstance(data.get("access_token"), str):
+        return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
+    return create_browser_session(data["access_token"])
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def logout_browser():
+    """Invalidate the current opaque application session."""
+    return revoke_browser_session()
+
+
+@app.after_request
+def secure_responses(response):
+    """Prevent caching private responses and suppress internal failure details."""
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+        if response.status_code >= 500:
+            response.set_data(json.dumps({"error": "Service unavailable"}))
+            response.content_type = "application/json"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "same-origin"
+    return response
+
+
+def _owned_agent(agent_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    user = get_current_user()
+    agent = agent_manager.get_agent(agent_id) if isinstance(agent_id, str) else None
+    return agent if agent and user and agent.get("owner_id") == user.user_id else None
+
 
 # Initialize managers and analyzers
 scenario_manager = ScenarioManager()
@@ -239,12 +305,7 @@ def get_health():
     """
     scenarios_health = scenario_manager.health()
     overall_ok = scenarios_health["status"] != "degraded_auth_failure"
-    body = {
-        "status": "ok" if overall_ok else "degraded",
-        "checks": {
-            "scenarios": scenarios_health,
-        },
-    }
+    body = {"status": "ok" if overall_ok else "degraded"}
     status_code = 200 if overall_ok else HTTP_SERVICE_UNAVAILABLE
     return jsonify(body), status_code
 
@@ -282,6 +343,7 @@ def create_agent():
 
     try:
         agent_id = agent_manager.create_agent(scenario_id, scenario, avatar_config)
+        agent_manager.agents[agent_id]["owner_id"] = get_current_user().user_id
         return jsonify({"agent_id": agent_id, "scenario_id": scenario_id})
     except Exception as e:
         logger.error("Failed to create agent: %s", e)
@@ -291,6 +353,8 @@ def create_agent():
 @app.route("/api/agents/<agent_id>", methods=["DELETE"])
 def delete_agent(agent_id: str):
     """Delete an agent."""
+    if not _owned_agent(agent_id):
+        return jsonify({"error": "Resource not found"}), HTTP_NOT_FOUND
     try:
         agent_manager.delete_agent(agent_id)
         session_audio_store.clear(agent_id)
@@ -311,22 +375,22 @@ def create_conversation_record():
         return jsonify({"error": SCENARIO_ID_REQUIRED}), HTTP_BAD_REQUEST
 
     user = get_current_user()
+    agent = _owned_agent(data.get("agent_id"))
+    if not agent or agent.get("scenario_id") != scenario_id:
+        return jsonify({"error": "Resource not found"}), HTTP_NOT_FOUND
+    if agent.get("conversation_id"):
+        return jsonify({"conversation_id": agent["conversation_id"]})
 
-    if user is not None:
-        metadata = {"user_name": user.name, "user_email": user.email}
-        conversation_id = conversation_store.create_conversation(
-            user_id=user.user_id,
-            scenario_id=scenario_id,
-            messages=messages,
-            metadata=metadata,
-        )
-    else:
-        conversation_id = conversation_manager.create_conversation_record(
-            scenario_id=scenario_id,
-            conversation_messages=messages,
-        )
+    metadata = {"user_name": user.name, "user_email": user.email}
+    conversation_id = conversation_store.create_conversation(
+        user_id=user.user_id,
+        scenario_id=scenario_id,
+        messages=messages,
+        metadata=metadata,
+    )
 
     if conversation_id:
+        agent["conversation_id"] = conversation_id
         return jsonify({"conversation_id": conversation_id})
     return jsonify({"error": "Failed to create conversation"}), HTTP_INTERNAL_SERVER_ERROR
 
@@ -339,20 +403,15 @@ def update_conversation_messages_endpoint(conversation_id: str):
     transcript = cast(str, data.get("transcript", ""))
 
     user = get_current_user()
+    if user is None or not conversation_store.get_conversation(user.user_id, conversation_id):
+        return jsonify({"error": CONVERSATION_NOT_FOUND}), HTTP_NOT_FOUND
 
-    if user is not None:
-        success = conversation_store.update_conversation_messages(
-            user_id=user.user_id,
-            conversation_id=conversation_id,
-            messages=messages,
-            transcript=transcript,
-        )
-    else:
-        success = conversation_manager.update_conversation_messages(
-            conversation_id=conversation_id,
-            conversation_messages=messages,
-            transcript_text=transcript,
-        )
+    success = conversation_store.update_conversation_messages(
+        user_id=user.user_id,
+        conversation_id=conversation_id,
+        messages=messages,
+        transcript=transcript,
+    )
 
     if success:
         return jsonify({"success": True})
@@ -367,7 +426,18 @@ def analyze_conversation():
     existing_conversation_id = data.get("conversation_id")
     agent_id = data.get("agent_id")
     user = get_current_user()
+    if agent_id and not _owned_agent(agent_id):
+        return jsonify({"error": "Resource not found"}), HTTP_NOT_FOUND
     saved_conversation = _get_saved_conversation_for_analysis(existing_conversation_id, user)
+    if existing_conversation_id and not saved_conversation:
+        return jsonify({"error": "Resource not found"}), HTTP_NOT_FOUND
+    if agent_id and existing_conversation_id:
+        if _owned_agent(agent_id).get("conversation_id") != existing_conversation_id:
+            return jsonify({"error": "Resource not found"}), HTTP_NOT_FOUND
+    if saved_conversation and saved_conversation.get("scenario_id") != scenario_id:
+        return jsonify({"error": "Resource not found"}), HTTP_NOT_FOUND
+    if agent_id and _owned_agent(agent_id).get("scenario_id") != scenario_id:
+        return jsonify({"error": "Resource not found"}), HTTP_NOT_FOUND
     conversation_messages = cast(List[Dict[str, Any]], data.get("conversation_messages", []))
     if not conversation_messages:
         conversation_messages = _messages_from_saved_conversation(saved_conversation)
@@ -382,19 +452,7 @@ def analyze_conversation():
     audio_data = data.get("audio_data", [])
     reference_text = cast(str, data.get("reference_text") or _extract_user_text(conversation_messages))
     session_audio = session_audio_store.get_user_audio(agent_id)
-    audio_source = "websocket-session" if session_audio else ("request-body" if audio_data else "none")
-
-    _log_analyze_request(
-        scenario_id,
-        transcript,
-        reference_text,
-        conversation_messages,
-        audio_data,
-        existing_conversation_id,
-        agent_id,
-        session_audio,
-        audio_source,
-    )
+    logger.info("Authorized analysis requested")
 
     if not scenario_id or not transcript:
         return jsonify({"error": TRANSCRIPT_REQUIRED}), HTTP_BAD_REQUEST
@@ -409,16 +467,14 @@ def analyze_conversation():
             user,
             existing_conversation_id=existing_conversation_id,
             session_audio=session_audio,
-            audio_source=audio_source,
         )
-    except Exception as error:  # pylint: disable=broad-exception-caught
-        logger.exception("Analyze request failed for scenario %s", scenario_id)
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.error("Analysis request failed")
         return (
             jsonify(
                 {
                     "error": "Analysis failed",
                     "code": "ANALYSIS_FAILED",
-                    "detail": str(error),
                 }
             ),
             HTTP_INTERNAL_SERVER_ERROR,
@@ -436,7 +492,7 @@ def _get_saved_conversation_for_analysis(
     if user is not None:
         return conversation_store.get_conversation(user.user_id, conversation_id)
 
-    return conversation_manager.get_conversation(conversation_id)
+    return None
 
 
 def _messages_from_saved_conversation(saved_conversation: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -495,49 +551,19 @@ def _extract_user_text(conversation_messages: List[Dict[str, Any]]) -> str:
     )
 
 
-def _log_analyze_request(
-    scenario_id: str,
-    transcript: str,
-    reference_text: str,
-    conversation_messages: List[Dict[str, Any]],
-    audio_data: List[Dict[str, Any]],
-    existing_conversation_id: Optional[str],
-    agent_id: Optional[str],
-    session_audio: Optional[bytes],
-    audio_source: str,
-):
-    """Log information about the analyze request."""
-    logger.info(
-        (
-            "Analyze request - scenario=%s transcript_chars=%s reference_chars=%s messages=%s "
-            "request_audio_chunks=%s session_audio_bytes=%s content_length=%s existing_conversation=%s "
-            "agent_audio=%s audio_source=%s"
-        ),
-        scenario_id,
-        len(transcript or ""),
-        len(reference_text or ""),
-        len(conversation_messages or []),
-        len(audio_data or []),
-        len(session_audio or b""),
-        request.content_length,
-        bool(existing_conversation_id),
-        bool(agent_id),
-        audio_source,
-    )
-
-
 def _perform_conversation_analysis(
     scenario_id: str,
     transcript: str,
     audio_data: List[Dict[str, Any]],
     reference_text: str,
     conversation_messages: List[Dict[str, Any]],
-    user: Optional[UserIdentity] = None,
+    user: UserIdentity,
     existing_conversation_id: Optional[str] = None,
     session_audio: Optional[bytes] = None,
-    audio_source: str = "request-body",
 ):
-    """Perform the actual conversation analysis and save to database if user is authenticated."""
+    """Analyze and persist only within an authenticated owner's context."""
+    if user is None:
+        return jsonify({"error": "Authentication required"}), HTTP_UNAUTHORIZED
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -560,31 +586,21 @@ def _perform_conversation_analysis(
         scoring_error = None
 
         if isinstance(ai_assessment, Exception):
-            logger.error(
-                "AI assessment failed",
-                exc_info=(type(ai_assessment), ai_assessment, ai_assessment.__traceback__),
-            )
-            scoring_error = (
-                str(ai_assessment)
-                if isinstance(ai_assessment, ConversationScoringError)
-                else "Conversation scoring failed. Check application logs for details."
-            )
+            logger.error("AI assessment failed (%s)", type(ai_assessment).__name__)
+            scoring_error = "Conversation scoring failed."
             ai_assessment = None
 
         if isinstance(pronunciation, Exception):
-            logger.error("Pronunciation assessment failed: %s", pronunciation)
+            logger.error("Pronunciation assessment failed")
             pronunciation = None
 
         response_data: Dict[str, Any] = {
             "ai_assessment": ai_assessment,
             "pronunciation_assessment": pronunciation,
             "diagnostics": {
-                "audio_source": audio_source,
-                "session_audio_bytes": len(session_audio or b""),
-                "request_audio_chunks": len(audio_data or []),
+                "scoring_error": scoring_error,
                 "ai_assessment_available": isinstance(ai_assessment, dict),
                 "pronunciation_assessment_available": isinstance(pronunciation, dict),
-                "scoring_error": scoring_error,
             },
         }
 
@@ -595,58 +611,33 @@ def _perform_conversation_analysis(
 
         # If an existing conversation was created during the session, update it
         if existing_conversation_id:
-            if user is not None:
-                updated = conversation_store.update_conversation_assessment(
-                    user_id=user.user_id,
-                    conversation_id=existing_conversation_id,
-                    transcript=transcript,
-                    assessment=assessment_data,
-                    messages=conversation_messages,
-                )
-            else:
-                updated = conversation_manager.update_conversation_with_assessment(
-                    conversation_id=existing_conversation_id,
-                    transcript_text=transcript,
-                    conversation_messages=conversation_messages,
-                    evaluation=ai_assessment if isinstance(ai_assessment, dict) else None,
-                    pronunciation=pronunciation if isinstance(pronunciation, dict) else None,
-                )
+            updated = conversation_store.update_conversation_assessment(
+                user_id=user.user_id,
+                conversation_id=existing_conversation_id,
+                transcript=transcript,
+                assessment=assessment_data,
+                messages=conversation_messages,
+            )
             if updated:
                 response_data["conversation_id"] = existing_conversation_id
                 logger.info("Updated existing conversation %s with assessment", existing_conversation_id)
             else:
-                logger.warning("Failed to update conversation %s, falling back to create", existing_conversation_id)
-                existing_conversation_id = None  # Fall through to create below
+                return jsonify({"error": "Conversation could not be updated"}), HTTP_NOT_FOUND
 
         # Create a new conversation record if none existed
         if not existing_conversation_id:
-            if user is not None:
-                metadata = {
-                    "user_name": user.name,
-                    "user_email": user.email,
-                }
-                conversation_id = conversation_store.save_conversation(
-                    user_id=user.user_id,
-                    scenario_id=scenario_id,
-                    transcript=transcript,
-                    assessment=assessment_data,
-                    metadata=metadata,
-                )
-                if conversation_id:
-                    response_data["conversation_id"] = conversation_id
-                    logger.info("Conversation saved with ID: %s for user: %s", conversation_id, user.user_id)
-                else:
-                    logger.warning("Failed to save conversation for user: %s", user.user_id)
+            metadata = {"user_name": user.name, "user_email": user.email}
+            conversation_id = conversation_store.save_conversation(
+                user_id=user.user_id,
+                scenario_id=scenario_id,
+                transcript=transcript,
+                assessment=assessment_data,
+                metadata=metadata,
+            )
+            if conversation_id:
+                response_data["conversation_id"] = conversation_id
             else:
-                conversation_id = conversation_manager.save_conversation(
-                    scenario_id=scenario_id,
-                    transcript=transcript,
-                    conversation_messages=conversation_messages,
-                    evaluation=ai_assessment if isinstance(ai_assessment, dict) else None,
-                    pronunciation=pronunciation if isinstance(pronunciation, dict) else None,
-                )
-                if conversation_id:
-                    response_data["conversation_id"] = conversation_id
+                return jsonify({"error": "Conversation could not be saved"}), HTTP_SERVICE_UNAVAILABLE
 
         return jsonify(response_data)
 
@@ -683,7 +674,11 @@ def list_conversations():
             sort_by=sort_by,
             sort_order=sort_order,
         )
-        result["items"] = [anonymize_conversation_record(item) for item in result.get("items", [])]
+        result["items"] = [
+            anonymize_conversation_record(item)
+            for item in result.get("items", [])
+            if user.can_access_user_data(item.get("user_id", ""))
+        ]
     else:
         result = conversation_store.list_user_conversations(
             user_id=user.user_id,
@@ -741,7 +736,7 @@ def get_conversation(conversation_id: str):
 
     # Check access: user must own the conversation or be an admin/trainer
     if not user.can_access_user_data(conversation.get("user_id", "")):
-        return jsonify({"error": ACCESS_DENIED}), HTTP_FORBIDDEN
+        return jsonify({"error": CONVERSATION_NOT_FOUND}), HTTP_NOT_FOUND
 
     # Anonymize when a trainer/admin views another trainee's conversation; self-access keeps identity.
     if conversation.get("user_id", "") != user.user_id:
@@ -782,7 +777,7 @@ def delete_conversation(conversation_id: str):
 
     # Check access: user must own the conversation or be an admin
     if not user.can_access_user_data(conversation.get("user_id", "")):
-        return jsonify({"error": ACCESS_DENIED}), HTTP_FORBIDDEN
+        return jsonify({"error": CONVERSATION_NOT_FOUND}), HTTP_NOT_FOUND
 
     # Delete the conversation
     success = conversation_store.delete_conversation(
@@ -942,41 +937,8 @@ def audio_processor():
 
 @app.route(API_CLIENT_LOG_ENDPOINT, methods=["POST"])
 def client_log():
-    """Surface client-side diagnostics in container logs.
-
-    The frontend POSTs structured events to this endpoint so that issues that
-    only manifest in the browser (mic permission failures, WebRTC ICE state
-    transitions, avatar pipeline stalls) become visible via
-    `az containerapp logs show` — no need to attach DevTools through Bastion.
-
-    Payload shape:
-        { "level": "info" | "warning" | "error" | "debug",
-          "event": "<short_identifier>",
-          "detail": <any json-serializable> }
-    """
-    try:
-        data = cast(Dict[str, Any], request.get_json(silent=True) or {})
-    except Exception:
-        data = {}
-
-    level = str(data.get("level", "info")).lower()
-    if level not in _CLIENT_LOG_LEVELS:
-        level = "info"
-
-    event = str(data.get("event", "client.log"))[:80]
-    detail = data.get("detail")
-    detail_str = ""
-    if detail is not None:
-        try:
-            detail_str = json.dumps(detail, default=str)
-        except Exception:
-            detail_str = repr(detail)
-        if len(detail_str) > _CLIENT_LOG_MAX_DETAIL_CHARS:
-            detail_str = detail_str[:_CLIENT_LOG_MAX_DETAIL_CHARS] + "...<truncated>"
-
-    user_agent = request.headers.get("User-Agent", "")[:120]
-    log_fn = getattr(logger, level)
-    log_fn("client_log event=%s ua=%s detail=%s", event, user_agent, detail_str)
+    """Acknowledge diagnostics without recording client-controlled sensitive data."""
+    logger.info("Authenticated client diagnostic received")
     return ("", 204)
 
 
@@ -992,7 +954,9 @@ def voice_proxy(ws: simple_websocket.ws.Server):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    loop.run_until_complete(voice_proxy_handler.handle_connection(ws))
+    loop.run_until_complete(
+        voice_proxy_handler.handle_connection(ws, get_current_user().user_id, websocket_authorizer())
+    )
 
 
 @app.route(API_GRAPH_SCENARIO_ENDPOINT, methods=["POST"])

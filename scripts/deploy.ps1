@@ -48,6 +48,11 @@ function Get-AzdEnvValue {
 }
 $niFlag    = Get-AzdEnvValue 'NETWORK_ISOLATION'
 $agentPool = Get-AzdEnvValue 'ACR_TASK_AGENT_POOL'
+foreach ($name in @('AUTH_TENANT_ID', 'AUTH_AUDIENCE', 'AUTH_PUBLIC_ORIGIN')) {
+    [Environment]::SetEnvironmentVariable($name, (Get-AzdEnvValue $name))
+}
+python "$PSScriptRoot\..\backend\src\auth_config.py"
+if ($LASTEXITCODE -ne 0) { throw "Required authentication configuration is invalid; deployment stopped." }
 #endregion
 
 #region Read APP_CONFIG_ENDPOINT
@@ -274,7 +279,7 @@ $backoffSeconds = @(15, 30, 60, 120)
 $updateOk = $false
 for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
     $tmpErr = New-TemporaryFile
-    az containerapp update --name $appName --resource-group $rg --image $imageName 2>$tmpErr
+    az containerapp update --name $appName --resource-group $rg --image $imageName --set-env-vars "AUTH_TENANT_ID=$env:AUTH_TENANT_ID" "AUTH_AUDIENCE=$env:AUTH_AUDIENCE" "AUTH_PUBLIC_ORIGIN=$env:AUTH_PUBLIC_ORIGIN" 2>$tmpErr
     $exit = $LASTEXITCODE
     $errText = ''
     try { $errText = (Get-Content $tmpErr -Raw -ErrorAction SilentlyContinue) } catch { $errText = '' }

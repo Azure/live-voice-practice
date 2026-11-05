@@ -16,6 +16,7 @@ class TestFlaskApp:
         """Set up test fixtures."""
         app.config["TESTING"] = True
         self.client: FlaskClient = app.test_client()  # pylint: disable=attribute-defined-outside-init
+        self.client.environ_base["HTTP_AUTHORIZATION"] = "Bearer local-test"
 
     def test_index_route(self):
         """Test the index route serves index.html."""
@@ -170,12 +171,15 @@ class TestFlaskApp:
 
         assert response.status_code == 500
         data = json.loads(response.data)
-        assert data["error"] == "Creation failed"
+        assert data["error"] == "Service unavailable"
 
     @patch("src.app.agent_manager")
     def test_delete_agent_success(self, mock_agent_manager):
         """Test successful agent deletion."""
         mock_agent_manager.delete_agent.return_value = None
+        mock_agent_manager.get_agent.return_value = {
+            "owner_id": "11111111-1111-1111-1111-111111111111:33333333-3333-3333-3333-333333333333"
+        }
 
         response = self.client.delete("/api/agents/agent-123")
 
@@ -188,12 +192,15 @@ class TestFlaskApp:
     def test_delete_agent_exception(self, mock_agent_manager):
         """Test agent deletion with exception."""
         mock_agent_manager.delete_agent.side_effect = Exception("Deletion failed")
+        mock_agent_manager.get_agent.return_value = {
+            "owner_id": "11111111-1111-1111-1111-111111111111:33333333-3333-3333-3333-333333333333"
+        }
 
         response = self.client.delete("/api/agents/agent-123")
 
         assert response.status_code == 500
         data = json.loads(response.data)
-        assert data["error"] == "Deletion failed"
+        assert data["error"] == "Service unavailable"
 
     def test_analyze_conversation_success(self):
         """Test successful conversation analysis."""
@@ -267,6 +274,7 @@ class TestFlaskApp:
 
     def test_list_conversations_requires_auth(self):
         """Test that GET /api/conversations returns 401 without auth."""
+        self.client.environ_base.pop("HTTP_AUTHORIZATION")
         response = self.client.get("/api/conversations")
         assert response.status_code == 401
 
@@ -284,7 +292,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/conversations",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -299,12 +307,17 @@ class TestFlaskApp:
     def test_get_conversation_found(self, mock_store, mock_role_store):
         """Test getting an existing conversation by ID."""
         mock_role_store.get_user_role.return_value = "trainee"
-        record = {"id": "conv-abc", "conversationId": "conv-abc", "user_id": "user-1", "scenario_id": "s1"}
+        record = {
+            "id": "conv-abc",
+            "conversationId": "conv-abc",
+            "user_id": "11111111-1111-1111-1111-111111111111:33333333-3333-3333-3333-333333333333",
+            "scenario_id": "s1",
+        }
         mock_store.get_conversation.return_value = record
 
         response = self.client.get(
             "/api/conversations/conv-abc",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -321,7 +334,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/conversations/nonexistent",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 404
@@ -335,7 +348,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/me",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -345,6 +358,7 @@ class TestFlaskApp:
 
     def test_get_me_unauthenticated(self):
         """Test that GET /api/me returns unauthenticated when no auth headers."""
+        self.client.environ_base.pop("HTTP_AUTHORIZATION")
         response = self.client.get("/api/me")
 
         assert response.status_code == 200
@@ -368,7 +382,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/conversations?all=true",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -390,7 +404,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/conversations?all=true",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -407,7 +421,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/admin/statistics/overview",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -422,13 +436,14 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/admin/statistics/overview",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 403
 
     def test_statistics_overview_unauthenticated(self):
         """Unauthenticated requests to the overview endpoint get 401."""
+        self.client.environ_base.pop("HTTP_AUTHORIZATION")
         response = self.client.get("/api/admin/statistics/overview")
         assert response.status_code == 401
 
@@ -444,7 +459,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/admin/statistics/trainees",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -460,7 +475,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/admin/statistics/trainees",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 403
@@ -478,7 +493,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/admin/statistics/trainees/user-2",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -494,7 +509,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/admin/statistics/trainees/missing",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 404
@@ -525,7 +540,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/admin/statistics/export",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -564,7 +579,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/admin/statistics/export",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 200
@@ -579,7 +594,7 @@ class TestFlaskApp:
 
         response = self.client.get(
             "/api/admin/statistics/export",
-            headers={"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Test User"},
+            headers={"Authorization": "Bearer local-test"},
         )
 
         assert response.status_code == 403

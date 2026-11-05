@@ -5,6 +5,9 @@ This format follows Keep a Changelog and adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+- Practice and analysis now require Microsoft Entra sign-in with a delegated API access token. Configure the required tenant, API audience, and public origin before upgrading; see [authentication and upgrade guidance](docs/authentication.md). Existing unscoped owner records require operator review.
+
 ## [1.1.2] - 2026-07-10
 
 ### Fixed

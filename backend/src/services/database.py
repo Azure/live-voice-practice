@@ -6,6 +6,7 @@
 """Cosmos DB service for storing and retrieving user conversations."""
 
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -129,7 +130,7 @@ class ConversationStore:
 
         try:
             self._container.create_item(body=document)
-            logger.info("Saved conversation %s for user %s", conversation_id, user_id)
+            logger.info("Saved owned conversation")
             return conversation_id
         except exceptions.CosmosHttpResponseError as e:
             logger.error("Failed to save conversation: %s", e)
@@ -178,7 +179,7 @@ class ConversationStore:
 
         try:
             self._container.create_item(body=document)
-            logger.info("Created in-progress conversation %s for user %s", conversation_id, user_id)
+            logger.info("Created owned in-progress conversation")
             return conversation_id
         except exceptions.CosmosHttpResponseError as e:
             logger.error("Failed to create conversation: %s", e)
@@ -214,7 +215,7 @@ class ConversationStore:
                 logger.warning("Conversation %s not found for update", conversation_id)
                 return False
             if item.get("user_id") != user_id:
-                logger.warning("User %s not authorized to update conversation %s", user_id, conversation_id)
+                logger.warning("Conversation ownership check failed")
                 return False
             item["messages"] = messages
             item["transcript"] = transcript
@@ -260,7 +261,7 @@ class ConversationStore:
                 logger.warning("Conversation %s not found for assessment update", conversation_id)
                 return False
             if item.get("user_id") != user_id:
-                logger.warning("User %s not authorized to update conversation %s", user_id, conversation_id)
+                logger.warning("Conversation ownership check failed")
                 return False
             item["transcript"] = transcript
             item["assessment"] = assessment
@@ -296,10 +297,10 @@ class ConversationStore:
         try:
             item = self._find_item(conversation_id)
             if item is None:
-                logger.warning("Conversation %s not found for user %s", conversation_id, user_id)
+                logger.warning("Owned conversation not found")
                 return None
             if item.get("user_id") != user_id:
-                logger.warning("User %s not authorized to access conversation %s", user_id, conversation_id)
+                logger.warning("Conversation ownership check failed")
                 return None
             return item
         except exceptions.CosmosHttpResponseError as e:
@@ -400,15 +401,18 @@ class ConversationStore:
         if self._container is None:
             return False
 
+        if not self.get_conversation(user_id, conversation_id):
+            return False
+
         try:
             self._container.delete_item(item=conversation_id, partition_key=conversation_id)
-            logger.info("Deleted conversation %s for user %s", conversation_id, user_id)
+            logger.info("Deleted owned conversation")
             return True
         except exceptions.CosmosResourceNotFoundError:
             # Fallback for legacy items without conversationId field (null partition)
             try:
                 self._container.delete_item(item=conversation_id, partition_key=NonePartitionKeyValue)
-                logger.info("Deleted legacy conversation %s for user %s", conversation_id, user_id)
+                logger.info("Deleted owned conversation from legacy partition")
                 return True
             except (exceptions.CosmosResourceNotFoundError, exceptions.CosmosHttpResponseError):
                 logger.warning("Conversation %s not found for deletion", conversation_id)
@@ -487,10 +491,13 @@ class ConversationStore:
             sort_order = "desc"
 
         try:
-            count_query = "SELECT VALUE COUNT(1) FROM c"
+            owner_filter = "STARTSWITH(c.user_id, @owner_prefix)"
+            owner_params = [{"name": "@owner_prefix", "value": os.environ["AUTH_TENANT_ID"] + ":"}]
+            count_query = f"SELECT VALUE COUNT(1) FROM c WHERE {owner_filter}"
             count_results = list(
                 self._container.query_items(
                     query=count_query,
+                    parameters=owner_params,
                     enable_cross_partition_query=True,
                 )
             )
@@ -500,10 +507,12 @@ class ConversationStore:
                 SELECT c.id, c.user_id, c.scenario_id, c.assessment,
                        c.metadata, c.status, c.created_at, c.updated_at
                 FROM c
+                WHERE {owner_filter}
                 ORDER BY c.{sort_by} {sort_order.upper()}
                 OFFSET @offset LIMIT @limit
             """
             parameters: List[Dict[str, Any]] = [
+                *owner_params,
                 {"name": "@offset", "value": offset},
                 {"name": "@limit", "value": limit},
             ]
