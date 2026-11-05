@@ -15,7 +15,7 @@ FROM ${REGISTRY}/${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app
 
-RUN npm config set strict-ssl false
+RUN npm config set strict-ssl true
 
 COPY frontend/package*.json ./
 RUN npm ci --legacy-peer-deps --include=dev
@@ -39,7 +39,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     FLASK_APP=src/app.py \
     FLASK_ENV=production \
-    PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org pypi.python.org" \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app
 

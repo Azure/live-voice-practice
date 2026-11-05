@@ -100,3 +100,12 @@ def test_cli_failure_stops_preflight_without_echoing_output(monkeypatch):
         check_auth.main()
     assert "sensitive" not in str(error.value)
     runner.assert_called_once()
+
+
+@pytest.mark.parametrize("filename", ["Dockerfile", "backend/Dockerfile"])
+def test_container_build_preserves_tls_verification(filename):
+    root = Path(__file__).resolve().parents[3]
+    content = (root / filename).read_text(encoding="utf-8")
+    assert "strict-ssl false" not in content
+    assert "PIP_TRUSTED_HOST" not in content
+    assert "--trusted-host" not in content
