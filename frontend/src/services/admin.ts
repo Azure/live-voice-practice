@@ -6,6 +6,8 @@
 // Admin content-management API client (scenarios, rubrics, transcripts, materials).
 // All endpoints are trainer-gated server-side; non-trainers receive HTTP 403.
 
+import { authenticatedFetch as fetch } from './authenticatedFetch'
+
 export type JsonDoc = Record<string, unknown>
 
 export interface MaterialItem {

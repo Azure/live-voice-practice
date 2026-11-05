@@ -35,7 +35,7 @@ import { api, AvatarConfig, parseAvatarValue } from '../services/api'
 import { Assessment } from '../types'
 
 type AppView = 'setup' | 'practice' | 'conversations' | 'conversationDetail'
-const RELEASE_VERSION = 'v0.0.2'
+const RELEASE_VERSION = 'v2.0.0'
 
 const useStyles = makeStyles({
   container: {

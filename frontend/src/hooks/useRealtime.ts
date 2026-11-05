@@ -5,6 +5,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../services/api'
+import {
+  authenticatedFetch as fetch,
+  ensureBrowserSession,
+} from '../services/authenticatedFetch'
 import { Message } from '../types'
 
 interface RealtimeOptions {
@@ -79,18 +83,21 @@ export function useRealtime(options: RealtimeOptions) {
   }, [])
 
   const ensureConversationCreated = useCallback(async () => {
-    if (conversationIdRef.current || !options.scenarioId) {
+    if (conversationIdRef.current || !options.scenarioId || !options.agentId) {
       return conversationIdRef.current
     }
     try {
-      const result = await api.createConversation(options.scenarioId)
+      const result = await api.createConversation(
+        options.scenarioId,
+        options.agentId
+      )
       conversationIdRef.current = result.conversation_id
       return conversationIdRef.current
     } catch (err) {
       console.warn('Failed to create conversation record:', err)
       return null
     }
-  }, [options.scenarioId])
+  }, [options.scenarioId, options.agentId])
 
   const connect = useCallback(async () => {
     if (reconnectTimerRef.current) {
@@ -118,6 +125,7 @@ export function useRealtime(options: RealtimeOptions) {
       voiceSocket: 'starting',
     })
     const config = await fetch('/api/config').then(r => r.json())
+    await ensureBrowserSession(true)
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(
       `${protocol}//${location.host}${config.ws_endpoint}`

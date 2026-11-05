@@ -1,33 +1,27 @@
-# ---------------------------------------------------------------------------------------------
-#  Copyright (c) Microsoft Corporation. All rights reserved.
-#  Licensed under the MIT License. See LICENSE in the project root for license information.
-# --------------------------------------------------------------------------------------------
+"""Server-validated Entra identities and short-lived browser sessions."""
 
-"""Authentication service for extracting user identity from Azure Easy Auth headers."""
-
-import base64
-import json
-import logging
+import os
+import secrets
+import threading
+import time
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, List, Optional
+from uuid import UUID
 
-from flask import g, request
+import jwt
+from flask import g, jsonify, request
+from src.auth_config import validate_auth_configuration
 
-logger = logging.getLogger(__name__)
-
-# Azure Easy Auth header names
-HEADER_CLIENT_PRINCIPAL = "x-ms-client-principal"
-HEADER_CLIENT_PRINCIPAL_ID = "x-ms-client-principal-id"
-HEADER_CLIENT_PRINCIPAL_NAME = "x-ms-client-principal-name"
-
-# Admin role name - users with this role can access all conversations
-ADMIN_ROLE = "admin"
+COOKIE_NAME = "__Host-voice-session"
+_sessions: dict[str, tuple[dict[str, Any], float]] = {}
+_session_lock = threading.Lock()
+_jwks_client: Optional[jwt.PyJWKClient] = None
 
 
 @dataclass
 class UserIdentity:
-    """Represents an authenticated user's identity."""
+    """Identity whose user_id includes the validated tenant and object IDs."""
 
     user_id: str
     name: Optional[str] = None
@@ -37,166 +31,193 @@ class UserIdentity:
 
     @property
     def is_admin(self) -> bool:
-        """Check if the user has admin role."""
-        return self.roles is not None and ADMIN_ROLE in self.roles
+        """Only signed application role claims grant administration."""
+        return "admin" in (self.roles or [])
 
     @property
     def is_trainer(self) -> bool:
-        """Check if the user has trainer role."""
+        """Trainer assignments are resolved using the tenant-scoped identity."""
         return self.role == "trainer"
 
     def can_access_user_data(self, target_user_id: str) -> bool:
-        """Check if this user can access another user's data."""
-        return self.user_id == target_user_id or self.is_admin or self.is_trainer
+        """Deny ownerless and legacy unscoped records even to privileged callers."""
+        tenant = self.user_id.partition(":")[0]
+        return bool(
+            isinstance(target_user_id, str)
+            and target_user_id
+            and target_user_id.startswith(tenant + ":")
+            and (self.user_id == target_user_id or self.is_admin or self.is_trainer)
+        )
+
+
+def validate_access_token(token: str) -> dict[str, Any]:
+    """Validate a delegated v2 Entra access token against a fixed tenant and API."""
+    global _jwks_client  # pylint: disable=global-statement
+    validate_auth_configuration()
+    tenant = os.environ["AUTH_TENANT_ID"]
+    if not token or len(token) > 16384:
+        raise jwt.InvalidTokenError("Invalid credential")
+    if _jwks_client is None:
+        _jwks_client = jwt.PyJWKClient(
+            f"https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys",
+            timeout=5,
+            cache_jwk_set=True,
+            lifespan=3600,
+        )
+    key = _jwks_client.get_signing_key_from_jwt(token).key
+    claims = jwt.decode(
+        token,
+        key,
+        algorithms=["RS256"],
+        audience=os.environ["AUTH_AUDIENCE"],
+        issuer=f"https://login.microsoftonline.com/{tenant}/v2.0",
+        options={"require": ["exp", "iat", "nbf", "iss", "aud", "tid", "oid", "scp"]},
+    )
+    if claims["tid"] != tenant or claims.get("ver") != "2.0":
+        raise jwt.InvalidTokenError("Invalid tenant or token version")
+    try:
+        UUID(claims["oid"])
+    except (ValueError, TypeError, AttributeError) as error:
+        raise jwt.InvalidTokenError("Invalid identity") from error
+    if "access_as_user" not in str(claims["scp"]).split():
+        raise jwt.InvalidTokenError("Delegated API scope required")
+    if not isinstance(claims.get("roles", []), list):
+        raise jwt.InvalidTokenError("Invalid roles")
+    return claims
+
+
+def _identity(claims: dict[str, Any]) -> UserIdentity:
+    return UserIdentity(
+        user_id=f'{claims["tid"]}:{claims["oid"]}',
+        name=claims.get("name"),
+        email=claims.get("preferred_username"),
+        roles=claims.get("roles", []),
+    )
+
+
+def same_origin() -> bool:
+    """Require the configured browser origin, without trusting forwarded headers."""
+    return request.headers.get("Origin") == os.environ.get("AUTH_PUBLIC_ORIGIN")
+
+
+def _cookie_name() -> str:
+    return COOKIE_NAME if os.environ.get("AUTH_PUBLIC_ORIGIN", "").startswith("https://") else "voice-local-session"
+
+
+def create_browser_session(token: str):
+    """Exchange a validated access token for an opaque, HttpOnly browser cookie."""
+    if not same_origin():
+        return jsonify({"error": "Access denied"}), 403
+    try:
+        claims = validate_access_token(token)
+    except (jwt.PyJWTError, ValueError, TypeError):
+        return jsonify({"error": "Authentication required"}), 401
+    now = time.time()
+    expiry = min(float(claims["exp"]), now + 3600)
+    session_id = secrets.token_urlsafe(32)
+    with _session_lock:
+        expired = [key for key, (_, deadline) in _sessions.items() if deadline <= now]
+        for key in expired:
+            del _sessions[key]
+        if len(_sessions) >= 4096:
+            return jsonify({"error": "Session capacity reached"}), 503
+        old = request.cookies.get(_cookie_name())
+        if old:
+            _sessions.pop(old, None)
+        _sessions[session_id] = (claims, expiry)
+    response = jsonify({"authenticated": True})
+    response.headers["Cache-Control"] = "no-store"
+    response.set_cookie(
+        _cookie_name(),
+        session_id,
+        max_age=max(0, int(expiry - now)),
+        secure=os.environ["AUTH_PUBLIC_ORIGIN"].startswith("https://"),
+        httponly=True,
+        samesite="Strict",
+        path="/",
+    )
+    return response
 
 
 def get_current_user() -> Optional[UserIdentity]:
-    """Get the current authenticated user from the request context.
-
-    Returns:
-        UserIdentity object if user is authenticated, None otherwise.
-    """
-    # Check if user is already cached in request context
+    """Resolve bearer credentials or a previously validated server-side session."""
     if hasattr(g, "current_user"):
         return g.current_user
-
-    user = _extract_user_from_headers()
+    user = None
+    authorization = request.headers.get("Authorization", "")
+    if authorization:
+        try:
+            scheme, token = authorization.split(" ", 1)
+            if scheme.lower() == "bearer":
+                claims = validate_access_token(token)
+                user = _identity(claims)
+                g.auth_expires_at = float(claims["exp"])
+        except (jwt.PyJWTError, ValueError, TypeError):
+            pass
+    else:
+        with _session_lock:
+            saved = _sessions.get(request.cookies.get(_cookie_name(), ""))
+        if saved and saved[1] > time.time():
+            if request.method in ("GET", "HEAD", "OPTIONS") or same_origin():
+                user = _identity(saved[0])
     g.current_user = user
     return user
 
 
-def _extract_user_from_headers() -> Optional[UserIdentity]:
-    """Extract user identity from Azure Easy Auth headers.
+def websocket_authorizer() -> Callable[[], bool]:
+    """Capture a bounded authorization lease without retaining request/token data."""
+    deadline = min(getattr(g, "auth_expires_at", time.time() + 900), time.time() + 900)
+    if request.headers.get("Authorization"):
+        return lambda: time.time() < deadline
+    session_id = request.cookies.get(_cookie_name(), "")
 
-    Azure Easy Auth sets the following headers:
-    - x-ms-client-principal: Base64-encoded JSON with user claims
-    - x-ms-client-principal-id: User's unique identifier (object ID)
-    - x-ms-client-principal-name: User's display name or email
+    def valid() -> bool:
+        with _session_lock:
+            saved = _sessions.get(session_id)
+        return bool(saved and time.time() < min(deadline, saved[1]))
 
-    Returns:
-        UserIdentity object if headers are present, None otherwise.
-    """
-    # Try to get the full principal first (has more information)
-    principal_header = request.headers.get(HEADER_CLIENT_PRINCIPAL)
-
-    if principal_header:
-        try:
-            decoded = base64.b64decode(principal_header)
-            principal_data: Dict[str, Any] = json.loads(decoded)
-            return _parse_principal_data(principal_data)
-        except (ValueError, json.JSONDecodeError) as e:
-            logger.warning("Failed to decode client principal: %s", e)
-
-    # Fallback to simple headers if full principal is not available
-    user_id = request.headers.get(HEADER_CLIENT_PRINCIPAL_ID)
-    if user_id:
-        name = request.headers.get(HEADER_CLIENT_PRINCIPAL_NAME)
-        return UserIdentity(user_id=user_id, name=name)
-
-    return None
+    return valid
 
 
-def _parse_principal_data(data: Dict[str, Any]) -> UserIdentity:
-    """Parse the decoded principal data into a UserIdentity object.
-
-    The principal data structure from Azure Easy Auth:
-    {
-        "auth_typ": "aad",
-        "claims": [
-            {"typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "val": "..."},
-            {"typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress", "val": "..."},
-            {"typ": "name", "val": "..."},
-            {"typ": "http://schemas.microsoft.com/ws/2008/06/identity/claims/role", "val": "admin"},
-            ...
-        ],
-        "name_typ": "...",
-        "role_typ": "..."
-    }
-    """
-    claims = {claim["typ"]: claim["val"] for claim in data.get("claims", [])}
-
-    # Extract user ID (object ID is preferred)
-    user_id = claims.get(
-        "http://schemas.microsoft.com/identity/claims/objectidentifier",
-        claims.get(
-            "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
-            claims.get("oid", ""),
-        ),
+def revoke_browser_session():
+    """Revoke this browser's session without logging credentials."""
+    if not same_origin():
+        return jsonify({"error": "Access denied"}), 403
+    with _session_lock:
+        _sessions.pop(request.cookies.get(_cookie_name(), ""), None)
+    response = jsonify({"authenticated": False})
+    response.delete_cookie(
+        _cookie_name(), path="/", secure=_cookie_name() == COOKIE_NAME, httponly=True, samesite="Strict"
     )
-
-    # Extract name
-    name = claims.get("name", claims.get("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"))
-
-    # Extract email
-    email = claims.get(
-        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
-        claims.get("preferred_username", claims.get("email")),
-    )
-
-    # Extract roles - roles can appear multiple times
-    roles: List[str] = []
-    role_claim_type = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
-    for claim in data.get("claims", []):
-        if claim["typ"] == role_claim_type:
-            roles.append(claim["val"])
-
-    return UserIdentity(user_id=user_id, name=name, email=email, roles=roles if roles else None)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
-def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator to require authentication for a route.
+def require_auth(function: Callable[..., Any]) -> Callable[..., Any]:
+    """Reject unauthenticated callers before the protected handler executes."""
 
-    Usage:
-        @app.route('/api/protected')
-        @require_auth
-        def protected_route():
-            user = get_current_user()
-            return f"Hello, {user.name}"
-    """
-
-    @wraps(f)
-    def decorated_function(*args: Any, **kwargs: Any) -> Any:
-        user = get_current_user()
-        if user is None:
-            from flask import jsonify
-
+    @wraps(function)
+    def decorated(*args: Any, **kwargs: Any) -> Any:
+        if get_current_user() is None:
             return jsonify({"error": "Authentication required"}), 401
-        return f(*args, **kwargs)
+        return function(*args, **kwargs)
 
-    return decorated_function
+    return decorated
 
 
-def require_trainer(f: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator to require the trainer role for a route.
+def require_trainer(function: Callable[..., Any]) -> Callable[..., Any]:
+    """Resolve trusted trainer assignments only after authentication."""
 
-    Composes with :func:`require_auth`: the request must be authenticated and
-    the resolved role (via the Cosmos ``role_assignments`` container) must be
-    ``trainer``. Unauthenticated requests get HTTP 401; authenticated
-    non-trainers get HTTP 403. On success the resolved role is cached on the
-    ``UserIdentity`` so downstream handlers do not re-query.
-
-    Usage:
-        @app.route('/api/admin/thing')
-        @require_trainer
-        def admin_route():
-            ...
-    """
-
-    @wraps(f)
-    def decorated_function(*args: Any, **kwargs: Any) -> Any:
-        from flask import jsonify
-
-        # Imported lazily/by module reference so tests can patch the singleton.
+    @wraps(function)
+    def decorated(*args: Any, **kwargs: Any) -> Any:
         from src.services.role_store import role_store
 
         user = get_current_user()
         if user is None:
             return jsonify({"error": "Authentication required"}), 401
-
         user.role = role_store.get_user_role(user.user_id)
         if not user.is_trainer:
             return jsonify({"error": "Access denied"}), 403
+        return function(*args, **kwargs)
 
-        return f(*args, **kwargs)
-
-    return decorated_function
+    return decorated

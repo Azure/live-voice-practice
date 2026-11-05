@@ -24,6 +24,14 @@ echo
 
 #region Load azd env
 envValues="$(azd env get-values 2>/dev/null || true)"
+for name in AUTH_TENANT_ID AUTH_AUDIENCE AUTH_PUBLIC_ORIGIN; do
+    value="${!name:-}"
+    if [[ -z "$value" ]]; then
+        value="$(echo "$envValues" | grep "^${name}=" | cut -d'=' -f2- | tr -d '"' || true)"
+    fi
+    export "$name=$value"
+done
+python3 "$(dirname "$0")/../backend/src/auth_config.py"
 niFlag="$(echo "$envValues" | grep -i '^NETWORK_ISOLATION=' | cut -d'=' -f2- | tr -d '"' | tr -d '[:space:]' || true)"
 agentPool="$(echo "$envValues" | grep -i '^ACR_TASK_AGENT_POOL=' | cut -d'=' -f2- | tr -d '"' | tr -d '[:space:]' || true)"
 #endregion
@@ -112,6 +120,7 @@ echo "   CONTAINER_REGISTRY_LOGIN_SERVER = $acrServer"
 echo "   AZURE_RESOURCE_GROUP = $rg"
 echo "   VOICELAB_APP_NAME = $appName"
 echo
+python3 "$(dirname "$0")/check_auth.py" --name "$appName" --resource-group "$rg"
 #endregion
 
 #region Decide agent pool
@@ -216,6 +225,7 @@ echo
 #endregion
 
 #region Update container app
+az containerapp revision set-mode --name "$appName" --resource-group "$rg" --mode single
 echo -e "${GREEN}Updating container app...${NC}"
 # Retry loop for the AcrPull race: when SystemAssigned MI was just bound to
 # the Container Registry, the AcrPull role assignment can take 30-120s to
@@ -227,7 +237,10 @@ backoffSeconds=(15 30 60 120 120)
 updateOk=false
 for attempt in $(seq 1 "$maxAttempts"); do
     errFile="$(mktemp)"
-    if az containerapp update --name "$appName" --resource-group "$rg" --image "$imageName" 2>"$errFile"; then
+    if az containerapp update --name "$appName" --resource-group "$rg" --image "$imageName" \
+        --min-replicas 1 --max-replicas 1 \
+        --set-env-vars "AUTH_TENANT_ID=$AUTH_TENANT_ID" "AUTH_AUDIENCE=$AUTH_AUDIENCE" \
+        "AUTH_PUBLIC_ORIGIN=$AUTH_PUBLIC_ORIGIN" 2>"$errFile"; then
         cat "$errFile"
         rm -f "$errFile"
         updateOk=true

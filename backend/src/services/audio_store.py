@@ -8,7 +8,6 @@
 import base64
 import logging
 import re
-import tempfile
 import time
 from pathlib import Path
 from threading import Lock
@@ -28,7 +27,7 @@ class SessionAudioStore:
     """Store user PCM audio received over WebSocket without sending it through analysis HTTP requests."""
 
     def __init__(self, base_dir: Optional[Path] = None):
-        self.base_dir = base_dir or Path(tempfile.gettempdir()) / "live-voice-practice-audio"
+        self.base_dir = base_dir or Path(".runtime") / "audio"
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
         self._metadata: Dict[str, Dict[str, int | float | str]] = {}
@@ -39,7 +38,7 @@ class SessionAudioStore:
         if not agent_id or not base64_audio:
             return
 
-        audio_bytes = base64.b64decode(base64_audio)
+        audio_bytes = base64.b64decode(base64_audio, validate=True)
         path = self._path_for_agent(agent_id)
         now = time.time()
 
@@ -93,6 +92,8 @@ class SessionAudioStore:
 
         with self._lock:
             messages = self._messages.setdefault(agent_id, [])
+            if len(messages) >= 1000 or len(content) > 16000:
+                raise ValueError("Transcript capacity reached")
             messages.append(
                 {
                     "role": role,

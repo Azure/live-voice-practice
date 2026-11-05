@@ -86,3 +86,7 @@ jobs:
       working-directory: ./frontend
       run: |
         npm run build
+
+    - name: Test browser authentication transport
+      working-directory: ./frontend
+      run: npm test

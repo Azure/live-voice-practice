@@ -69,13 +69,13 @@ This project supports two deployment modes:
 - **[Network isolation quick reference](docs/network-isolation-jumpbox-runbook.md)** — workstation/jumpbox split, subnets, firewall allow-list, and troubleshooting.
 - **[Public ingress runbook](docs/manual-testing/public-ingress-runbook.md)** — BYO domain/certificate setup and real microphone validation.
 
-### Optional user sign-in
+### Required user sign-in
 
-The app works without user login for practice and analysis. Configure Microsoft Entra ID sign-in after deployment when you want:
+Practice and analysis require verified Microsoft Entra sign-in. Configure the API audience, tenant, public origin, and delegated scope before deploying. Authentication supports:
 
 - **Past Practices** for each signed-in user
 - **Trainer views** such as All Practices
-- user identity from Azure Container Apps built-in authentication
+- server-validated access tokens and same-origin browser sessions
 
 Guide: **[Configure user authentication with Microsoft Entra ID](docs/authentication.md)**.
 

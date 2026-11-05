@@ -179,3 +179,4 @@ scripts/.tmp-search/
 .ni-env-name.txt
 .tmp-*
 
+.runtime/

@@ -8,7 +8,7 @@ from flask.testing import FlaskClient
 
 from src.app import app
 
-TRAINER_HEADERS = {"x-ms-client-principal-id": "user-1", "x-ms-client-principal-name": "Trainer"}
+TRAINER_HEADERS = {"Authorization": "Bearer local-test"}
 
 
 class TestAdminContentRoutes:

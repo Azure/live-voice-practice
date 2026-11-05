@@ -17,9 +17,6 @@ from src.config import config
 
 logger = logging.getLogger(__name__)
 
-# Constants
-UUID_SHORT_LENGTH = 8
-
 
 class ConversationManager:
     """Loads evaluation rubrics from Cosmos DB and persists conversation records with evaluations."""
@@ -112,7 +109,7 @@ class ConversationManager:
             logger.warning("COSMOS database name not configured; conversation not saved")
             return None
 
-        conversation_id = f"conv-{uuid.uuid4().hex[:UUID_SHORT_LENGTH]}"
+        conversation_id = f"conv-{uuid.uuid4().hex}"
         now = datetime.now(timezone.utc).isoformat()
 
         rubric = self.get_rubric_for_scenario(scenario_id)
@@ -227,7 +224,7 @@ class ConversationManager:
             logger.warning("COSMOS database name not configured; conversation not created")
             return None
 
-        conversation_id = f"conv-{uuid.uuid4().hex[:UUID_SHORT_LENGTH]}"
+        conversation_id = f"conv-{uuid.uuid4().hex}"
         now = datetime.now(timezone.utc).isoformat()
 
         rubric = self.get_rubric_for_scenario(scenario_id)
